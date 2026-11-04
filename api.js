@@ -380,6 +380,113 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     },
   })
 
+  /**
+   * The Qzone page's data: profile, own posts, friend feed.
+   *
+   * Three independent reads behind one route so the page needs a single request.
+   * Each section reports its own failure, because Qzone actions are the most
+   * gateway-dependent ones and one of them being unsupported must not blank the
+   * whole page.
+   *
+   * `what` selects a subset: `profile`, `list`, `feeds`, or `all` (default).
+   * `target_uin` and `pos`/`num` pass through to the gateway.
+   */
+  const disposeQzone = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/qzone',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      const url = new URL(String(req.url ?? '/'), 'http://localhost')
+      const what = String(url.searchParams.get('what') ?? 'all')
+      const targetUin = String(url.searchParams.get('target_uin') ?? '').trim()
+      const num = Math.min(50, Math.max(1, Number(url.searchParams.get('num') ?? 20) || 20))
+      const pos = Math.max(0, Number(url.searchParams.get('pos') ?? 0) || 0)
+      const connection = getConnection()
+      const offline = { available: false, error: 'not connected' }
+      if (connection === undefined || connection.state !== 'online') {
+        sendJson(res, 200, { state: 'offline', profile: offline, posts: offline, feeds: offline })
+        return
+      }
+
+      /**
+       * Run one optional Qzone read.
+       * @param action - the action name.
+       * @param params - its params.
+       * @returns `{ available, error, data }`.
+       */
+      const read = async (action, params) => {
+        try {
+          return { available: true, error: '', data: await connection.call(action, params) }
+        } catch (error) {
+          return { available: false, error: String(error?.message ?? error), data: undefined }
+        }
+      }
+
+      const want = (name) => what === 'all' || what === name
+      const [profile, posts, feeds] = await Promise.all([
+        want('profile') ? read('get_qzone_profile', targetUin === '' ? {} : { target_uin: targetUin }) : Promise.resolve(undefined),
+        want('list')
+          ? read('get_qzone_msg_list', targetUin === '' ? { pos, num } : { target_uin: targetUin, pos, num })
+          : Promise.resolve(undefined),
+        want('feeds') ? read('get_qzone_feeds', { page_num: 1, count: num }) : Promise.resolve(undefined),
+      ])
+
+      /**
+       * Normalize one post.
+       *
+       * The gateway may answer in SnowLuma shape (`{ total, msglist }`) or in
+       * the native H5 shape; both are flattened to the same fields here, with
+       * unknown values left null rather than invented.
+       * @param item - one raw post.
+       */
+      const post = (item) => ({
+        tid: item?.tid === undefined || item?.tid === null ? '' : String(item.tid),
+        content: String(item?.content ?? '').replace(/\s+/g, ' ').trim(),
+        time: Number(item?.time ?? 0) || 0,
+        commentCount: Number(item?.comment_num ?? item?.commentCount ?? 0) || 0,
+        likeCount: Number(item?.like_count ?? item?.likeCount ?? 0) || 0,
+        private: item?.is_private === true || item?.private === true,
+        images: Array.isArray(item?.images) ? item.images.map((image) => String(image)).filter((image) => image !== '') : [],
+        userId: item?.user_id === undefined || item?.user_id === null ? '' : String(item.user_id),
+      })
+
+      const listOf = (result) => {
+        const data = result?.data
+        const items = Array.isArray(data) ? data : (Array.isArray(data?.msglist) ? data.msglist : [])
+        return {
+          available: result?.available === true,
+          error: result?.error ?? '',
+          total: Number(data?.total ?? 0) || 0,
+          items: items.map(post),
+        }
+      }
+
+      sendJson(res, 200, {
+        state: connection.state,
+        selfId: connection.selfId,
+        profile: profile === undefined
+          ? { available: false, error: 'not requested', name: '', description: '' }
+          : {
+            available: profile.available,
+            error: profile.error,
+            name: String(profile.data?.name ?? ''),
+            description: String(profile.data?.description ?? ''),
+          },
+        posts: posts === undefined ? { available: false, error: 'not requested', total: 0, items: [] } : listOf(posts),
+        feeds: feeds === undefined ? { available: false, error: 'not requested', total: 0, items: [] } : listOf(feeds),
+      })
+    },
+  })
+
   const disposeClear = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/logs/clear',
@@ -405,6 +512,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     disposeContacts()
     disposeMembers()
     disposeFriend()
+    disposeQzone()
     disposeClear()
   }
 }

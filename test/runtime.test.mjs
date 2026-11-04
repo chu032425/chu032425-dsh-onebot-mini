@@ -540,6 +540,64 @@ const offlineExtra = await (async () => {
   return JSON.parse(res.body)
 })()
 t('members route degrades when offline', offlineExtra.available === false && offlineExtra.error === 'not connected')
+// the Qzone route: three sections, both list shapes, per-section degradation
+const qzoneConnection = {
+  state: 'online',
+  selfId: '2000002',
+  call: async (action) => {
+    if (action === 'get_qzone_profile') return { name: '我的空间', description: '记录生活' }
+    if (action === 'get_qzone_msg_list') {
+      return { total: 2, msglist: [
+        { tid: 'a1', content: '第一 条\n说说', time: 1700000000, comment_num: 3, is_private: false, images: ['x.jpg'] },
+        { tid: 'a2', content: '', time: 0, comment_num: 0, is_private: true, images: [] },
+      ] }
+    }
+    if (action === 'get_qzone_feeds') {
+      // the native shape is a bare array
+      return [{ tid: 'b1', user_id: '123', content: '好友动态', time: 1700000100 }]
+    }
+    throw new Error('unsupported action: ' + action)
+  },
+}
+const disposeQzone = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => qzoneConnection, applyConfig: async () => {},
+})
+const qzoneRes = fakeRes()
+await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/api/qzone', headers: {} }, qzoneRes)
+const qzone = JSON.parse(qzoneRes.body)
+t('qzone route answers with the profile', qzone.profile.available === true && qzone.profile.name === '我的空间')
+t('qzone posts normalize the snowluma shape', qzone.posts.items.length === 2 && qzone.posts.total === 2)
+t('a post keeps its text and collapses whitespace', qzone.posts.items[0].content === '第一 条 说说')
+t('a post carries its counts and images', qzone.posts.items[0].commentCount === 3 && qzone.posts.items[0].images.length === 1)
+t('a private post is flagged', qzone.posts.items[1].private === true)
+t('qzone feeds normalize a bare array', qzone.feeds.items.length === 1 && qzone.feeds.items[0].userId === '123')
+t('the feed post carries its text', qzone.feeds.items[0].content === '好友动态')
+
+// one unsupported section must not blank the others
+const partialConnection = {
+  state: 'online', selfId: '1',
+  call: async (action) => {
+    if (action === 'get_qzone_profile') return { name: '空间' }
+    throw new Error('qzone is not available on this gateway')
+  },
+}
+const disposePartial = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => partialConnection, applyConfig: async () => {},
+})
+const partialRes = fakeRes()
+await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/api/qzone', headers: {} }, partialRes)
+const partial = JSON.parse(partialRes.body)
+t('a supported section still renders when another fails', partial.profile.available === true)
+t('the failing section reports why', partial.posts.available === false && partial.posts.error.includes('not available'))
+disposePartial()
+
+// what= selects a subset, so the page can refresh one section
+const listOnlyRes = fakeRes()
+await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/api/qzone?what=list', headers: {} }, listOnlyRes)
+const listOnly = JSON.parse(listOnlyRes.body)
+t('what=list skips the other sections', listOnly.profile.available === false && listOnly.feeds.available === false)
+disposeQzone()
+
 disposeExtra()
 disposeRoutes()
 

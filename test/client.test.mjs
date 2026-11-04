@@ -93,7 +93,7 @@ t('panel root is a grid shell', tree.props.style.display === 'grid')
 const rail = tree.children.find((child) => child && child.type === 'nav')
 t('rail exists', rail !== undefined)
 const tabs = rail.children.flat(4).filter((child) => child && child.props && child.props.role === 'tab')
-t('five tabs (logs, tools, contacts, access, settings)', tabs.length === 5, String(tabs.length))
+t('six tabs (logs, tools, contacts, access, qzone, settings)', tabs.length === 6, String(tabs.length))
 t('log tab is selected first', tabs[0].props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false))
 const pane = tree.children.find((child) => child && child.props && child.props.role === 'tabpanel')
 t('pane has a mounted page', pane.children.filter(Boolean).length >= 1)
@@ -125,6 +125,11 @@ t('the tools page renders every catalog group', TOOL_GROUPS.length === 9)
 t('tools menu label present', zh.tabTools === '工具' && en.tabTools === 'Tools')
 t('contacts menu label present', zh.tabContacts === '好友与群组' && en.tabContacts === 'Contacts')
 t('access menu label present', zh.tabAccess === '访问控制' && en.tabAccess === 'Access')
+t('qzone menu label present', zh.tabQzone === '空间' && en.tabQzone === 'Qzone')
+for (const key of ['qzoneTitle', 'qzoneProfile', 'qzonePosts', 'qzoneFeeds', 'qzoneEmpty',
+  'qzonePrivate', 'qzoneComments', 'qzoneLikes', 'qzoneUnavailable', 'qzoneOffline', 'qzoneRefresh']) {
+  t('qzone copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
 for (const key of ['accessTitle', 'accessPrivateAllow', 'accessPrivateDeny', 'accessGroupAllow', 'accessGroupDeny',
   'accessChooseFriend', 'accessChooseGroup', 'accessEmpty', 'accessNote']) {
   t('access copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
