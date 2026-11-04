@@ -109,6 +109,9 @@ export function apply(ctx) {
       log,
       sessionTitle,
       getWorkspaceRegistry,
+      getAgentPresets: () => ctx.get('agentPresets'),
+      getPermissionPresets: () => ctx.get('permissionPresets'),
+      getPlanMode: () => ctx.get('planMode'),
       describeError,
     })
     const disposeEvents = bridge.start()
@@ -133,6 +136,60 @@ export function apply(ctx) {
      * The workspaces a chat Session may be pinned to, for the settings picker.
      * @returns `{ available, workspaces }`; a missing registry degrades quietly.
      */
+    /**
+     * The agent presets a chat may run under, for the settings picker.
+     * @returns `{ available, presets }`; a missing registry degrades quietly.
+     */
+    async function listAgentPresets() {
+      const registry = ctx.get('agentPresets')
+      if (registry === undefined) return { available: false, presets: [] }
+      try {
+        const roster = await registry.list()
+        let defaultId
+        try {
+          defaultId = (await registry.resolve()).id
+        } catch {
+          defaultId = undefined
+        }
+        return {
+          available: true,
+          defaultId: defaultId ?? '',
+          presets: roster.map((preset) => ({
+            id: String(preset.id),
+            name: String(preset.name ?? preset.id),
+            description: String(preset.description ?? ''),
+            broken: preset.broken === undefined ? '' : String(preset.broken),
+            isDefault: String(preset.id) === defaultId,
+          })),
+        }
+      } catch {
+        return { available: false, presets: [] }
+      }
+    }
+
+    /**
+     * The permission presets a chat may run under.
+     * @returns `{ available, options, defaultPreset }`.
+     */
+    function listPermissionPresets() {
+      const service = ctx.get('permissionPresets')
+      if (service === undefined) return { available: false, options: [], defaultPreset: '' }
+      try {
+        const catalog = service.catalog()
+        return {
+          available: true,
+          defaultPreset: String(catalog.defaultPreset ?? ''),
+          options: (catalog.options ?? []).map((option) => ({
+            value: String(option.value),
+            name: String(option.name ?? option.value),
+            description: String(option.description ?? ''),
+          })),
+        }
+      } catch {
+        return { available: false, options: [], defaultPreset: '' }
+      }
+    }
+
     function listWorkspaces() {
       const registry = getWorkspaceRegistry()
       if (registry === undefined) return { available: false, workspaces: [] }
@@ -156,6 +213,8 @@ export function apply(ctx) {
       getConnection: () => connection,
       applyConfig,
       listWorkspaces,
+      listAgentPresets,
+      listPermissionPresets,
     })
 
     try {

@@ -59,6 +59,8 @@ export const DEFAULTS = Object.freeze({
   agentPreset: '',
   senderPrefix: true,
   sessionPrefix: 'onebot',
+  sessionPermission: '',
+  sessionMode: 'normal',
   titleEqualsId: true,
   logCapacity: 500,
   logMessagePreview: true,
@@ -78,9 +80,11 @@ export const FIELD_KINDS = Object.freeze({
   allowFrom: 'stringList',
   allowGroups: 'stringList',
   workspacePath: 'workspace',
-  agentPreset: 'string',
+  agentPreset: 'agentPreset',
   senderPrefix: 'boolean',
   sessionPrefix: 'string',
+  sessionPermission: 'permission',
+  sessionMode: 'sessionMode',
   titleEqualsId: 'boolean',
   logCapacity: 'number',
   logMessagePreview: 'boolean',
@@ -92,7 +96,7 @@ export const FIELD_KINDS = Object.freeze({
 export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention', 'allowFrom', 'allowGroups'] },
-  { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'senderPrefix'] },
+  { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'sessionPermission', 'sessionMode', 'senderPrefix'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
 
@@ -132,6 +136,8 @@ function coerce(field, raw) {
     return raw.map((item) => String(item).trim()).filter((item) => item !== '')
   }
   if (kind === 'enum') return raw === 'reverse' || raw === 'forward' ? raw : fallback
+  if (kind === 'sessionMode') return raw === 'plan' ? 'plan' : 'normal'
+  if (kind === 'permission') return String(raw)
   return String(raw)
 }
 
@@ -178,6 +184,10 @@ export function normalizeConfig(raw) {
       problems.push('sessionPrefix must start with a lowercase letter and contain only lowercase letters, digits and hyphens; using "' + DEFAULTS.sessionPrefix + '"')
     }
     value.sessionPrefix = DEFAULTS.sessionPrefix
+  }
+
+  if (String(value.sessionPermission ?? '').trim() === '') {
+    problems.push('sessionPermission is required: pick a permission preset for the chat Sessions')
   }
 
   if (String(value.workspacePath ?? '').trim() === '') {

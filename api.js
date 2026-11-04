@@ -59,7 +59,7 @@ async function readJsonBody(req) {
  * @param deps - `store`, `log`, `getConnection`, `applyConfig`.
  * @returns the disposer.
  */
-export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces }) {
+export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets }) {
   const disposeState = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/state',
@@ -91,6 +91,8 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         defaults: DEFAULTS,
         modeFields: MODE_FIELDS,
         workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
+        agentPresets: typeof listAgentPresets === 'function' ? await listAgentPresets() : { available: false, presets: [] },
+        permissionPresets: typeof listPermissionPresets === 'function' ? listPermissionPresets() : { available: false, options: [], defaultPreset: '' },
       })
     },
   })
@@ -149,6 +151,8 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         defaults: DEFAULTS,
         modeFields: MODE_FIELDS,
         workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
+        agentPresets: typeof listAgentPresets === 'function' ? await listAgentPresets() : { available: false, presets: [] },
+        permissionPresets: typeof listPermissionPresets === 'function' ? listPermissionPresets() : { available: false, options: [], defaultPreset: '' },
       })
     },
   })

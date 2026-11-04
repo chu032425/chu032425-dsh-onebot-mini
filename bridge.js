@@ -185,13 +185,16 @@ export class ChatBridge {
    * @param options - `ctx`, `config`, `connection`, `log`, `sessionTitle`
    * (optional service), `describeError`.
    */
-  constructor({ ctx, config, connection, log, sessionTitle, getWorkspaceRegistry, describeError }) {
+  constructor({ ctx, config, connection, log, sessionTitle, getWorkspaceRegistry, getAgentPresets, getPermissionPresets, getPlanMode, describeError }) {
     this.ctx = ctx
     this.config = config
     this.connection = connection
     this.log = log
     this.sessionTitle = sessionTitle
     this.getWorkspaceRegistry = getWorkspaceRegistry
+    this.getAgentPresets = getAgentPresets
+    this.getPermissionPresets = getPermissionPresets
+    this.getPlanMode = getPlanMode
     this.describeError = describeError ?? ((error) => String(error?.message ?? error))
 
     /** chatId → chat record. */
@@ -395,7 +398,11 @@ export class ChatBridge {
     await this.ensureWorkspace(true)
     const meta = {}
     if (this.config.workspacePath !== '') meta.cwd = this.config.workspacePath
-    if (this.config.agentPreset !== '') meta.agentPreset = this.config.agentPreset
+    // Resolve once, then use the same id for both the header and the mount so a
+    // preset deleted after configuration falls back to the deployment default in
+    // both places instead of diverging.
+    const presetId = await this.resolveAgentPreset()
+    if (presetId !== undefined) meta.agentPreset = presetId
 
     // Three steps, because "resume failed" and "no such session" are different
     // facts: a resume can fail while the log exists (owned elsewhere, unreadable
@@ -413,6 +420,7 @@ export class ChatBridge {
     }
 
     let handle
+    let created = false
     // The session may already be live: the user can open a QQ chat's Session in
     // the Web UI, and that live agent owns the write handle. Resume and create
     // both fail in that state ("already owned by an active write handle" /
@@ -436,7 +444,7 @@ export class ChatBridge {
     }
 
     try {
-      handle = await this.ctx.agents.resume({ resumeSessionId: sessionId, setup: this.buildSetup() })
+      handle = await this.ctx.agents.resume({ resumeSessionId: sessionId, setup: this.buildSetup(presetId) })
       this.log.record('bridge', { note: 'session resumed', chatId, sessionId })
     } catch (resumeError) {
       this.log.record('bridge', {
@@ -446,7 +454,8 @@ export class ChatBridge {
         error: this.describeError(resumeError),
       })
       try {
-        handle = await this.ctx.agents.create({ sessionId, meta, agentOptions, setup: this.buildSetup() })
+        handle = await this.ctx.agents.create({ sessionId, meta, agentOptions, setup: this.buildSetup(presetId) })
+        created = true
         this.log.record('bridge', { note: 'session created', chatId, sessionId })
       } catch (createError) {
         const fresh = sessionId + '-' + Date.now().toString(36)
@@ -457,7 +466,8 @@ export class ChatBridge {
           fallback: fresh,
           error: this.describeError(createError),
         })
-        handle = await this.ctx.agents.create({ sessionId: fresh, meta, agentOptions, setup: this.buildSetup() })
+        handle = await this.ctx.agents.create({ sessionId: fresh, meta, agentOptions, setup: this.buildSetup(presetId) })
+        created = true
         this.log.record('bridge', { note: 'session created with a fallback id', chatId, sessionId: fresh })
       }
     }
@@ -473,7 +483,49 @@ export class ChatBridge {
 
     if (this.config.titleEqualsId) this.pinTitle(handle.agent.session, record.sessionId)
     await this.attachWorkspace(record.sessionId)
+    // Permission and plan mode are session-scoped intents: apply them only when
+    // this plugin created the session, never on a resume (a user may have changed
+    // them deliberately in the Web UI since).
+    if (created) this.applySessionSettings(handle.agent, chatId)
     return record
+  }
+
+  /**
+   * Apply the configured permission preset and plan-mode state to a new agent.
+   *
+   * Both are best-effort: a missing service or an unknown preset name must not
+   * break the chat, so failures are logged and the Host default stays in force.
+   * @param agent - the freshly created agent.
+   * @param chatId - canonical chat id, for logging.
+   */
+  applySessionSettings(agent, chatId) {
+    const permissionName = String(this.config.sessionPermission ?? '').trim()
+    if (permissionName !== '') {
+      const service = typeof this.getPermissionPresets === 'function' ? this.getPermissionPresets() : undefined
+      if (service === undefined) {
+        this.log.record('bridge', { note: 'permission presets unavailable; keeping the Host default', chatId })
+      } else {
+        try {
+          service.set(agent.session, permissionName)
+          this.log.record('bridge', { note: 'session permission applied', chatId, permission: permissionName })
+        } catch (error) {
+          this.log.record('warn', { note: 'session permission apply failed; keeping the Host default', chatId, permission: permissionName, error: this.describeError(error) })
+        }
+      }
+    }
+
+    const wantPlan = this.config.sessionMode === 'plan'
+    const planMode = typeof this.getPlanMode === 'function' ? this.getPlanMode() : undefined
+    if (planMode === undefined) {
+      if (wantPlan) this.log.record('bridge', { note: 'plan mode service unavailable; session stays in normal mode', chatId })
+      return
+    }
+    try {
+      const outcome = planMode.set(agent, wantPlan)
+      this.log.record('bridge', { note: 'session mode applied', chatId, mode: wantPlan ? 'plan' : 'normal', outcome })
+    } catch (error) {
+      this.log.record('warn', { note: 'session mode apply failed', chatId, error: this.describeError(error) })
+    }
   }
 
   /**
@@ -596,15 +648,52 @@ export class ChatBridge {
    * Registered on `agentCtx` so disposal removes them with the agent.
    * @returns the setup callback.
    */
-  buildSetup() {
+  /**
+   * Resolve the preset id to mount: the configured one when it still exists,
+   * otherwise the deployment default. A deleted or broken preset must not leave
+   * the agent without its composition.
+   * @returns the preset id, or undefined to let the Host use its default.
+   */
+  async resolveAgentPreset() {
+    const registry = typeof this.getAgentPresets === 'function' ? this.getAgentPresets() : undefined
+    const configured = String(this.config.agentPreset ?? '').trim()
+    if (registry === undefined) return configured === '' ? undefined : configured
+    if (configured === '') return undefined
+    try {
+      const preset = await registry.resolve(configured)
+      if (preset !== undefined && preset.broken === undefined) return configured
+      this.log.record('bridge', { note: 'configured agent preset is broken; using the default', preset: configured, error: String(preset?.broken ?? '') })
+    } catch (error) {
+      this.log.record('bridge', { note: 'configured agent preset is gone; using the default', preset: configured, error: this.describeError(error) })
+    }
+    return undefined
+  }
+
+  /**
+   * The per-agent setup: channel prompt, the OneBot tool, and the preset mount.
+   *
+   * Mounting is what makes `agentPreset` real: writing it into the session
+   * header alone records intent but never loads that preset's plugins.
+   * @param presetId - resolved preset id, or undefined for the Host default.
+   * @returns the setup callback.
+   */
+  buildSetup(presetId) {
     return async (agentCtx) => {
+      const { registerTools } = await import('./tools.js')
+      registerTools(agentCtx, { connection: this.connection })
       agentCtx.systemPrompt.section({
         name: 'channel:dsh-onebot-mini',
         order: 90,
         text: buildPlatformPrompt(this.config),
       })
-      const { registerTools } = await import('./tools.js')
-      registerTools(agentCtx, { connection: this.connection })
+      const registry = typeof this.getAgentPresets === 'function' ? this.getAgentPresets() : undefined
+      if (registry === undefined) return
+      try {
+        const mounted = await registry.mount(agentCtx, presetId)
+        this.log.record('bridge', { note: 'agent joined preset', preset: mounted?.id ?? String(presetId ?? 'default') })
+      } catch (error) {
+        this.log.record('warn', { note: 'agent preset mount failed; falling back to the global tool layer', error: this.describeError(error) })
+      }
     }
   }
 

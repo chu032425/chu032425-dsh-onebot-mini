@@ -70,7 +70,9 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `requireMention` | `true` | 群聊需 @ 机器人才响应（`botQQ` 未知时 fail-closed） |
 | `allowFrom` / `allowGroups` | `[]` | 空=不限制 |
 | `workspacePath` | **必填** | 会话工作区；设置页从现有工作区下拉选择，被删除时自动重建 |
-| `agentPreset` | 空 | 会话使用的 agent 预设 |
+| `agentPreset` | 空 | 会话使用的 agent 预设；设置页从现有预设下拉选择，留空=部署默认，被删除/损坏时自动回退默认 |
+| `sessionPermission` | **必填** | 会话权限预设（沙箱+审批），设置页下拉选择，新建会话时应用 |
+| `sessionMode` | `normal` | 会话模式：`normal`（直接执行）/ `plan`（先出方案），新建会话时应用 |
 | `senderPrefix` | `true` | 群消息加 `[HH:MM 昵称(QQ)]` 前缀 |
 | `sessionPrefix` | `onebot` | 会话 ID 前缀；小写字母开头，只含小写字母/数字/连字符 |
 | `titleEqualsId` | `true` | 会话标题钉成会话 ID（见下） |
@@ -87,6 +89,20 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
   先建目录，再注册工作区，然后把会话挂进去；
 - 下拉框里若出现「工作区已删除，连接时会自动重建」的选项，说明配置里记的路径
   当前不在注册表中，连接后会自动修复。
+
+## 会话预设 / 权限 / 模式
+
+这三项都在设置页「会话」组，只作用于**新建**的 QQ 会话（已有会话保持原状，
+避免覆盖你在 Web 界面里手动改过的设置）：
+
+| 项 | 作用 | 缺省行为 |
+|---|---|---|
+| `agentPreset` | 该会话挂载哪套 agent 预设（决定工具、技能、提示词） | 留空用部署默认；选中的预设被删除或损坏时回退默认 |
+| `sessionPermission`（必填） | 会话权限预设，把沙箱级别与审批策略打包（如 `workspace-write` / `danger-full-access` / `read-only`） | 无 |
+| `sessionMode` | `normal` 直接执行；`plan` 先探索并给出方案再执行 | `normal` |
+
+三项都调用宿主服务下发（`agentPresets.mount` / `permissionPresets.set` /
+`planMode.set`），预设是**真的加载**其插件组合，不只是记在会话头上。
 
 ## 会话 ID 与标题
 

@@ -23,7 +23,21 @@ const baseConfig = {
   allowFrom: [], allowGroups: [], workspacePath: '', agentPreset: '',
   senderPrefix: true, titleEqualsId: true, logCapacity: 200,
   logMessagePreview: true, logToFile: false, sendTimeoutMs: 5000,
+  sessionPrefix: 'onebot', sessionPermission: 'workspace-write', sessionMode: 'normal',
 }
+
+// ---- preset / permission / plan-mode stubs (record what the bridge calls)
+const calls = { mounted: [], permissionSet: [], planSet: [] }
+const agentPresets = {
+  async resolve(id) {
+    if (id === 'standard' || id === 'minimal') return { id, name: id }
+    const error = new Error('unknown preset: ' + id)
+    throw error
+  },
+  async mount(_ctx, id) { const bound = id ?? 'default'; calls.mounted.push(bound); return { id: bound } },
+}
+const permissionPresets = { set: (session, name) => { calls.permissionSet.push(name) } }
+const planMode = { set: (_agent, active) => { calls.planSet.push(active); return 'committed' } }
 
 // ---------------------------------------------------------------- transport
 const port = 18650
@@ -124,12 +138,22 @@ const agents = {
     created.push(options.sessionId)
     createdOptions.push(options.agentOptions)
     const session = { id: options.sessionId }
-    return { agent: { session, followups: [], followup(m) { this.followups.push(m) } }, dispose: async () => {} }
+    const agent = { session, followups: [], followup(m) { this.followups.push(m) } }
+    // The real factory runs the setup callback during creation; the mount and
+    // prompt registration only happen there.
+    if (typeof options.setup === 'function') {
+      await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: () => () => {} } })
+    }
+    return { agent, dispose: async () => {} }
   },
   async resume(options) {
     if (!resumeIds.includes(options.resumeSessionId)) throw new Error('no persisted session')
     const session = { id: options.resumeSessionId }
-    return { agent: { session, followups: [], followup(m) { this.followups.push(m) } }, dispose: async () => {} }
+    const agent = { session, followups: [], followup(m) { this.followups.push(m) } }
+    if (typeof options.setup === 'function') {
+      await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: () => () => {} } })
+    }
+    return { agent, dispose: async () => {} }
   },
 }
 const workspaceCalls = { resolved: [], created: [], attached: [], existing: [] }
@@ -159,6 +183,9 @@ const bridge = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: transport, log,
   sessionTitle: { rename: (_session, title) => titles.push(title) },
   getWorkspaceRegistry: () => workspaceRegistry,
+  getAgentPresets: () => agentPresets,
+  getPermissionPresets: () => permissionPresets,
+  getPlanMode: () => planMode,
   describeError: (error) => String(error?.message ?? error),
 })
 bridge.start()
@@ -177,6 +204,9 @@ t('agent starts on the host default model', createdOptions.length === 1
 t('session id is derived from the chat', chat.sessionId === 'onebot-private-20002')
 t('title is pinned to the id', titles[0] === chat.sessionId)
 t('message reaches the agent', chat.agent.followups.length === 1 && chat.agent.followups[0].role === 'user')
+t('the preset is actually mounted', calls.mounted.length > 0)
+t('new session applies the configured permission', calls.permissionSet.includes('workspace-write'))
+t('new session applies the configured mode', calls.planSet.includes(false))
 t('a missing workspace is created', workspaceCalls.created.includes('/workspace/QQ'))
 t('the session is attached to the workspace', workspaceCalls.attached.includes(chat.sessionId))
 
@@ -224,6 +254,38 @@ t('errored turn sends a notice', sent.length === 3 && sent[2].startsWith('⚠️
 // events from other sessions are ignored
 sessionEvent({ id: 'web-session' }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'x' }] } } })
 t('foreign sessions are ignored', sent.length === 3)
+
+// a configured preset that no longer exists falls back to the deployment default
+calls.mounted.length = 0
+const bridgeGone = new ChatBridge({
+  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', agentPreset: 'deleted-preset' },
+  connection: transport, log, workspaceRegistry,
+  getWorkspaceRegistry: () => workspaceRegistry,
+  getAgentPresets: () => agentPresets,
+  getPermissionPresets: () => permissionPresets,
+  getPlanMode: () => planMode,
+  describeError: String,
+})
+bridgeGone.start()
+await bridgeGone.handleInbound(inbound({ user_id: 66666, message_id: 66 }))
+t('deleted preset falls back to the default mount', calls.mounted.includes('default'), JSON.stringify(calls.mounted))
+await bridgeGone.stop()
+
+// plan mode config is applied as true
+calls.planSet.length = 0
+const bridgePlan = new ChatBridge({
+  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', sessionMode: 'plan' },
+  connection: transport, log, workspaceRegistry,
+  getWorkspaceRegistry: () => workspaceRegistry,
+  getAgentPresets: () => agentPresets,
+  getPermissionPresets: () => permissionPresets,
+  getPlanMode: () => planMode,
+  describeError: String,
+})
+bridgePlan.start()
+await bridgePlan.handleInbound(inbound({ user_id: 55555, message_id: 55 }))
+t('plan mode config commits plan state', calls.planSet.includes(true), JSON.stringify(calls.planSet))
+await bridgePlan.stop()
 
 // a workspace that already exists is not recreated
 workspaceCalls.existing.push('/workspace/QQ')
