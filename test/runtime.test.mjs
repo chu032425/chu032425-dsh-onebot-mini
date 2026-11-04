@@ -636,6 +636,7 @@ const profileConnection = {
       return { user_id: Number(id), nickname: '好友甲', qid: 'Q2', sex: 'female', age: 20, qqLevel: 60, long_nick: '' }
     }
     if (action === 'nc_get_user_status') return { status: 10, ext_status: 0 }
+    if (action === 'get_status') return { online: true, good: true }
     if (action === 'get_profile_like') return { total_count: 128 }
     throw new Error('unsupported action: ' + action)
   },
@@ -650,7 +651,7 @@ t('the profile route defaults to the bot account', own.userId === '2000002' && o
 t('the profile carries the bot nickname', own.nickname === '示例昵称')
 t('the profile carries level, signature and VIP fields', own.level === 42 && own.signature === '示例签名' && own.vip === true && own.vipLevel === 3)
 t('the profile reports registration and login days', own.regTime === 1300000000 && own.loginDays === 900)
-t('the profile reports presence', own.online === true)
+t('the profile reports the bot presence from get_status', own.online === true)
 t('the profile reports likes', own.likeCount === 128)
 
 const friendRes = fakeRes()
@@ -658,6 +659,7 @@ await routes.get('/onebot-mini/api/profile')({ method: 'GET', url: '/onebot-mini
 const friendProfile = JSON.parse(friendRes.body)
 t('a requested user is not marked as self', friendProfile.isSelf === false && friendProfile.userId === '2000004')
 t("a friend's profile renders its own fields", friendProfile.nickname === '好友甲' && friendProfile.age === 20 && friendProfile.level === 60)
+t('a friend presence comes from nc_get_user_status', friendProfile.online === true)
 t('a friend profile does not read the login info', true)
 
 // a gateway that answers nothing still returns a usable shape

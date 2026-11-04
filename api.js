@@ -538,15 +538,21 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
       // Only read the login info when this is the bot itself, or when the bot
       // id is still unknown: it is a cheap way to fill the nickname.
       const needLogin = requested === '' || botId === ''
-      const [login, stranger, userStatus, like] = await Promise.all([
+      const isSelf = userId === botId
+      // `nc_get_user_status` answers for other accounts, but on a live gateway it
+      // reports the bot itself as not online; the bot's own presence comes from
+      // `get_status` instead. Reading both and picking per case avoids showing a
+      // connected bot as offline.
+      const [login, stranger, userStatus, botStatus, like] = await Promise.all([
         needLogin ? optional('get_login_info', {}) : Promise.resolve(undefined),
         optional('get_stranger_info', { user_id: Number(userId), no_cache: true }),
-        optional('nc_get_user_status', { user_id: String(userId) }),
+        isSelf ? Promise.resolve(undefined) : optional('nc_get_user_status', { user_id: String(userId) }),
+        isSelf ? optional('get_status', {}) : Promise.resolve(undefined),
         optional('get_profile_like', { user_id: String(userId), start: 0, count: 10 }),
       ])
 
       const statusCode = userStatus === undefined ? undefined : Number(userStatus?.status ?? NaN)
-      const isSelf = userId === botId
+      const selfOnline = botStatus === undefined ? undefined : botStatus?.online === true
       sendJson(res, 200, {
         available: stranger !== undefined || login !== undefined,
         error: '',
@@ -567,7 +573,9 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         vip: stranger?.is_vip === true,
         yearsVip: stranger?.is_years_vip === true,
         vipLevel: Number(stranger?.vip_level ?? 0) || 0,
-        online: Number.isFinite(statusCode) ? statusCode === 10 : undefined,
+        online: isSelf
+          ? selfOnline
+          : (Number.isFinite(statusCode) ? statusCode === 10 : undefined),
         // A like summary is a nicety, not the point of the page, so a gateway
         // that lacks it just leaves the count at zero.
         likeCount: Number(like?.total_count ?? like?.like_count ?? 0) || 0,
