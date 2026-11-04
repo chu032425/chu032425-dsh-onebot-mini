@@ -23,11 +23,11 @@ const baseConfig = {
   allowFrom: [], allowGroups: [], workspacePath: '', agentPreset: '',
   senderPrefix: true, titleEqualsId: true, logCapacity: 200,
   logMessagePreview: true, logToFile: false, sendTimeoutMs: 5000,
-  sessionPrefix: 'onebot', sessionPermission: 'workspace-write', sessionMode: 'normal', agentModel: '',
+  sessionPrefix: 'onebot', sessionPermission: 'workspace-write', agentModel: '',
 }
 
 // ---- preset / permission / plan-mode stubs (record what the bridge calls)
-const calls = { mounted: [], permissionSet: [], planSet: [] }
+const calls = { mounted: [], permissionSet: [] }
 const agentPresets = {
   async resolve(id) {
     if (id === 'standard' || id === 'minimal') return { id, name: id }
@@ -37,7 +37,6 @@ const agentPresets = {
   async mount(_ctx, id) { const bound = id ?? 'default'; calls.mounted.push(bound); return { id: bound } },
 }
 const permissionPresets = { set: (session, name) => { calls.permissionSet.push(name) } }
-const planMode = { set: (_agent, active) => { calls.planSet.push(active); return 'committed' } }
 
 // ---------------------------------------------------------------- transport
 const port = 18650
@@ -185,7 +184,6 @@ const bridge = new ChatBridge({
   getWorkspaceRegistry: () => workspaceRegistry,
   getAgentPresets: () => agentPresets,
   getPermissionPresets: () => permissionPresets,
-  getPlanMode: () => planMode,
   describeError: (error) => String(error?.message ?? error),
 })
 bridge.start()
@@ -216,7 +214,6 @@ const bridgeModel = new ChatBridge({
 t('configured model overrides the default', JSON.stringify(bridgeModel.modelOptions()) === '{"provider":"localhost","model":"group/never-stuck"}', JSON.stringify(bridgeModel.modelOptions()))
 t('unconfigured model falls back to the host default', bridge.modelOptions()?.provider === 'localhost')
 t('new session applies the configured permission', calls.permissionSet.includes('workspace-write'))
-t('new session applies the configured mode', calls.planSet.includes(false))
 t('a missing workspace is created', workspaceCalls.created.includes('/workspace/QQ'))
 t('the session is attached to the workspace', workspaceCalls.attached.includes(chat.sessionId))
 
@@ -273,29 +270,12 @@ const bridgeGone = new ChatBridge({
   getWorkspaceRegistry: () => workspaceRegistry,
   getAgentPresets: () => agentPresets,
   getPermissionPresets: () => permissionPresets,
-  getPlanMode: () => planMode,
   describeError: String,
 })
 bridgeGone.start()
 await bridgeGone.handleInbound(inbound({ user_id: 66666, message_id: 66 }))
 t('deleted preset falls back to the default mount', calls.mounted.includes('default'), JSON.stringify(calls.mounted))
 await bridgeGone.stop()
-
-// plan mode config is applied as true
-calls.planSet.length = 0
-const bridgePlan = new ChatBridge({
-  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', sessionMode: 'plan' },
-  connection: transport, log, workspaceRegistry,
-  getWorkspaceRegistry: () => workspaceRegistry,
-  getAgentPresets: () => agentPresets,
-  getPermissionPresets: () => permissionPresets,
-  getPlanMode: () => planMode,
-  describeError: String,
-})
-bridgePlan.start()
-await bridgePlan.handleInbound(inbound({ user_id: 55555, message_id: 55 }))
-t('plan mode config commits plan state', calls.planSet.includes(true), JSON.stringify(calls.planSet))
-await bridgePlan.stop()
 
 // a workspace that already exists is not recreated
 workspaceCalls.existing.push('/workspace/QQ')

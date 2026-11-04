@@ -73,7 +73,6 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `agentPreset` | 空 | 会话使用的 agent 预设；设置页从现有预设下拉选择，留空=部署默认，被删除/损坏时自动回退默认 |
 | `agentModel` | 空 | 会话使用的模型；设置页从部署的 provider/model 目录下拉选择，留空=部署默认 |
 | `sessionPermission` | **必填** | 会话权限预设（沙箱+审批），设置页下拉选择，新建会话时应用 |
-| `sessionMode` | `normal` | 会话模式：`normal`（直接执行）/ `plan`（先出方案），新建会话时应用 |
 | `senderPrefix` | `true` | 群消息加 `[HH:MM 昵称(QQ)]` 前缀 |
 | `sessionPrefix` | `onebot` | 会话 ID 前缀；小写字母开头，只含小写字母/数字/连字符 |
 | `titleEqualsId` | `true` | 会话标题钉成会话 ID（见下） |
@@ -101,7 +100,6 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `agentPreset` | 该会话挂载哪套 agent 预设（决定工具、技能、提示词） | 留空用部署默认；选中的预设被删除或损坏时回退默认 |
 | `agentModel` | 该会话跑在哪个 provider/model 上 | 留空用部署默认；配置的模型不在目录里时回退默认 |
 | `sessionPermission`（必填） | 会话权限预设，把沙箱级别与审批策略打包（如 `workspace-write` / `danger-full-access` / `read-only`） | 无 |
-| `sessionMode` | `normal` 直接执行；`plan` 先探索并给出方案再执行 | `normal` |
 
 三项都调用宿主服务下发（`agentPresets.mount` / `permissionPresets.set` /
 `planMode.set`），预设是**真的加载**其插件组合，不只是记在会话头上。

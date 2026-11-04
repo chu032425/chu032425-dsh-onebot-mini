@@ -91,5 +91,13 @@ t('pane has a mounted page', pane.children.filter(Boolean).length >= 1)
 const icon = slots.find((s) => s.options.name === 'sidebar.panellist').render({})
 t('sidebar icon is an svg', icon.type === 'svg')
 
+// Localized names for the well-known preset/permission values must exist in
+// both dictionaries, so a Chinese UI never shows raw ids like "read-only".
+for (const key of ['presetNameStandard', 'presetNamePtc', 'presetNameMinimal', 'presetNameCordis',
+  'permReadOnly', 'permWorkspaceWrite', 'permDangerFullAccess', 'permAuto']) {
+  t('localized name present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
+t('session mode is gone', !('fieldSessionMode' in zh) && !('modePlan' in zh))
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

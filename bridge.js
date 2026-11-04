@@ -185,7 +185,7 @@ export class ChatBridge {
    * @param options - `ctx`, `config`, `connection`, `log`, `sessionTitle`
    * (optional service), `describeError`.
    */
-  constructor({ ctx, config, connection, log, sessionTitle, getWorkspaceRegistry, getAgentPresets, getPermissionPresets, getPlanMode, describeError }) {
+  constructor({ ctx, config, connection, log, sessionTitle, getWorkspaceRegistry, getAgentPresets, getPermissionPresets, describeError }) {
     this.ctx = ctx
     this.config = config
     this.connection = connection
@@ -194,7 +194,6 @@ export class ChatBridge {
     this.getWorkspaceRegistry = getWorkspaceRegistry
     this.getAgentPresets = getAgentPresets
     this.getPermissionPresets = getPermissionPresets
-    this.getPlanMode = getPlanMode
     this.describeError = describeError ?? ((error) => String(error?.message ?? error))
 
     /** chatId → chat record. */
@@ -491,10 +490,10 @@ export class ChatBridge {
   }
 
   /**
-   * Apply the configured permission preset and plan-mode state to a new agent.
+   * Apply the configured permission preset to a new agent.
    *
-   * Both are best-effort: a missing service or an unknown preset name must not
-   * break the chat, so failures are logged and the Host default stays in force.
+   * Best-effort: a missing service or an unknown preset name must not break the
+   * chat, so failures are logged and the Host default stays in force.
    * @param agent - the freshly created agent.
    * @param chatId - canonical chat id, for logging.
    */
@@ -514,18 +513,6 @@ export class ChatBridge {
       }
     }
 
-    const wantPlan = this.config.sessionMode === 'plan'
-    const planMode = typeof this.getPlanMode === 'function' ? this.getPlanMode() : undefined
-    if (planMode === undefined) {
-      if (wantPlan) this.log.record('bridge', { note: 'plan mode service unavailable; session stays in normal mode', chatId })
-      return
-    }
-    try {
-      const outcome = planMode.set(agent, wantPlan)
-      this.log.record('bridge', { note: 'session mode applied', chatId, mode: wantPlan ? 'plan' : 'normal', outcome })
-    } catch (error) {
-      this.log.record('warn', { note: 'session mode apply failed', chatId, error: this.describeError(error) })
-    }
   }
 
   /**
