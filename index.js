@@ -168,6 +168,49 @@ export function apply(ctx) {
     }
 
     /**
+     * The provider/model pairs a chat may run on, for the settings picker.
+     * Values are `provider::model` so a model id containing a slash is preserved.
+     * @returns `{ available, models, defaultModel }`.
+     */
+    async function listModels() {
+      const llm = ctx.get('llm')
+      if (llm === undefined) return { available: false, models: [], defaultModel: '' }
+      try {
+        let defaultModel = ''
+        try {
+          const selection = ctx.get('agentDefaultModel')?.currentSelection()
+          if (selection !== undefined && selection !== null) {
+            defaultModel = String(selection.provider ?? '') + '::' + String(selection.model ?? '')
+          }
+        } catch {
+          defaultModel = ''
+        }
+        const providers = await llm.listProviders()
+        const models = []
+        for (const provider of providers) {
+          let advertised = []
+          try {
+            advertised = await llm.listModels(provider.id)
+          } catch {
+            advertised = []
+          }
+          for (const model of advertised) {
+            models.push({
+              value: String(provider.id) + '::' + String(model.id),
+              provider: String(provider.id),
+              providerName: String(provider.name ?? provider.id),
+              model: String(model.id),
+              modelName: String(model.name ?? model.id),
+            })
+          }
+        }
+        return { available: true, models, defaultModel }
+      } catch {
+        return { available: false, models: [], defaultModel: '' }
+      }
+    }
+
+    /**
      * The permission presets a chat may run under.
      * @returns `{ available, options, defaultPreset }`.
      */
@@ -215,6 +258,7 @@ export function apply(ctx) {
       listWorkspaces,
       listAgentPresets,
       listPermissionPresets,
+      listModels,
     })
 
     try {

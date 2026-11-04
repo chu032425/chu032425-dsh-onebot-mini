@@ -61,6 +61,7 @@ export const DEFAULTS = Object.freeze({
   sessionPrefix: 'onebot',
   sessionPermission: '',
   sessionMode: 'normal',
+  agentModel: '',
   titleEqualsId: true,
   logCapacity: 500,
   logMessagePreview: true,
@@ -85,6 +86,7 @@ export const FIELD_KINDS = Object.freeze({
   sessionPrefix: 'string',
   sessionPermission: 'permission',
   sessionMode: 'sessionMode',
+  agentModel: 'model',
   titleEqualsId: 'boolean',
   logCapacity: 'number',
   logMessagePreview: 'boolean',
@@ -96,7 +98,7 @@ export const FIELD_KINDS = Object.freeze({
 export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention', 'allowFrom', 'allowGroups'] },
-  { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'sessionPermission', 'sessionMode', 'senderPrefix'] },
+  { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'sessionMode', 'senderPrefix'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
 
@@ -138,6 +140,7 @@ function coerce(field, raw) {
   if (kind === 'enum') return raw === 'reverse' || raw === 'forward' ? raw : fallback
   if (kind === 'sessionMode') return raw === 'plan' ? 'plan' : 'normal'
   if (kind === 'permission') return String(raw)
+  if (kind === 'model') return String(raw)
   return String(raw)
 }
 

@@ -605,6 +605,17 @@ export class ChatBridge {
    * @returns agent options, or undefined when no default model is configured.
    */
   modelOptions() {
+    // An explicit per-chat model wins over the deployment default. The value is
+    // "provider::model" so a model id that itself contains a slash stays intact.
+    const configured = String(this.config.agentModel ?? '').trim()
+    if (configured !== '') {
+      const at = configured.indexOf('::')
+      if (at > 0) {
+        const provider = configured.slice(0, at)
+        const model = configured.slice(at + 2)
+        if (provider !== '' && model !== '') return { provider, model }
+      }
+    }
     const service = this.ctx.get('agentDefaultModel')
     if (service === undefined) return undefined
     try {

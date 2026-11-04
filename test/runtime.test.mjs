@@ -23,7 +23,7 @@ const baseConfig = {
   allowFrom: [], allowGroups: [], workspacePath: '', agentPreset: '',
   senderPrefix: true, titleEqualsId: true, logCapacity: 200,
   logMessagePreview: true, logToFile: false, sendTimeoutMs: 5000,
-  sessionPrefix: 'onebot', sessionPermission: 'workspace-write', sessionMode: 'normal',
+  sessionPrefix: 'onebot', sessionPermission: 'workspace-write', sessionMode: 'normal', agentModel: '',
 }
 
 // ---- preset / permission / plan-mode stubs (record what the bridge calls)
@@ -205,6 +205,16 @@ t('session id is derived from the chat', chat.sessionId === 'onebot-private-2000
 t('title is pinned to the id', titles[0] === chat.sessionId)
 t('message reaches the agent', chat.agent.followups.length === 1 && chat.agent.followups[0].role === 'user')
 t('the preset is actually mounted', calls.mounted.length > 0)
+
+// an explicit provider::model in config wins over the deployment default
+const bridgeModel = new ChatBridge({
+  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', agentModel: 'localhost::group/never-stuck' },
+  connection: transport, log,
+  getWorkspaceRegistry: () => workspaceRegistry,
+  describeError: String,
+})
+t('configured model overrides the default', JSON.stringify(bridgeModel.modelOptions()) === '{"provider":"localhost","model":"group/never-stuck"}', JSON.stringify(bridgeModel.modelOptions()))
+t('unconfigured model falls back to the host default', bridge.modelOptions()?.provider === 'localhost')
 t('new session applies the configured permission', calls.permissionSet.includes('workspace-write'))
 t('new session applies the configured mode', calls.planSet.includes(false))
 t('a missing workspace is created', workspaceCalls.created.includes('/workspace/QQ'))
