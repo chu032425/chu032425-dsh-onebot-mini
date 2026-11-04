@@ -76,8 +76,20 @@ good.ws.addEventListener('message', (event) => {
   const frame = JSON.parse(event.data)
   good.ws.send(JSON.stringify({ echo: frame.echo, status: 'ok', retcode: 0, data: { message_id: 777 } }))
 })
+// Record every frame the plugin writes over the socket, so the test can prove
+// actions travel on the WebSocket rather than through some HTTP side channel.
+const written = []
+good.ws.addEventListener('message', (event) => {
+  written.push(event.data)
+})
 const data = await conn.call('send_private_msg', { user_id: 2, message: [] })
 t('action response resolves', data.message_id === 777)
+t('the action was written to the WebSocket', written.some((frame) => {
+  try { return JSON.parse(frame).action === 'send_private_msg' } catch { return false }
+}), JSON.stringify(written.slice(0, 2)))
+t('the action frame carries an echo for correlation', written.some((frame) => {
+  try { const parsed = JSON.parse(frame); return parsed.action === 'send_private_msg' && typeof parsed.echo === 'string' && parsed.echo !== '' } catch { return false }
+}))
 t('action was logged as send then recv',
   log.snapshot(0, 500).entries.some((e) => e.kind === 'send' && e.action === 'send_private_msg')
   && log.snapshot(0, 500).entries.some((e) => e.kind === 'recv' && e.retcode === 0))
