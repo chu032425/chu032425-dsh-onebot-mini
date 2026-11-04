@@ -83,8 +83,8 @@ t('panel root is a grid shell', tree.props.style.display === 'grid')
 const rail = tree.children.find((child) => child && child.type === 'nav')
 t('rail exists', rail !== undefined)
 const tabs = rail.children.flat(4).filter((child) => child && child.props && child.props.role === 'tab')
-t('two tabs', tabs.length === 2, String(tabs.length))
-t('log tab is selected first', tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false)
+t('three tabs (logs, tools, settings)', tabs.length === 3, String(tabs.length))
+t('log tab is selected first', tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false && tabs[2].props['aria-selected'] === false)
 const pane = tree.children.find((child) => child && child.props && child.props.role === 'tabpanel')
 t('pane has a mounted page', pane.children.filter(Boolean).length >= 1)
 
@@ -106,6 +106,14 @@ for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
   'toolActionsHint', 'toolNoteAuto']) {
   t('tool config copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
+
+// Every catalogued action needs a Chinese annotation, so the list never shows a
+// bare action id without an explanation next to it.
+for (const key of ['toolActionSendPrivateMsg', 'toolActionSendGroupMsg', 'toolActionSetGroupBan',
+  'toolActionGetLoginInfo', 'toolActionSetGroupAddRequest']) {
+  t('action annotation present: ' + key, typeof zh[key] === 'string' && /[\u4e00-\u9fa5]/.test(zh[key]) && typeof en[key] === 'string' && en[key] !== '')
+}
+t('tools menu label present', zh.tabTools === '工具' && en.tabTools === 'Tools')
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
