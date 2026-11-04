@@ -124,4 +124,4 @@ dsh plugin --profile web remove dsh-onebot-mini
 
 ## 许可证
 
-MIT
+Apache License 2.0

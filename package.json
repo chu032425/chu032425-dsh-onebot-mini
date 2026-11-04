@@ -2,7 +2,7 @@
   "name": "dsh-onebot-mini",
   "version": "0.1.0",
   "description": "OneBot 11 (NapCat) channel for DeepSeek Harness: QQ messages reach a dsh agent and replies go back through the OneBot API, with a config page and a live WebSocket log page.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./index.js",
   "icon": "./icon.svg",
@@ -15,6 +15,9 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "README.md",
+    "LICENSE",
+    "PUSH.md",
     "index.js",
     "config.js",
     "logbus.js",
@@ -27,7 +30,6 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md",
     "test/*.mjs"
   ],
   "dsh": {
