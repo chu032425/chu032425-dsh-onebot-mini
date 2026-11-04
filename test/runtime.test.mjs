@@ -596,6 +596,28 @@ const listOnlyRes = fakeRes()
 await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/api/qzone?what=list', headers: {} }, listOnlyRes)
 const listOnly = JSON.parse(listOnlyRes.body)
 t('what=list skips the other sections', listOnly.profile.available === false && listOnly.feeds.available === false)
+
+// target_uin passes through, so the page can read a friend's space
+const seenParams = []
+const targetConnection = {
+  state: 'online', selfId: '1',
+  call: async (action, params) => {
+    seenParams.push({ action, params })
+    if (action === 'get_qzone_profile') return { name: '幻想净土', description: '锦瑟无端五十弦' }
+    if (action === 'get_qzone_msg_list') return { total: 1, msglist: [{ tid: 't1', content: '好友说说', time: 1700000000 }] }
+    return { page_num: 1, count: 20 }
+  },
+}
+const disposeTarget = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => targetConnection, applyConfig: async () => {},
+})
+const targetRes = fakeRes()
+await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/api/qzone?target_uin=2000005', headers: {} }, targetRes)
+const targeted = JSON.parse(targetRes.body)
+t('target_uin reaches the gateway', seenParams.some((call) => call.params?.target_uin === '2000005'))
+t("a friend's space profile renders", targeted.profile.name === '幻想净土')
+t("a friend's posts render", targeted.posts.items.length === 1 && targeted.posts.items[0].content === '好友说说')
+disposeTarget()
 disposeQzone()
 
 disposeExtra()

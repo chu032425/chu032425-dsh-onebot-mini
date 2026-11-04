@@ -127,7 +127,8 @@ t('contacts menu label present', zh.tabContacts === '好友与群组' && en.tabC
 t('access menu label present', zh.tabAccess === '访问控制' && en.tabAccess === 'Access')
 t('qzone menu label present', zh.tabQzone === '空间' && en.tabQzone === 'Qzone')
 for (const key of ['qzoneTitle', 'qzoneProfile', 'qzonePosts', 'qzoneFeeds', 'qzoneEmpty',
-  'qzonePrivate', 'qzoneComments', 'qzoneLikes', 'qzoneUnavailable', 'qzoneOffline', 'qzoneRefresh']) {
+  'qzonePrivate', 'qzoneComments', 'qzoneLikes', 'qzoneUnavailable', 'qzoneOffline', 'qzoneRefresh',
+  'qzoneTargetLabel', 'qzoneTargetMine', 'qzoneTargetPlaceholder', 'qzoneTargetGo', 'qzoneProfileEmpty']) {
   t('qzone copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 for (const key of ['accessTitle', 'accessPrivateAllow', 'accessPrivateDeny', 'accessGroupAllow', 'accessGroupDeny',
