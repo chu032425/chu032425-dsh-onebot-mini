@@ -31,9 +31,8 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 
 ## 机器人账号（自动回填）
 
-`botQQ` 不用手填：连上网关后，插件从事件帧里的 `self_id` 读到机器人账号，**立刻写回配置文件**，
-设置页的「Bot account」字段会显示这个值。配置页还会在字段下方提示
-「当前连接识别到：<QQ号>」。
+`botQQ` 不用手填，设置页里它是**只读展示**：连上网关后，插件从事件帧里的 `self_id`
+读到机器人账号，**立刻写回配置文件**，字段里显示这个值并提示「当前连接识别到：<QQ号>」。
 
 只有极少数非标准网关不在事件里带 `self_id`，才需要手填。
 
@@ -66,7 +65,7 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `mode` | `reverse` | `reverse`=网关拨入；`forward`=插件拨出 |
 | `host` / `port` | `127.0.0.1` / `8643` | 反向监听；跨机部署改 `0.0.0.0` |
 | `url` | `ws://127.0.0.1:3001` | 正向目标 |
-| `accessToken` | 空 | 反向必填；正向作为 `Authorization: Bearer`。**设置页明文回显**（密码型输入框，便于与 NapCat 逐字比对），文件里也是明文 |
+| `accessToken` | 空 | 反向必填；正向作为 `Authorization: Bearer`。设置页为密码型输入框，带**眼睛按钮**可切换明文/隐藏；文件里是明文 |
 | `botQQ` | 空 | 机器人账号；**连接后自动识别并回填**，一般无需手填 |
 | `requireMention` | `true` | 群聊需 @ 机器人才响应（`botQQ` 未知时 fail-closed） |
 | `allowFrom` / `allowGroups` | `[]` | 空=不限制 |
