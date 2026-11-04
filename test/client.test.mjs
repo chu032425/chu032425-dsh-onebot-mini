@@ -99,5 +99,13 @@ for (const key of ['presetNameStandard', 'presetNamePtc', 'presetNameMinimal', '
 }
 t('session mode is gone', !('fieldSessionMode' in zh) && !('modePlan' in zh))
 
+// The onebot_call action picker must have copy in both languages, so the section
+// never falls back to a raw dictionary key in either UI.
+for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
+  'toolGroupMessage', 'toolGroupMedia', 'toolGroupGroup', 'toolGroupAccount', 'toolGroupRequest',
+  'toolActionsHint', 'toolNoteAuto']) {
+  t('tool config copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

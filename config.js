@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
 
 /** The DSH home, honoring `$DSH_HOME` then `~/.dsh`. */
 export function dshHome() {
@@ -61,6 +62,8 @@ export const DEFAULTS = Object.freeze({
   sessionPrefix: 'onebot',
   sessionPermission: '',
   agentModel: '',
+  onebotToolEnabled: true,
+  onebotToolDisabled: [],
   titleEqualsId: true,
   logCapacity: 500,
   logMessagePreview: true,
@@ -85,6 +88,8 @@ export const FIELD_KINDS = Object.freeze({
   sessionPrefix: 'string',
   sessionPermission: 'permission',
   agentModel: 'model',
+  onebotToolEnabled: 'boolean',
+  onebotToolDisabled: 'stringList',
   titleEqualsId: 'boolean',
   logCapacity: 'number',
   logMessagePreview: 'boolean',
@@ -97,6 +102,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention', 'allowFrom', 'allowGroups'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
+  { id: 'tool', fields: ['onebotToolEnabled', 'onebotToolDisabled'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
 
@@ -169,6 +175,13 @@ export function normalizeConfig(raw) {
     problems.push('logCapacity must be 50-5000')
     value.logCapacity = DEFAULTS.logCapacity
   }
+  // The tool allowlist is stored as the set of *disabled* actions, so an action
+  // added to the catalog by a later release is on by default for existing
+  // installs. Unknown names and duplicates are dropped so a hand-edited file
+  // cannot smuggle junk into the config.
+  const rawDisabled = Array.isArray(value.onebotToolDisabled) ? value.onebotToolDisabled : []
+  value.onebotToolDisabled = [...new Set(rawDisabled.filter((action) => isKnownAction(action)))]
+
   // The session prefix becomes part of a filesystem-backed session id, so it is
   // flattened to the same safe alphabet the chat body already uses. A value that
   // flattens to nothing usable (CJK only, punctuation only) falls back to the
@@ -273,6 +286,7 @@ export class ConfigStore {
       kinds: FIELD_KINDS,
       defaults: DEFAULTS,
       modeFields: MODE_FIELDS,
+      toolCatalog: TOOL_GROUPS,
     }
   }
 }

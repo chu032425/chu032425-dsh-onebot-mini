@@ -14,6 +14,7 @@
  */
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
+import { computeAllowlist } from './toolcatalog.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -677,8 +678,14 @@ export class ChatBridge {
    */
   buildSetup(presetId) {
     return async (agentCtx) => {
-      const { registerTools } = await import('./tools.js')
-      registerTools(agentCtx, { connection: this.connection })
+      // The tool is registered only when at least one action is enabled, so a
+      // chat never sees a `onebot_call` that can do nothing. Evaluated per agent
+      // at creation time: an existing chat keeps the tool set it was created with.
+      const allow = computeAllowlist(this.config)
+      if (allow !== null) {
+        const { registerTools } = await import('./tools.js')
+        registerTools(agentCtx, { connection: this.connection, allow })
+      }
       agentCtx.systemPrompt.section({
         name: 'channel:dsh-onebot-mini',
         order: 90,
@@ -815,7 +822,11 @@ export function buildPlatformPrompt(config) {
   if (config.senderPrefix) {
     text += '- Group messages are prefixed with [HH:MM nickname(QQ)] so you can tell speakers apart.\n'
   }
-  text += '- To send an image or a file, call the onebot_call tool with the OneBot action (send_group_msg / send_private_msg / send_msg and friends) and its params.\n'
+  if (computeAllowlist(config) === null) {
+    text += '- The onebot_call tool is disabled on this channel: you cannot call OneBot actions (send images or files, group management, queries). Reply with text only.\n'
+  } else {
+    text += '- To send an image or a file, call the onebot_call tool with the OneBot action (send_group_msg / send_private_msg / send_msg and friends) and its params. Only the actions enabled in the settings are accepted.\n'
+  }
   text += '- There is no Web approval card on this channel: do not call exit_plan_mode. Write any plan as plain text instead.\n'
   return text
 }

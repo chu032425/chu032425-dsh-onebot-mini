@@ -14,6 +14,7 @@
  */
 
 import { DEFAULTS, FIELD_GROUPS, FIELD_KINDS, MODE_FIELDS } from './config.js'
+import { TOOL_GROUPS } from './toolcatalog.js'
 
 /** Route path prefix. */
 export const API_PREFIX = '/onebot-mini/api'
@@ -90,6 +91,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         kinds: FIELD_KINDS,
         defaults: DEFAULTS,
         modeFields: MODE_FIELDS,
+        toolCatalog: TOOL_GROUPS,
         workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
         agentPresets: typeof listAgentPresets === 'function' ? await listAgentPresets() : { available: false, presets: [] },
         permissionPresets: typeof listPermissionPresets === 'function' ? listPermissionPresets() : { available: false, options: [], defaultPreset: '' },
@@ -151,6 +153,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         kinds: FIELD_KINDS,
         defaults: DEFAULTS,
         modeFields: MODE_FIELDS,
+        toolCatalog: TOOL_GROUPS,
         workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
         agentPresets: typeof listAgentPresets === 'function' ? await listAgentPresets() : { available: false, presets: [] },
         permissionPresets: typeof listPermissionPresets === 'function' ? listPermissionPresets() : { available: false, options: [], defaultPreset: '' },

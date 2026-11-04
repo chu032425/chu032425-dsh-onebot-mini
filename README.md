@@ -6,7 +6,7 @@
 
 - QQ 私聊与群聊消息 → dsh 会话（一个 chat 一个持久会话，重启自动续）；
 - 模型回复 → 通过 OneBot 接口发回原聊天；
-- `onebot_call` 工具：模型可直接调任意 OneBot 动作（发图、发文件、群管理）；
+- `onebot_call` 工具：模型可直接调任意 OneBot 动作（发图、发文件、群管理），可在设置页按分组/动作开关；
 - **配置页**：改连接参数并立即重连；
 - **日志页**：实时看 WebSocket 连接 / 断开 / 发送 / 接收。
 
@@ -73,6 +73,8 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `agentPreset` | 空 | 会话使用的 agent 预设；设置页从现有预设下拉选择，留空=部署默认，被删除/损坏时自动回退默认 |
 | `agentModel` | 空 | 会话使用的模型；设置页从部署的 provider/model 目录下拉选择，留空=部署默认 |
 | `sessionPermission` | **必填** | 会话权限预设（沙箱+审批），设置页下拉选择，新建会话时应用 |
+| `onebotToolEnabled` | `true` | 是否给模型注册 `onebot_call` 工具；关=模型完全看不到它 |
+| `onebotToolDisabled` | `[]` | 被禁用的 OneBot 动作名单（设置页按分组/动作勾选，未勾选=禁用；未知动作会被忽略） |
 | `senderPrefix` | `true` | 群消息加 `[HH:MM 昵称(QQ)]` 前缀 |
 | `sessionPrefix` | `onebot` | 会话 ID 前缀；小写字母开头，只含小写字母/数字/连字符 |
 | `titleEqualsId` | `true` | 会话标题钉成会话 ID（见下） |
@@ -103,6 +105,19 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 
 三项都调用宿主服务下发（`agentPresets.mount` / `permissionPresets.set` /
 `planMode.set`），预设是**真的加载**其插件组合，不只是记在会话头上。
+
+## onebot_call 工具开关
+
+设置页「工具（onebot_call）」组可按 **分组 + 单个动作** 勾选模型能调用的 OneBot
+动作（发送消息、媒体与文件、群管理、账号与查询、请求处理）。规则：
+
+- 默认全部启用；关闭总开关，或把某组 / 某动作取消勾选，对应动作就被拒绝
+  （工具返回 `disabled in the OneBot-Mini settings`，不会真正发到网关）；
+- 关掉**总开关**、或一个动作都不剩时，工具**不注册**，模型上下文里看不到它；
+- 只影响 `onebot_call` 工具本身；普通文字回复的自动转发**始终生效**，不受影响；
+- 改动只对**新建**的会话生效，已有会话保持创建时的工具集。
+
+存储上记录的是「被禁用的动作」列表，所以以后版本新增的动作对老配置默认是启用的。
 
 ## 会话 ID 与标题
 

@@ -5,6 +5,7 @@
 import { rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { acceptKey, takeFrame, encodeText, encodeControl } from '../wire.js'
 import { normalizeConfig, ConfigStore, DEFAULTS, MODE_FIELDS, FIELD_GROUPS } from '../config.js'
+import { TOOL_GROUPS, ALL_ACTIONS, isKnownAction, computeAllowlist } from '../toolcatalog.js'
 import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
@@ -123,6 +124,19 @@ t('private prefix is empty', speakerPrefix({ sender: {} }, 'private', true) === 
 t('prefix can be disabled', speakerPrefix({ sender: { card: 'x' } }, 'group', false) === '')
 t('only text blocks are joined', textOfMessage({ content: [{ type: 'text', text: 'a' }, { type: 'reasoning', text: 'secret' }, { type: 'text', text: 'b' }] }) === 'a\nb')
 t('empty content yields empty text', textOfMessage({ content: [] }) === '')
+
+// --- onebot_call tool catalog and allowlist
+t('catalog groups the send actions', TOOL_GROUPS.some((group) => group.id === 'message' && group.actions.includes('send_group_msg')))
+t('all actions flatten from the groups', ALL_ACTIONS.length === TOOL_GROUPS.reduce((sum, group) => sum + group.actions.length, 0))
+t('unknown action is not in the catalog', isKnownAction('definitely_not_real') === false)
+t('a missing config enables every action', computeAllowlist({})?.size === ALL_ACTIONS.length)
+t('the master switch off disables the tool entirely', computeAllowlist({ onebotToolEnabled: false }) === null)
+const banOff = computeAllowlist({ onebotToolDisabled: ['set_group_ban'] })
+t('a disabled action is dropped from the allowlist', banOff !== null && !banOff.has('set_group_ban') && banOff.has('send_group_msg'))
+t('disabling every action disables the tool', computeAllowlist({ onebotToolDisabled: [...ALL_ACTIONS] }) === null)
+const filteredDisabled = normalizeConfig({ onebotToolDisabled: ['set_group_ban', 'not-an-action', 'set_group_ban'] }).value.onebotToolDisabled
+t('unknown and duplicate disabled actions are dropped', JSON.stringify(filteredDisabled) === '["set_group_ban"]', JSON.stringify(filteredDisabled))
+t('snapshot ships the tool catalog', Array.isArray(snap.toolCatalog) && snap.toolCatalog.length === TOOL_GROUPS.length)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

@@ -120,6 +120,7 @@ await new Promise((resolve) => blocker.close(resolve))
 
 // ---------------------------------------------------------------- bridge
 const sent = []
+const toolDefs = []
 const transport = {
   selfId: '10001',
   state: 'online',
@@ -141,7 +142,7 @@ const agents = {
     // The real factory runs the setup callback during creation; the mount and
     // prompt registration only happen there.
     if (typeof options.setup === 'function') {
-      await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: () => () => {} } })
+      await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: (def) => { toolDefs.push(def); return () => {} } } })
     }
     return { agent, dispose: async () => {} }
   },
@@ -150,7 +151,7 @@ const agents = {
     const session = { id: options.resumeSessionId }
     const agent = { session, followups: [], followup(m) { this.followups.push(m) } }
     if (typeof options.setup === 'function') {
-      await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: () => () => {} } })
+      await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: (def) => { toolDefs.push(def); return () => {} } } })
     }
     return { agent, dispose: async () => {} }
   },
@@ -203,6 +204,7 @@ t('session id is derived from the chat', chat.sessionId === 'onebot-private-2000
 t('title is pinned to the id', titles[0] === chat.sessionId)
 t('message reaches the agent', chat.agent.followups.length === 1 && chat.agent.followups[0].role === 'user')
 t('the preset is actually mounted', calls.mounted.length > 0)
+t('onebot_call is registered by default', toolDefs.some((def) => def.name === 'onebot_call'))
 
 // an explicit provider::model in config wins over the deployment default
 const bridgeModel = new ChatBridge({
@@ -321,6 +323,34 @@ bridge4.start()
 await bridge4.handleInbound(inbound({ message_id: 10 }))
 t('allowlist blocks the chat', bridge4.chats.has('private:20002') === false)
 await bridge4.stop()
+
+// the onebot_call tool obeys the settings allowlist
+const bridgeOff = new ChatBridge({
+  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', onebotToolEnabled: false },
+  connection: transport, log, getWorkspaceRegistry: () => workspaceRegistry,
+  getAgentPresets: () => agentPresets, getPermissionPresets: () => permissionPresets, describeError: String,
+})
+bridgeOff.start()
+const beforeOff = toolDefs.length
+await bridgeOff.handleInbound(inbound({ user_id: 70001, message_id: 700 }))
+t('master off registers no tool', toolDefs.length === beforeOff)
+await bridgeOff.stop()
+
+const bridgeBan = new ChatBridge({
+  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', onebotToolDisabled: ['set_group_ban'] },
+  connection: transport, log, getWorkspaceRegistry: () => workspaceRegistry,
+  getAgentPresets: () => agentPresets, getPermissionPresets: () => permissionPresets, describeError: String,
+})
+bridgeBan.start()
+const beforeBan = toolDefs.length
+await bridgeBan.handleInbound(inbound({ user_id: 70002, message_id: 701 }))
+const banTool = toolDefs.slice(beforeBan).find((def) => def.name === 'onebot_call')
+t('tool registers while one action stays enabled', banTool !== undefined)
+const refused = await banTool.execute({ action: 'set_group_ban', params: {} })
+t('a disabled action is refused', refused.ok === false && String(refused.error).includes('disabled'))
+const allowedCall = await banTool.execute({ action: 'send_group_msg', params: {} })
+t('an enabled action is relayed', allowedCall.ok === true)
+await bridgeBan.stop()
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

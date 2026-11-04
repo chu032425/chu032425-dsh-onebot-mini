@@ -49,14 +49,20 @@ const OUTPUT_SCHEMA = Object.freeze({
  * `agentCtx.tools.register` ties the registration to that agent, so the tool
  * disappears when the agent is disposed.
  * @param agentCtx - the agent-scoped context from the setup callback.
- * @param options - the live `connection` facade.
+ * @param options - the live `connection` facade and the allowed action set.
+ *   `allow` is a Set of action names; an action outside it is refused instead
+ *   of being relayed. The caller omits the tool entirely when nothing is allowed.
  */
-export function registerTools(agentCtx, { connection }) {
+export function registerTools(agentCtx, { connection, allow }) {
+  const allowed = allow instanceof Set ? allow : undefined
   agentCtx.tools.register({
     name: 'onebot_call',
     description: 'Call one OneBot 11 action through the bridged gateway, for example send_group_msg, '
       + 'send_private_msg, get_group_info or set_group_ban. Use this to send images, files or any '
-      + 'message that is not plain text. The action response comes back as JSON.',
+      + 'message that is not plain text. The action response comes back as JSON. '
+      + (allowed === undefined
+        ? ''
+        : 'Only the actions enabled in the OneBot-Mini settings are accepted; anything else is refused.'),
     parameters: PARAMETERS,
     output: {
       schema: OUTPUT_SCHEMA,
@@ -67,6 +73,9 @@ export function registerTools(agentCtx, { connection }) {
     async execute(args) {
       const action = String(args?.action ?? '').trim()
       if (action === '') throw new Error('onebot_call: action must not be empty')
+      if (allowed !== undefined && !allowed.has(action)) {
+        return { ok: false, error: 'action "' + action + '" is disabled in the OneBot-Mini settings' }
+      }
       const params = args?.params !== null && typeof args?.params === 'object' ? args.params : {}
       try {
         const data = await connection.call(action, params)
