@@ -352,5 +352,68 @@ const allowedCall = await banTool.execute({ action: 'send_group_msg', params: {}
 t('an enabled action is relayed', allowedCall.ok === true)
 await bridgeBan.stop()
 
+// ---------------------------------------------------------------- contacts route
+// The contacts route must normalize both gateway shapes (a bare array and a
+// `{ list }` wrapper) and must degrade one section instead of failing the page.
+const { registerRoutes } = await import('../api.js')
+const routes = new Map()
+const routeCtx = {
+  connection: { requestRejection: () => undefined },
+  webServer: { register: (options) => { routes.set(options.path, options.handler); return () => {} } },
+}
+const contactCalls = []
+const contactsConnection = {
+  state: 'online',
+  selfId: '2000002',
+  call: async (action) => {
+    contactCalls.push(action)
+    if (action === 'get_friend_list') {
+      return [{ user_id: 111, nickname: '小明', remark: '同学' }, { user_id: 222, nickname: '小红', remark: '' }]
+    }
+    if (action === 'get_group_list') {
+      return { list: [{ group_id: 888, group_name: '测试群', member_count: 5, max_member_count: 200 }] }
+    }
+    throw new Error('unsupported action: ' + action)
+  },
+}
+const contactStore = { snapshot: () => ({ config: baseConfig }) }
+const disposeRoutes = registerRoutes(routeCtx, {
+  store: contactStore,
+  log,
+  getConnection: () => contactsConnection,
+  applyConfig: async () => {},
+})
+const fakeRes = () => {
+  const res = { statusCode: 0, body: '', headers: {}, setHeader(k, v) { this.headers[k] = v }, end(body) { this.body = body ?? '' } }
+  return res
+}
+const callRoute = async (path, method = 'GET') => {
+  const res = fakeRes()
+  await routes.get(path)({ method, url: path, headers: {} }, res)
+  return { status: res.statusCode, body: res.body === '' ? {} : JSON.parse(res.body) }
+}
+const contacts = await callRoute('/onebot-mini/api/contacts')
+t('contacts route answers 200', contacts.status === 200)
+t('contacts route reads both lists', contactCalls.includes('get_friend_list') && contactCalls.includes('get_group_list'))
+t('friends normalize a bare array', contacts.body.friends.items.length === 2 && contacts.body.friends.items[0].id === '111')
+t('friend name prefers the remark', contacts.body.friends.items[0].name === '同学' && contacts.body.friends.items[1].name === '小红')
+t('groups normalize a { list } wrapper', contacts.body.groups.items.length === 1 && contacts.body.groups.items[0].id === '888')
+t('group carries its member count', contacts.body.groups.items[0].memberCount === 5)
+t('the bot account is reported', contacts.body.selfId === '2000002')
+
+// offline: the page still renders, with both sections marked unavailable
+const offlineRoute = await (async () => {
+  const res = fakeRes()
+  const disposeOffline = registerRoutes(routeCtx, {
+    store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {},
+  })
+  await routes.get('/onebot-mini/api/contacts')({ method: 'GET', url: '/onebot-mini/api/contacts', headers: {} }, res)
+  disposeOffline()
+  return { status: res.statusCode, body: JSON.parse(res.body) }
+})()
+t('offline contacts route still answers 200', offlineRoute.status === 200)
+t('offline reports both sections unavailable', offlineRoute.body.friends.available === false && offlineRoute.body.groups.available === false)
+disposeRoutes()
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

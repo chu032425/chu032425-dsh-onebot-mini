@@ -83,8 +83,8 @@ t('panel root is a grid shell', tree.props.style.display === 'grid')
 const rail = tree.children.find((child) => child && child.type === 'nav')
 t('rail exists', rail !== undefined)
 const tabs = rail.children.flat(4).filter((child) => child && child.props && child.props.role === 'tab')
-t('three tabs (logs, tools, settings)', tabs.length === 3, String(tabs.length))
-t('log tab is selected first', tabs[0].props['aria-selected'] === true && tabs[1].props['aria-selected'] === false && tabs[2].props['aria-selected'] === false)
+t('four tabs (logs, tools, contacts, settings)', tabs.length === 4, String(tabs.length))
+t('log tab is selected first', tabs[0].props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false))
 const pane = tree.children.find((child) => child && child.props && child.props.role === 'tabpanel')
 t('pane has a mounted page', pane.children.filter(Boolean).length >= 1)
 
@@ -114,6 +114,10 @@ for (const key of ['toolActionSendPrivateMsg', 'toolActionSendGroupMsg', 'toolAc
   t('action annotation present: ' + key, typeof zh[key] === 'string' && /[\u4e00-\u9fa5]/.test(zh[key]) && typeof en[key] === 'string' && en[key] !== '')
 }
 t('tools menu label present', zh.tabTools === '工具' && en.tabTools === 'Tools')
+t('contacts menu label present', zh.tabContacts === '好友与群组' && en.tabContacts === 'Contacts')
+for (const key of ['contactsTitle', 'contactsFriends', 'contactsGroups', 'contactsCount', 'contactsEmpty', 'contactsOffline']) {
+  t('contacts copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

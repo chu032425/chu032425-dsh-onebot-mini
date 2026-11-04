@@ -57,7 +57,8 @@ async function readJsonBody(req) {
 /**
  * Register the plugin's routes.
  * @param ctx - the plugin context (needs `webServer` and `connection`).
- * @param deps - `store`, `log`, `getConnection`, `applyConfig`.
+ * @param deps - `store`, `log`, `getConnection`, `applyConfig`, and the catalog
+ *   providers for the pickers.
  * @returns the disposer.
  */
 export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels }) {
@@ -162,6 +163,90 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     },
   })
 
+  /**
+   * The bot's own contact lists, for the Contacts page.
+   *
+   * Read live from the gateway on every request rather than cached: a friend
+   * added in QQ should show up on the next refresh, and the lists are small.
+   * A single failing action reports that section as unavailable instead of
+   * failing the whole page, so one unsupported action on an older gateway
+   * still leaves the other list usable.
+   */
+  const disposeContacts = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/contacts',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      const connection = getConnection()
+      if (connection === undefined || connection.state !== 'online') {
+        sendJson(res, 200, {
+          ok: false,
+          state: connection?.state ?? 'offline',
+          selfId: connection?.selfId ?? '',
+          friends: { available: false, error: 'not connected', items: [] },
+          groups: { available: false, error: 'not connected', items: [] },
+        })
+        return
+      }
+
+      /**
+       * Run one list action and normalize it.
+       * @param action - the OneBot action name.
+       * @returns `{ available, items, error }`.
+       */
+      const fetchList = async (action) => {
+        try {
+          const data = await connection.call(action, {})
+          // OneBot 11 returns a bare array; some gateways wrap it in `{ list }`.
+          const items = Array.isArray(data) ? data : (Array.isArray(data?.list) ? data.list : [])
+          return { available: true, error: '', items }
+        } catch (error) {
+          return { available: false, error: String(error?.message ?? error), items: [] }
+        }
+      }
+
+      const [friends, groups] = await Promise.all([fetchList('get_friend_list'), fetchList('get_group_list')])
+      sendJson(res, 200, {
+        ok: friends.available || groups.available,
+        state: connection.state,
+        selfId: connection.selfId,
+        friends: {
+          available: friends.available,
+          error: friends.error,
+          items: friends.items.map((item) => ({
+            id: String(item?.user_id ?? ''),
+            // A gateway that reports an empty remark means "no remark", not an
+            // empty name, so fall back to the nickname in that case too.
+            name: String(item?.remark ?? '').trim() !== ''
+              ? String(item.remark)
+              : String(item?.nickname ?? ''),
+            nickname: String(item?.nickname ?? ''),
+            remark: String(item?.remark ?? ''),
+          })).filter((item) => item.id !== ''),
+        },
+        groups: {
+          available: groups.available,
+          error: groups.error,
+          items: groups.items.map((item) => ({
+            id: String(item?.group_id ?? ''),
+            name: String(item?.group_name ?? ''),
+            memberCount: Number(item?.member_count ?? 0),
+            maxMemberCount: Number(item?.max_member_count ?? 0),
+          })).filter((item) => item.id !== ''),
+        },
+      })
+    },
+  })
+
   const disposeClear = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/logs/clear',
@@ -184,6 +269,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
   return () => {
     disposeState()
     disposeConfig()
+    disposeContacts()
     disposeClear()
   }
 }
