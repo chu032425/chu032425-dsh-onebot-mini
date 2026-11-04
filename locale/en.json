@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "OneBot channel",
+    "title": "OneBot-Mini",
     "description": "Connects DeepSeek Harness to an OneBot 11 gateway (NapCat), carries QQ messages into dsh Sessions and replies back, and records the WebSocket traffic."
   }
 }
