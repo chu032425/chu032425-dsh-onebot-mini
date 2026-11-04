@@ -61,6 +61,16 @@ export function apply(ctx) {
       next.onEvent = (frame) => {
         void bridge.handleInbound(frame)
       }
+      // Backfill the bot account from the live connection: an operator should not
+      // have to look it up, and a stored value that no longer matches the gateway
+      // would otherwise stay misleading.
+      next.onLearnSelfId = (learned) => {
+        const current = store.read()
+        if (String(current.botQQ ?? '') === learned) return
+        void store.write({ botQQ: learned }).then((result) => {
+          if (result.ok) log.record('bridge', { note: 'bot account saved to config', selfId: learned })
+        }).catch(() => undefined)
+      }
       await next.start()
       return next
     }

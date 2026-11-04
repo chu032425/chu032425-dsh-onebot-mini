@@ -45,6 +45,7 @@ const good = await dial('test-token')
 t('correct token dials in', good.ok === true)
 t('transport reports online', conn.state === 'online')
 const bad = await dial('wrong')
+let good2
 t('wrong token is rejected', bad.ok === false)
 
 // self id is learned from a meta event
@@ -80,6 +81,16 @@ t('link loss flips to offline', conn.state === 'offline')
 let rejected = false
 try { await conn.call('send_private_msg', {}) } catch { rejected = true }
 t('call without a link rejects', rejected)
+// the learned account is reported to the Host so it can be persisted
+const learnedIds = []
+conn.onLearnSelfId = (id) => learnedIds.push(id)
+good2 = await dial('test-token')
+good2.ws.send(JSON.stringify({ post_type: 'meta_event', meta_event_type: 'heartbeat', self_id: 424242, time: 1 }))
+await wait(200)
+t('onLearnSelfId fires with the learned id', learnedIds.includes('424242'), JSON.stringify(learnedIds))
+good2.ws.close()
+await wait(150)
+
 await conn.stop()
 
 // busy port must not throw out of start() silently

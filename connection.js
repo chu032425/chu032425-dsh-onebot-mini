@@ -65,6 +65,8 @@ export class OneBotConnection {
     this.onEvent = () => {}
     /** Called with `'online' | 'offline' | 'connecting'` transitions. */
     this.onState = () => {}
+    /** Called once per newly learned bot account id. */
+    this.onLearnSelfId = () => {}
 
     /** The bot's own account id, learned from a meta event when not configured. */
     this.selfId = String(config.botQQ ?? '')
@@ -388,8 +390,14 @@ export class OneBotConnection {
       if (typeof frame.self_id === 'number' || typeof frame.self_id === 'string') {
         const learned = String(frame.self_id)
         if (this.selfId !== learned) {
+          const previous = this.selfId
           this.selfId = learned
-          this.log.record('bridge', { note: 'learned bot account', selfId: learned })
+          this.log.record('bridge', { note: 'learned bot account', selfId: learned, previous })
+          try {
+            this.onLearnSelfId(learned)
+          } catch {
+            // A listener failure must not break frame handling.
+          }
         }
       }
       this.log.record('event', {
