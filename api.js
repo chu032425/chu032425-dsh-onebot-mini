@@ -222,16 +222,19 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         friends: {
           available: friends.available,
           error: friends.error,
-          items: friends.items.map((item) => ({
-            id: String(item?.user_id ?? ''),
-            // A gateway that reports an empty remark means "no remark", not an
-            // empty name, so fall back to the nickname in that case too.
-            name: String(item?.remark ?? '').trim() !== ''
-              ? String(item.remark)
-              : String(item?.nickname ?? ''),
-            nickname: String(item?.nickname ?? ''),
-            remark: String(item?.remark ?? ''),
-          })).filter((item) => item.id !== ''),
+          items: friends.items.map((item) => {
+            // A gateway may report an empty or whitespace-only remark (some
+            // clients send a full-width space), which means "no remark" rather
+            // than an empty name, so the nickname is used in that case.
+            const remark = String(item?.remark ?? '').trim()
+            const nickname = String(item?.nickname ?? '').trim()
+            return {
+              id: String(item?.user_id ?? ''),
+              name: remark !== '' ? remark : nickname,
+              nickname,
+              remark,
+            }
+          }).filter((item) => item.id !== ''),
         },
         groups: {
           available: groups.available,

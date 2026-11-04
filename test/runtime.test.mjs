@@ -399,6 +399,7 @@ t('friends normalize a bare array', contacts.body.friends.items.length === 2 && 
 t('friend name prefers the remark', contacts.body.friends.items[0].name === '同学' && contacts.body.friends.items[1].name === '小红')
 t('groups normalize a { list } wrapper', contacts.body.groups.items.length === 1 && contacts.body.groups.items[0].id === '888')
 t('group carries its member count', contacts.body.groups.items[0].memberCount === 5)
+t('a whitespace-only nickname is trimmed to empty', contacts.body.friends.items[1].name === '小红' && contacts.body.friends.items[1].nickname === '小红')
 t('the bot account is reported', contacts.body.selfId === '2000002')
 
 // offline: the page still renders, with both sections marked unavailable
