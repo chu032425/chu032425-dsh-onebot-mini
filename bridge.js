@@ -185,12 +185,13 @@ export class ChatBridge {
    * @param options - `ctx`, `config`, `connection`, `log`, `sessionTitle`
    * (optional service), `describeError`.
    */
-  constructor({ ctx, config, connection, log, sessionTitle, describeError }) {
+  constructor({ ctx, config, connection, log, sessionTitle, getWorkspaceRegistry, describeError }) {
     this.ctx = ctx
     this.config = config
     this.connection = connection
     this.log = log
     this.sessionTitle = sessionTitle
+    this.getWorkspaceRegistry = getWorkspaceRegistry
     this.describeError = describeError ?? ((error) => String(error?.message ?? error))
 
     /** chatId → chat record. */
@@ -206,6 +207,9 @@ export class ChatBridge {
     this.dedupWindowMs = 300000
     this.dedupMax = 2000
     this.stopping = false
+    /** Last workspace verified, and when (epoch ms); avoids a stat per message. */
+    this.workspaceCheckedPath = ''
+    this.workspaceCheckedAt = 0
   }
 
   /**
@@ -213,6 +217,10 @@ export class ChatBridge {
    * @param config - the new effective config.
    */
   reconfigure(config) {
+    // A save is an explicit "re-check now": drop the workspace verification cache
+    // so a workspace deleted in the meantime is recreated on the next message.
+    this.workspaceCheckedPath = ''
+    this.workspaceCheckedAt = 0
     this.config = config
   }
 
@@ -327,6 +335,9 @@ export class ChatBridge {
    * @param frame - the source event (for logging).
    */
   async dispatch(chatId, chat, text, frame) {
+    // A workspace can be deleted at any time; re-verify before delivering so an
+    // existing chat also lands in a real workspace after a delete.
+    await this.ensureWorkspace()
     let record
     try {
       record = await this.ensureChat(chatId)
@@ -378,6 +389,10 @@ export class ChatBridge {
    */
   async createChat(chatId) {
     const sessionId = sessionIdOf(chatId, this.config.sessionPrefix)
+    // The configured workspace is required, but its registration may have been
+    // deleted since — recreate it so the Session always lands in a real
+    // workspace instead of falling back to the host cwd.
+    await this.ensureWorkspace(true)
     const meta = {}
     if (this.config.workspacePath !== '') meta.cwd = this.config.workspacePath
     if (this.config.agentPreset !== '') meta.agentPreset = this.config.agentPreset
@@ -457,7 +472,76 @@ export class ChatBridge {
     this.bySession.set(record.sessionId, chatId)
 
     if (this.config.titleEqualsId) this.pinTitle(handle.agent.session, record.sessionId)
+    await this.attachWorkspace(record.sessionId)
     return record
+  }
+
+  /**
+   * Make sure the configured workspace exists and is registered.
+   *
+   * A deleted registration (or a deleted directory) must not leave the chat with
+   * no workspace, so this recreates whichever part is missing. Failures are
+   * logged and swallowed: a workspace problem must not block the conversation.
+   */
+  async ensureWorkspace(force = false) {
+    const registry = typeof this.getWorkspaceRegistry === 'function' ? this.getWorkspaceRegistry() : undefined
+    const path = String(this.config.workspacePath ?? '').trim()
+    if (registry === undefined || path === '') return
+    // Verified within the last minute against the same path: skip the stat.
+    if (!force && this.workspaceCheckedPath === path && Date.now() - this.workspaceCheckedAt < 60000) return
+    const { mkdir, stat } = await import('node:fs/promises')
+
+    // A missing directory makes `resolveByPath` reject (its realpath fails), so
+    // the directory check comes first and its absence is not an error.
+    let directoryExists = true
+    try {
+      await stat(path)
+    } catch {
+      directoryExists = false
+    }
+    if (!directoryExists) {
+      try {
+        await mkdir(path, { recursive: true })
+        this.log.record('bridge', { note: 'workspace directory created', path })
+      } catch (error) {
+        this.log.record('error', { note: 'workspace directory create failed for ' + path, error: this.describeError(error) })
+        return
+      }
+    }
+
+    try {
+      const existing = await registry.resolveByPath(path)
+      if (existing !== undefined) {
+        this.workspaceCheckedPath = path
+        this.workspaceCheckedAt = Date.now()
+        return
+      }
+      await registry.create(path)
+      this.workspaceCheckedPath = path
+      this.workspaceCheckedAt = Date.now()
+      this.log.record('bridge', { note: 'workspace recreated', path })
+    } catch (error) {
+      this.log.record('error', { note: 'workspace ensure failed for ' + path, error: this.describeError(error) })
+    }
+  }
+
+  /**
+   * Put the Session under the configured workspace so the sidebar groups it.
+   *
+   * Attaching is best-effort: a workspace mismatch must not break the chat.
+   * @param sessionId - the live session to record.
+   */
+  async attachWorkspace(sessionId) {
+    const registry = typeof this.getWorkspaceRegistry === 'function' ? this.getWorkspaceRegistry() : undefined
+    const path = String(this.config.workspacePath ?? '').trim()
+    if (registry === undefined || path === '') return
+    try {
+      const workspace = await registry.resolveByPath(path)
+      if (workspace === undefined) return
+      await workspace.attachSession(sessionId)
+    } catch (error) {
+      this.log.record('bridge', { note: 'workspace attach skipped', sessionId, error: this.describeError(error) })
+    }
   }
 
   /**

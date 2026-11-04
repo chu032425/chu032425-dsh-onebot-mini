@@ -97,12 +97,18 @@ export function apply(ctx) {
       },
     }
 
+    // Resolved on demand: the workspace registry initializes asynchronously, so
+    // a value captured at mount can still be undefined. Optional too — a bare
+    // composition has no workspace service and the plugin must still run.
+    const getWorkspaceRegistry = () => ctx.get('workspaceRegistry')
+
     const bridge = new ChatBridge({
       ctx,
       config: initial,
       connection: transport,
       log,
       sessionTitle,
+      getWorkspaceRegistry,
       describeError,
     })
     const disposeEvents = bridge.start()
@@ -123,11 +129,33 @@ export function apply(ctx) {
       connection = await startTransport(config)
     }
 
+    /**
+     * The workspaces a chat Session may be pinned to, for the settings picker.
+     * @returns `{ available, workspaces }`; a missing registry degrades quietly.
+     */
+    function listWorkspaces() {
+      const registry = getWorkspaceRegistry()
+      if (registry === undefined) return { available: false, workspaces: [] }
+      try {
+        return {
+          available: true,
+          workspaces: registry.list().map((workspace) => ({
+            id: String(workspace.id),
+            path: String(workspace.path),
+            title: String(workspace.title ?? ''),
+          })),
+        }
+      } catch {
+        return { available: false, workspaces: [] }
+      }
+    }
+
     const disposeRoutes = registerRoutes(ctx, {
       store,
       log,
       getConnection: () => connection,
       applyConfig,
+      listWorkspaces,
     })
 
     try {

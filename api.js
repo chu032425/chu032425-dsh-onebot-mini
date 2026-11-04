@@ -59,7 +59,7 @@ async function readJsonBody(req) {
  * @param deps - `store`, `log`, `getConnection`, `applyConfig`.
  * @returns the disposer.
  */
-export function registerRoutes(ctx, { store, log, getConnection, applyConfig }) {
+export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces }) {
   const disposeState = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/state',
@@ -90,6 +90,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig }) 
         kinds: FIELD_KINDS,
         defaults: DEFAULTS,
         modeFields: MODE_FIELDS,
+        workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
       })
     },
   })
@@ -147,6 +148,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig }) 
         kinds: FIELD_KINDS,
         defaults: DEFAULTS,
         modeFields: MODE_FIELDS,
+        workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
       })
     },
   })

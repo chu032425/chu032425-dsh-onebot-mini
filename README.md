@@ -69,7 +69,7 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `botQQ` | 空 | 机器人账号；**连接后自动识别并回填**，一般无需手填 |
 | `requireMention` | `true` | 群聊需 @ 机器人才响应（`botQQ` 未知时 fail-closed） |
 | `allowFrom` / `allowGroups` | `[]` | 空=不限制 |
-| `workspacePath` | 空 | 会话工作目录，空=宿主进程 cwd |
+| `workspacePath` | **必填** | 会话工作区；设置页从现有工作区下拉选择，被删除时自动重建 |
 | `agentPreset` | 空 | 会话使用的 agent 预设 |
 | `senderPrefix` | `true` | 群消息加 `[HH:MM 昵称(QQ)]` 前缀 |
 | `sessionPrefix` | `onebot` | 会话 ID 前缀；小写字母开头，只含小写字母/数字/连字符 |
@@ -77,6 +77,16 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `logCapacity` | `500` | 日志保留条数 |
 | `logMessagePreview` | `true` | 日志是否记消息正文前缀 |
 | `sendTimeoutMs` | `30000` | 动作超时 |
+
+## 会话工作区
+
+`workspacePath` 是**必填**项，设置页里是一个下拉框，列出当前部署已有的工作区
+（`标题 — 路径`），聊天会话都创建在选中的工作区下，侧栏里能按工作区分组看到。
+
+- 工作区注册被删除、或目录本身不存在时，收到下一条消息会**自动重建**：
+  先建目录，再注册工作区，然后把会话挂进去；
+- 下拉框里若出现「工作区已删除，连接时会自动重建」的选项，说明配置里记的路径
+  当前不在注册表中，连接后会自动修复。
 
 ## 会话 ID 与标题
 

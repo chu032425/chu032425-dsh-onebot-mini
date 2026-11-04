@@ -39,11 +39,11 @@ t('partial buffer returns undefined', takeFrame(Buffer.from([0x81])) === undefin
 t('control frame is two bytes', encodeControl(0x8).length === 2)
 
 // --- config
-const needsToken = normalizeConfig({ mode: 'reverse', accessToken: '' })
+const needsToken = normalizeConfig({ mode: 'reverse', accessToken: '', workspacePath: '/workspace/QQ' })
 t('reverse without token is rejected', needsToken.problems.some((p) => p.includes('accessToken')))
 const clamped = normalizeConfig({ port: 99999 })
 t('port out of range falls back', clamped.value.port === DEFAULTS.port)
-const good = normalizeConfig({ mode: 'forward', accessToken: 'x', url: 'ws://a:1', allowFrom: [' 1 ', '', '2'] })
+const good = normalizeConfig({ mode: 'forward', accessToken: 'x', url: 'ws://a:1', workspacePath: '/workspace/QQ', allowFrom: [' 1 ', '', '2'] })
 t('forward with token is clean', good.problems.length === 0, JSON.stringify(good.problems))
 t('string list is trimmed', JSON.stringify(good.value.allowFrom) === '["1","2"]')
 t('unknown enum falls back', normalizeConfig({ mode: 'weird' }).value.mode === 'reverse')
@@ -57,6 +57,10 @@ t('session prefix rejects digit start', normalizeConfig({ sessionPrefix: '1qq' }
 t('session prefix rejects CJK', normalizeConfig({ sessionPrefix: '我的QQ' }).value.sessionPrefix === 'onebot')
 t('session prefix rejects spaces', normalizeConfig({ sessionPrefix: 'a b' }).value.sessionPrefix === 'onebot')
 t('session prefix empty means default', normalizeConfig({ sessionPrefix: '' }).value.sessionPrefix === 'onebot')
+
+// workspacePath is required
+t('workspace is required', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '' }).problems.some((p) => p.includes('workspacePath')))
+t('workspace accepted when set', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ' }).problems.length === 0)
 
 // mode-scoped fields: the form shows only the current mode's connection inputs
 t('host and port belong to reverse', MODE_FIELDS.host === 'reverse' && MODE_FIELDS.port === 'reverse')
@@ -73,7 +77,7 @@ const path = '/tmp/onebot-mini-unit.json'
 rmSync(path, { force: true })
 const store = new ConfigStore(path)
 t('absent file yields defaults', store.read().port === 8643)
-const wrote = await store.write({ mode: 'forward', accessToken: 'tk', port: 9999 })
+const wrote = await store.write({ mode: 'forward', accessToken: 'tk', port: 9999, workspacePath: '/workspace/QQ' })
 t('valid write succeeds', wrote.ok === true, JSON.stringify(wrote.problems))
 t('write reaches disk', JSON.parse(readFileSync(path, 'utf8')).port === 9999)
 const snap = store.snapshot()
@@ -83,6 +87,7 @@ writeFileSync(path, 'not json', 'utf8')
 const corrupt = new ConfigStore(path)
 t('corrupt file degrades to defaults', corrupt.read().port === 8643)
 t('invalid write is refused', (await corrupt.write({ port: 0 })).ok === false)
+t('write without a workspace is refused', (await new ConfigStore('/tmp/onebot-mini-nw.json').write({ mode: 'forward', accessToken: 'tk', workspacePath: '' })).ok === false)
 
 // --- log ring
 const log = new LogBus({ capacity: 50 })

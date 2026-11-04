@@ -77,7 +77,7 @@ export const FIELD_KINDS = Object.freeze({
   requireMention: 'boolean',
   allowFrom: 'stringList',
   allowGroups: 'stringList',
-  workspacePath: 'string',
+  workspacePath: 'workspace',
   agentPreset: 'string',
   senderPrefix: 'boolean',
   sessionPrefix: 'string',
@@ -178,6 +178,10 @@ export function normalizeConfig(raw) {
       problems.push('sessionPrefix must start with a lowercase letter and contain only lowercase letters, digits and hyphens; using "' + DEFAULTS.sessionPrefix + '"')
     }
     value.sessionPrefix = DEFAULTS.sessionPrefix
+  }
+
+  if (String(value.workspacePath ?? '').trim() === '') {
+    problems.push('workspacePath is required: pick a workspace for the chat Sessions')
   }
 
   if (value.mode === 'reverse' && value.accessToken.trim() === '') {

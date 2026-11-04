@@ -132,6 +132,20 @@ const agents = {
     return { agent: { session, followups: [], followup(m) { this.followups.push(m) } }, dispose: async () => {} }
   },
 }
+const workspaceCalls = { resolved: [], created: [], attached: [], existing: [] }
+const workspaceRegistry = {
+  async resolveByPath(path) {
+    workspaceCalls.resolved.push(path)
+    if (workspaceCalls.created.includes(path) || workspaceCalls.existing.includes(path)) {
+      return { attachSession: async (id) => { workspaceCalls.attached.push(id) } }
+    }
+    return undefined
+  },
+  async create(path) {
+    workspaceCalls.created.push(path)
+    return { attachSession: async (id) => { workspaceCalls.attached.push(id) } }
+  },
+}
 const ctx = {
   on: (name, cb) => { if (name === 'session/event') sessionEvent = cb; return () => {} },
   agents,
@@ -142,8 +156,9 @@ const ctx = {
 }
 const titles = []
 const bridge = new ChatBridge({
-  ctx, config: baseConfig, connection: transport, log,
+  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: transport, log,
   sessionTitle: { rename: (_session, title) => titles.push(title) },
+  getWorkspaceRegistry: () => workspaceRegistry,
   describeError: (error) => String(error?.message ?? error),
 })
 bridge.start()
@@ -162,6 +177,8 @@ t('agent starts on the host default model', createdOptions.length === 1
 t('session id is derived from the chat', chat.sessionId === 'onebot-private-20002')
 t('title is pinned to the id', titles[0] === chat.sessionId)
 t('message reaches the agent', chat.agent.followups.length === 1 && chat.agent.followups[0].role === 'user')
+t('a missing workspace is created', workspaceCalls.created.includes('/workspace/QQ'))
+t('the session is attached to the workspace', workspaceCalls.attached.includes(chat.sessionId))
 
 await bridge.handleInbound(inbound({ message_type: 'group', group_id: 888, message_id: 2 }))
 t('group message without a mention is ignored', bridge.chats.has('group:888') === false)
@@ -207,6 +224,22 @@ t('errored turn sends a notice', sent.length === 3 && sent[2].startsWith('⚠️
 // events from other sessions are ignored
 sessionEvent({ id: 'web-session' }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'x' }] } } })
 t('foreign sessions are ignored', sent.length === 3)
+
+// a workspace that already exists is not recreated
+workspaceCalls.existing.push('/workspace/QQ')
+const bridgeExisting = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: transport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+const beforeCreate = workspaceCalls.created.length
+bridgeExisting.start()
+await bridgeExisting.handleInbound(inbound({ user_id: 77777, message_id: 77 }))
+t('existing workspace is reused, not recreated', workspaceCalls.created.length === beforeCreate, JSON.stringify(workspaceCalls.created))
+
+// a workspace deleted later is recreated on the next message, even though the chat exists
+workspaceCalls.existing.length = 0   // registry no longer resolves it = deleted
+workspaceCalls.created.length = 0
+bridgeExisting.reconfigure({ ...baseConfig, workspacePath: '/workspace/QQ' })
+await bridgeExisting.handleInbound(inbound({ user_id: 77777, message_id: 78 }))
+t('deleted workspace is recreated on the next message', workspaceCalls.created.includes('/workspace/QQ'), JSON.stringify(workspaceCalls.created))
+await bridgeExisting.stop()
 
 // restart resumes the same session instead of creating a new one
 await bridge.stop()
