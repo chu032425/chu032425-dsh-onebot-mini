@@ -350,12 +350,17 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
           return undefined
         }
       }
-      const [info, status] = await Promise.all([
+      // `nc_get_user_status` is NapCat's own extension and is the only action
+      // that reports a contact's presence; `get_status` reports the bot itself.
+      // `status` is a numeric code (10 = online) and `ext_status` refines it.
+      const [info, userStatus, botStatus] = await Promise.all([
         optional('get_stranger_info', { user_id: Number(userId), no_cache: true }),
+        optional('nc_get_user_status', { user_id: String(userId) }),
         optional('get_status', {}),
       ])
+      const statusCode = userStatus === undefined ? undefined : Number(userStatus?.status ?? NaN)
       sendJson(res, 200, {
-        available: info !== undefined || status !== undefined,
+        available: info !== undefined || userStatus !== undefined || botStatus !== undefined,
         error: '',
         userId,
         nickname: String(info?.nickname ?? '').trim(),
@@ -364,9 +369,13 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         age: Number(info?.age ?? 0),
         qid: String(info?.qid ?? ''),
         level: Number(info?.level ?? 0),
-        online: status?.online === true,
-        good: status?.good === true,
-        botOnline: status?.online === true,
+        // `status` stays undefined when the gateway has no such action, which the
+        // page shows as "unknown" instead of guessing.
+        status: Number.isFinite(statusCode) ? statusCode : undefined,
+        extStatus: userStatus === undefined ? undefined : Number(userStatus?.ext_status ?? 0),
+        online: Number.isFinite(statusCode) ? statusCode === 10 : undefined,
+        botOnline: botStatus?.online === true,
+        good: botStatus?.good === true,
       })
     },
   })

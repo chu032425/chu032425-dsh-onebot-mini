@@ -14,7 +14,7 @@
  */
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
-import { computeAllowlist } from './toolcatalog.js'
+import { computeAllowlist, enabledGroups, actionLabel } from './toolcatalog.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -822,10 +822,18 @@ export function buildPlatformPrompt(config) {
   if (config.senderPrefix) {
     text += '- Group messages are prefixed with [HH:MM nickname(QQ)] so you can tell speakers apart.\n'
   }
-  if (computeAllowlist(config) === null) {
+  const allow = computeAllowlist(config)
+  if (allow === null) {
     text += '- The onebot_call tool is disabled on this channel: you cannot call OneBot actions (send images or files, group management, queries). Reply with text only.\n'
   } else {
-    text += '- To send an image or a file, call the onebot_call tool with the OneBot action (send_group_msg / send_private_msg / send_msg and friends) and its params. Only the actions enabled in the settings are accepted.\n'
+    text += '- To do anything other than reply in plain text, call the onebot_call tool with the OneBot action name and its params. '
+      + 'Only the actions listed below are accepted; anything else is refused.\n'
+    // Advertise exactly what the operator left enabled, so the model never
+    // wastes a turn on an action that would be refused.
+    for (const group of enabledGroups(allow)) {
+      const names = group.actions.map((action) => action.name + ' (' + actionLabel(action.name) + ')').join(', ')
+      text += '  - ' + group.id + ': ' + names + '\n'
+    }
   }
   text += '- There is no Web approval card on this channel: do not call exit_plan_mode. Write any plan as plain text instead.\n'
   return text

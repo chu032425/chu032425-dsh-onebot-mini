@@ -5,6 +5,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { FIELD_GROUPS } from '../config.js'
+import { TOOL_GROUPS } from '../toolcatalog.js'
 
 const src = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
@@ -111,17 +112,16 @@ t('session mode is gone', !('fieldSessionMode' in zh) && !('modePlan' in zh))
 // The onebot_call action picker must have copy in both languages, so the section
 // never falls back to a raw dictionary key in either UI.
 for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
-  'toolGroupMessage', 'toolGroupMedia', 'toolGroupGroup', 'toolGroupAccount', 'toolGroupRequest',
-  'toolActionsHint', 'toolNoteAuto']) {
+  'toolGroupMessage', 'toolGroupMedia', 'toolGroupGroup', 'toolGroupQuery', 'toolGroupInteraction',
+  'toolGroupRequest', 'toolGroupProfile', 'toolGroupQzone', 'toolGroupAlbum',
+  'toolActionsHint', 'toolNoteAuto', 'toolTotal', 'toolSearchPlaceholder', 'toolNoMatch']) {
   t('tool config copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 
-// Every catalogued action needs a Chinese annotation, so the list never shows a
-// bare action id without an explanation next to it.
-for (const key of ['toolActionSendPrivateMsg', 'toolActionSendGroupMsg', 'toolActionSetGroupBan',
-  'toolActionGetLoginInfo', 'toolActionSetGroupAddRequest']) {
-  t('action annotation present: ' + key, typeof zh[key] === 'string' && /[\u4e00-\u9fa5]/.test(zh[key]) && typeof en[key] === 'string' && en[key] !== '')
-}
+// Every catalogued action carries its annotation in the catalog itself, so the
+// list never shows a bare action id without an explanation next to it.
+t('the catalog supplies action annotations', TOOL_GROUPS.every((group) => group.actions.every((action) => /[\u4e00-\u9fa5]/.test(action.zh)))),
+t('the tools page renders every catalog group', TOOL_GROUPS.length === 9)
 t('tools menu label present', zh.tabTools === '工具' && en.tabTools === 'Tools')
 t('contacts menu label present', zh.tabContacts === '好友与群组' && en.tabContacts === 'Contacts')
 t('access menu label present', zh.tabAccess === '访问控制' && en.tabAccess === 'Access')

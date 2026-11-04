@@ -5,7 +5,7 @@
 import { rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { acceptKey, takeFrame, encodeText, encodeControl } from '../wire.js'
 import { normalizeConfig, ConfigStore, DEFAULTS, MODE_FIELDS, FIELD_GROUPS } from '../config.js'
-import { TOOL_GROUPS, ALL_ACTIONS, isKnownAction, computeAllowlist } from '../toolcatalog.js'
+import { TOOL_GROUPS, ALL_ACTIONS, isKnownAction, computeAllowlist, actionLabel, enabledGroups } from '../toolcatalog.js'
 import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
@@ -126,7 +126,17 @@ t('only text blocks are joined', textOfMessage({ content: [{ type: 'text', text:
 t('empty content yields empty text', textOfMessage({ content: [] }) === '')
 
 // --- onebot_call tool catalog and allowlist
-t('catalog groups the send actions', TOOL_GROUPS.some((group) => group.id === 'message' && group.actions.includes('send_group_msg')))
+const groupOf = (name) => TOOL_GROUPS.find((group) => group.actions.some((action) => action.name === name))
+t('catalog groups the send actions', groupOf('send_group_msg')?.id === 'message')
+t('catalog covers the NapCat core actions', ['set_group_ban', 'send_poke', 'delete_msg', 'nc_get_user_status', 'send_qzone_msg']
+  .every((name) => isKnownAction(name)))
+t('dangerous actions stay out of the catalog', ['get_credentials', 'get_csrf_token', 'get_cookies', 'set_restart', 'bot_exit', 'send_packet', 'clean_cache', 'ocr_image']
+  .every((name) => !isKnownAction(name)))
+t('every catalogued action carries a Chinese annotation', TOOL_GROUPS.every((group) => group.actions.every((action) => /[\u4e00-\u9fa5]/.test(action.zh))))
+t('every catalogued action carries an English annotation', TOOL_GROUPS.every((group) => group.actions.every((action) => action.en !== '')))
+t('no duplicate action names', ALL_ACTIONS.length === new Set(ALL_ACTIONS).size)
+t('actionLabel returns the Chinese annotation', actionLabel('set_group_ban') === '禁言群成员')
+t('enabledGroups only lists groups with enabled actions', JSON.stringify(enabledGroups(new Set(['set_group_ban'])).map((g) => g.id)) === '["group"]')
 t('all actions flatten from the groups', ALL_ACTIONS.length === TOOL_GROUPS.reduce((sum, group) => sum + group.actions.length, 0))
 t('unknown action is not in the catalog', isKnownAction('definitely_not_real') === false)
 t('a missing config enables every action', computeAllowlist({})?.size === ALL_ACTIONS.length)

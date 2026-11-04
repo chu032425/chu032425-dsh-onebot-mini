@@ -206,6 +206,14 @@ t('message reaches the agent', chat.agent.followups.length === 1 && chat.agent.f
 t('the preset is actually mounted', calls.mounted.length > 0)
 t('onebot_call is registered by default', toolDefs.some((def) => def.name === 'onebot_call'))
 
+// the channel prompt advertises exactly the enabled actions
+const { buildPlatformPrompt } = await import('../bridge.js')
+const promptAll = buildPlatformPrompt(baseConfig)
+t('the prompt lists the enabled actions', promptAll.includes('send_group_msg (发送群消息)') && promptAll.includes('set_group_ban (禁言群成员)'))
+const promptOff = buildPlatformPrompt({ ...baseConfig, onebotToolEnabled: false })
+t('the prompt says the tool is off', promptOff.includes('onebot_call tool is disabled') && !promptOff.includes('send_group_msg (发送群消息)'))
+const promptNoBan = buildPlatformPrompt({ ...baseConfig, onebotToolDisabled: ['set_group_ban'] })
+t('a disabled action is not advertised', !promptNoBan.includes('set_group_ban (禁言群成员)') && promptNoBan.includes('send_group_msg (发送群消息)'))
 // an explicit provider::model in config wins over the deployment default
 const bridgeModel = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', agentModel: 'localhost::group/never-stuck' },
@@ -465,6 +473,7 @@ const memberConnection = {
       ]
     }
     if (action === 'get_stranger_info') return { nickname: '小明', remark: '', sex: 'male', age: 18, qid: 'Q1', level: 3 }
+    if (action === 'nc_get_user_status') return { status: 10, ext_status: 0 }
     if (action === 'get_status') return { online: true, good: true }
     throw new Error('unsupported action: ' + action)
   },
@@ -491,7 +500,22 @@ t('a refused member query reports unavailable', denied.status === 200 && denied.
 const friendDetail = await resOf('/onebot-mini/api/friend?user_id=1001')
 t('friend route answers 200', friendDetail.status === 200)
 t('friend detail carries the profile', friendDetail.body.nickname === '小明' && friendDetail.body.age === 18)
-t('friend detail reports presence', friendDetail.body.online === true)
+t('friend detail reports presence from nc_get_user_status', friendDetail.body.online === true && friendDetail.body.status === 10)
+t('the bot status is kept separate from the contact status', friendDetail.body.botOnline === true)
+
+// a gateway without nc_get_user_status leaves the presence unknown, not offline
+const noStatusConnection = { state: 'online', selfId: '1', call: async (action) => {
+  if (action === 'get_stranger_info') return { nickname: '小红' }
+  throw new Error('unsupported action: ' + action)
+} }
+const disposeNoStatus = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => noStatusConnection, applyConfig: async () => {},
+})
+const noStatusRes = fakeRes()
+await routes.get('/onebot-mini/api/friend')({ method: 'GET', url: '/onebot-mini/api/friend?user_id=1002', headers: {} }, noStatusRes)
+const noStatus = JSON.parse(noStatusRes.body)
+t('a missing status action reports unknown, not offline', noStatus.online === undefined && noStatus.status === undefined)
+disposeNoStatus()
 const noUser = await resOf('/onebot-mini/api/friend')
 t('friend route requires a user id', noUser.status === 400)
 const offlineExtra = await (async () => {
