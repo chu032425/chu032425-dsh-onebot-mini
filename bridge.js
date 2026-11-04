@@ -274,18 +274,18 @@ export class ChatBridge {
     const chatId = chatIdOf(frame.message_type, frame.message_type === 'group' ? groupId : userId)
     const chat = splitChatId(chatId)
 
-    if (chat.kind === 'private') {
-      const allow = this.config.allowFrom
-      if (allow.length > 0 && !allow.includes(chat.id)) {
-        this.log.record('bridge', { note: 'private chat not in allowFrom', chatId })
-        return
-      }
-    } else {
-      const allow = this.config.allowGroups
-      if (allow.length > 0 && !allow.includes(chat.id)) {
-        this.log.record('bridge', { note: 'group not in allowGroups', chatId })
-        return
-      }
+    // Access gate, deny before allow: a blacklisted chat is always refused, and
+    // a non-empty whitelist restricts the channel to the ids on it. An empty
+    // whitelist means "no restriction", which is the default.
+    const allow = chat.kind === 'private' ? this.config.allowFrom : this.config.allowGroups
+    const deny = chat.kind === 'private' ? this.config.denyFrom : this.config.denyGroups
+    if (Array.isArray(deny) && deny.length > 0 && deny.includes(chat.id)) {
+      this.log.record('bridge', { note: (chat.kind === 'private' ? 'private chat' : 'group') + ' is blacklisted', chatId })
+      return
+    }
+    if (Array.isArray(allow) && allow.length > 0 && !allow.includes(chat.id)) {
+      this.log.record('bridge', { note: (chat.kind === 'private' ? 'private chat not in allowFrom' : 'group not in allowGroups'), chatId })
+      return
     }
 
     const messageId = String(frame.message_id ?? '')

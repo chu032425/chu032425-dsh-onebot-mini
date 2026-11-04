@@ -4,11 +4,20 @@
  * Run with `node test/client.test.mjs`.
  */
 import { readFileSync } from 'node:fs'
+import { FIELD_GROUPS } from '../config.js'
 
 const src = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
 let captured
 globalThis.window = { __ModuleLoader__: { load: (def) => { captured = def } } }
+
+// Minimal DOM head, enough for the stylesheet effect.
+const injected = []
+globalThis.document = {
+  getElementById: (id) => injected.find((node) => node.id === id) ?? null,
+  createElement: () => ({ id: '', textContent: '' }),
+  head: { appendChild: (node) => { injected.push(node); return node } },
+}
 
 // Enough of React to build a tree; hooks return their initial value.
 const React = {
@@ -83,7 +92,7 @@ t('panel root is a grid shell', tree.props.style.display === 'grid')
 const rail = tree.children.find((child) => child && child.type === 'nav')
 t('rail exists', rail !== undefined)
 const tabs = rail.children.flat(4).filter((child) => child && child.props && child.props.role === 'tab')
-t('four tabs (logs, tools, contacts, settings)', tabs.length === 4, String(tabs.length))
+t('five tabs (logs, tools, contacts, access, settings)', tabs.length === 5, String(tabs.length))
 t('log tab is selected first', tabs[0].props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false))
 const pane = tree.children.find((child) => child && child.props && child.props.role === 'tabpanel')
 t('pane has a mounted page', pane.children.filter(Boolean).length >= 1)
@@ -115,6 +124,22 @@ for (const key of ['toolActionSendPrivateMsg', 'toolActionSendGroupMsg', 'toolAc
 }
 t('tools menu label present', zh.tabTools === '工具' && en.tabTools === 'Tools')
 t('contacts menu label present', zh.tabContacts === '好友与群组' && en.tabContacts === 'Contacts')
+t('access menu label present', zh.tabAccess === '访问控制' && en.tabAccess === 'Access')
+for (const key of ['accessTitle', 'accessPrivateAllow', 'accessPrivateDeny', 'accessGroupAllow', 'accessGroupDeny',
+  'accessChooseFriend', 'accessChooseGroup', 'accessEmpty', 'accessNote']) {
+  t('access copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
+for (const key of ['membersTitle', 'membersLoading', 'membersFailed', 'membersRoleOwner', 'membersRoleAdmin',
+  'friendDetailTitle', 'friendDetailOnline', 'friendDetailOnlineUnknown']) {
+  t('detail copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
+const settingsFields = FIELD_GROUPS.flatMap((group) => group.fields)
+t('the access lists moved off the settings page', !settingsFields.includes('allowFrom') && !settingsFields.includes('allowGroups') && !settingsFields.includes('denyFrom'))
+t('the access group keeps only the mention switch', JSON.stringify(FIELD_GROUPS.find((group) => group.id === 'access').fields) === '["requireMention"]')
+const sheet = injected.find((node) => node.id === 'onebot-mini-stylesheet')
+t('a responsive stylesheet is installed', sheet !== undefined && sheet.textContent.includes('@media (max-width:720px)'))
+t('the narrow layout stacks the shell', sheet !== undefined && sheet.textContent.includes('.obm-shell{grid-template-columns:minmax(0,1fr)'))
+t('the rail becomes horizontal when narrow', sheet !== undefined && sheet.textContent.includes('.obm-rail{flex-direction:row'))
 for (const key of ['contactsTitle', 'contactsFriends', 'contactsGroups', 'contactsCount', 'contactsEmpty', 'contactsOffline']) {
   t('contacts copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }

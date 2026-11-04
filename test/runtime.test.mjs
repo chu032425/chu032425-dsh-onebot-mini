@@ -324,6 +324,43 @@ await bridge4.handleInbound(inbound({ message_id: 10 }))
 t('allowlist blocks the chat', bridge4.chats.has('private:20002') === false)
 await bridge4.stop()
 
+// blacklists: deny wins over allow, and an allowlist still restricts
+const bridgeDeny = new ChatBridge({
+  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', denyFrom: ['20002'] },
+  connection: transport, log, getWorkspaceRegistry: () => workspaceRegistry,
+  getAgentPresets: () => agentPresets, getPermissionPresets: () => permissionPresets, describeError: String,
+})
+bridgeDeny.start()
+await bridgeDeny.handleInbound(inbound({ user_id: 20002, message_id: 900 }))
+t('a blacklisted private chat is refused', bridgeDeny.chats.has('private:20002') === false)
+await bridgeDeny.handleInbound(inbound({ user_id: 90001, message_id: 901 }))
+t('an unlisted chat still passes when only a blacklist is set', bridgeDeny.chats.has('private:90001') === true)
+await bridgeDeny.stop()
+
+const bridgeBoth = new ChatBridge({
+  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', allowFrom: ['20002', '30003'], denyFrom: ['20002'] },
+  connection: transport, log, getWorkspaceRegistry: () => workspaceRegistry,
+  getAgentPresets: () => agentPresets, getPermissionPresets: () => permissionPresets, describeError: String,
+})
+bridgeBoth.start()
+await bridgeBoth.handleInbound(inbound({ user_id: 20002, message_id: 910 }))
+t('the blacklist wins over the whitelist', bridgeBoth.chats.has('private:20002') === false)
+await bridgeBoth.handleInbound(inbound({ user_id: 30003, message_id: 911 }))
+t('a whitelisted chat that is not blacklisted passes', bridgeBoth.chats.has('private:30003') === true)
+await bridgeBoth.handleInbound(inbound({ user_id: 40004, message_id: 912 }))
+t('a chat outside the whitelist is still refused', bridgeBoth.chats.has('private:40004') === false)
+await bridgeBoth.stop()
+
+const bridgeGroupDeny = new ChatBridge({
+  ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', requireMention: false, denyGroups: ['888'] },
+  connection: transport, log, getWorkspaceRegistry: () => workspaceRegistry,
+  getAgentPresets: () => agentPresets, getPermissionPresets: () => permissionPresets, describeError: String,
+})
+bridgeGroupDeny.start()
+await bridgeGroupDeny.handleInbound(inbound({ message_type: 'group', group_id: 888, message_id: 920 }))
+t('a blacklisted group is refused', bridgeGroupDeny.chats.has('group:888') === false)
+await bridgeGroupDeny.stop()
+
 // the onebot_call tool obeys the settings allowlist
 const bridgeOff = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', onebotToolEnabled: false },
@@ -414,6 +451,60 @@ const offlineRoute = await (async () => {
 })()
 t('offline contacts route still answers 200', offlineRoute.status === 200)
 t('offline reports both sections unavailable', offlineRoute.body.friends.available === false && offlineRoute.body.groups.available === false)
+// the members and friend routes: normalization, refusal and offline handling
+const memberConnection = {
+  state: 'online',
+  selfId: '2000002',
+  call: async (action, params) => {
+    if (action === 'get_group_member_list') {
+      if (Number(params?.group_id) === 999) throw new Error('permission denied')
+      return [
+        { user_id: 1001, nickname: '群主', card: '老大', role: 'owner' },
+        { user_id: 1002, nickname: '管理', card: '', role: 'admin' },
+        { user_id: 1003, nickname: '路人', card: '  ', role: 'member' },
+      ]
+    }
+    if (action === 'get_stranger_info') return { nickname: '小明', remark: '', sex: 'male', age: 18, qid: 'Q1', level: 3 }
+    if (action === 'get_status') return { online: true, good: true }
+    throw new Error('unsupported action: ' + action)
+  },
+}
+const disposeExtra = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => memberConnection, applyConfig: async () => {},
+})
+const resOf = async (path) => {
+  const res = fakeRes()
+  await routes.get(path.split('?')[0])({ method: 'GET', url: path, headers: {} }, res)
+  return { status: res.statusCode, body: JSON.parse(res.body) }
+}
+const members = await resOf('/onebot-mini/api/members?group_id=888')
+t('members route answers 200', members.status === 200)
+t('members are normalized', members.body.items.length === 3 && members.body.items[0].role === 'owner')
+t('a member card wins over the nickname', members.body.items[0].name === '老大')
+t('a blank card falls back to the nickname', members.body.items[1].name === '管理')
+t('a whitespace-only card is ignored', members.body.items[2].name === '路人')
+const noGroup = await resOf('/onebot-mini/api/members')
+t('members route requires a group id', noGroup.status === 400)
+const denied = await resOf('/onebot-mini/api/members?group_id=999')
+t('a refused member query reports unavailable', denied.status === 200 && denied.body.available === false && denied.body.error.includes('permission'))
+
+const friendDetail = await resOf('/onebot-mini/api/friend?user_id=1001')
+t('friend route answers 200', friendDetail.status === 200)
+t('friend detail carries the profile', friendDetail.body.nickname === '小明' && friendDetail.body.age === 18)
+t('friend detail reports presence', friendDetail.body.online === true)
+const noUser = await resOf('/onebot-mini/api/friend')
+t('friend route requires a user id', noUser.status === 400)
+const offlineExtra = await (async () => {
+  const res = fakeRes()
+  const disposeOff = registerRoutes(routeCtx, {
+    store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {},
+  })
+  await routes.get('/onebot-mini/api/members')({ method: 'GET', url: '/onebot-mini/api/members?group_id=888', headers: {} }, res)
+  disposeOff()
+  return JSON.parse(res.body)
+})()
+t('members route degrades when offline', offlineExtra.available === false && offlineExtra.error === 'not connected')
+disposeExtra()
 disposeRoutes()
 
 console.log(`\n${pass} passed, ${fail} failed`)

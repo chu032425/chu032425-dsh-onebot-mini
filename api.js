@@ -250,6 +250,127 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     },
   })
 
+  /**
+   * One group's member list, for the expandable group rows.
+   *
+   * `group_id` comes from the query string. A gateway that refuses the action
+   * reports `available: false` with the reason, so the row can show that instead
+   * of pretending the group is empty.
+   */
+  const disposeMembers = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/members',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      const url = new URL(String(req.url ?? '/'), 'http://localhost')
+      const groupId = String(url.searchParams.get('group_id') ?? '').trim()
+      if (groupId === '') {
+        sendJson(res, 400, { error: 'group_id is required' })
+        return
+      }
+      const connection = getConnection()
+      if (connection === undefined || connection.state !== 'online') {
+        sendJson(res, 200, { available: false, error: 'not connected', groupId, items: [] })
+        return
+      }
+      try {
+        const data = await connection.call('get_group_member_list', { group_id: Number(groupId) })
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.list) ? data.list : [])
+        sendJson(res, 200, {
+          available: true,
+          error: '',
+          groupId,
+          items: list.map((item) => ({
+            id: String(item?.user_id ?? ''),
+            name: String(item?.card ?? '').trim() !== '' ? String(item.card).trim() : String(item?.nickname ?? '').trim(),
+            nickname: String(item?.nickname ?? '').trim(),
+            card: String(item?.card ?? '').trim(),
+            role: String(item?.role ?? 'member'),
+          })).filter((item) => item.id !== ''),
+        })
+      } catch (error) {
+        sendJson(res, 200, { available: false, error: String(error?.message ?? error), groupId, items: [] })
+      }
+    },
+  })
+
+  /**
+   * One friend's live profile: status plus a best-effort detail lookup.
+   *
+   * `get_friend_msg_history` and presence are not part of OneBot 11, so the
+   * status is assembled from what a gateway reliably offers: online state
+   * (via `get_status`), the account's own info (`get_stranger_info`) and
+   * whether the user is reachable. Every field is optional and missing data
+   * reports as an empty string rather than failing the request.
+   */
+  const disposeFriend = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/friend',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      const url = new URL(String(req.url ?? '/'), 'http://localhost')
+      const userId = String(url.searchParams.get('user_id') ?? '').trim()
+      if (userId === '') {
+        sendJson(res, 400, { error: 'user_id is required' })
+        return
+      }
+      const connection = getConnection()
+      if (connection === undefined || connection.state !== 'online') {
+        sendJson(res, 200, { available: false, error: 'not connected', userId })
+        return
+      }
+      /**
+       * Run one optional lookup.
+       * @param action - the OneBot action.
+       * @param params - its params.
+       * @returns the data, or undefined when the gateway refused it.
+       */
+      const optional = async (action, params) => {
+        try {
+          return await connection.call(action, params)
+        } catch {
+          return undefined
+        }
+      }
+      const [info, status] = await Promise.all([
+        optional('get_stranger_info', { user_id: Number(userId), no_cache: true }),
+        optional('get_status', {}),
+      ])
+      sendJson(res, 200, {
+        available: info !== undefined || status !== undefined,
+        error: '',
+        userId,
+        nickname: String(info?.nickname ?? '').trim(),
+        remark: String(info?.remark ?? '').trim(),
+        sex: String(info?.sex ?? ''),
+        age: Number(info?.age ?? 0),
+        qid: String(info?.qid ?? ''),
+        level: Number(info?.level ?? 0),
+        online: status?.online === true,
+        good: status?.good === true,
+        botOnline: status?.online === true,
+      })
+    },
+  })
+
   const disposeClear = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/logs/clear',
@@ -273,6 +394,8 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     disposeState()
     disposeConfig()
     disposeContacts()
+    disposeMembers()
+    disposeFriend()
     disposeClear()
   }
 }

@@ -55,7 +55,9 @@ export const DEFAULTS = Object.freeze({
   botQQ: '',
   requireMention: true,
   allowFrom: [],
+  denyFrom: [],
   allowGroups: [],
+  denyGroups: [],
   workspacePath: '',
   agentPreset: '',
   senderPrefix: true,
@@ -81,7 +83,9 @@ export const FIELD_KINDS = Object.freeze({
   botQQ: 'string',
   requireMention: 'boolean',
   allowFrom: 'stringList',
+  denyFrom: 'stringList',
   allowGroups: 'stringList',
+  denyGroups: 'stringList',
   workspacePath: 'workspace',
   agentPreset: 'agentPreset',
   senderPrefix: 'boolean',
@@ -100,7 +104,7 @@ export const FIELD_KINDS = Object.freeze({
 /** Field order and grouping for the config page. */
 export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
-  { id: 'access', fields: ['requireMention', 'allowFrom', 'allowGroups'] },
+  { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
