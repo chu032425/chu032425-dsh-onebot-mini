@@ -1,0 +1,230 @@
+/**
+ * Transport and bridge behaviour against local doubles: real WebSocket
+ * handshake and auth, action roundtrip, log redaction, inbound gating,
+ * turn buffering, resume and allowlist.
+ * Run with `node test/runtime.test.mjs`.
+ */
+import { createServer } from 'node:http'
+import { OneBotConnection } from '../connection.js'
+import { LogBus } from '../logbus.js'
+import { ChatBridge } from '../bridge.js'
+
+let pass = 0
+let fail = 0
+const t = (name, cond, extra = '') => {
+  if (cond) pass += 1
+  else { fail += 1; console.log('FAIL ' + name + (extra ? ' :: ' + extra : '')) }
+}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const baseConfig = {
+  mode: 'reverse', host: '127.0.0.1', port: 0, url: 'ws://127.0.0.1:1',
+  accessToken: 'test-token', botQQ: '', requireMention: true,
+  allowFrom: [], allowGroups: [], workspacePath: '', agentPreset: '',
+  senderPrefix: true, titleEqualsId: true, logCapacity: 200,
+  logMessagePreview: true, logToFile: false, sendTimeoutMs: 5000,
+}
+
+// ---------------------------------------------------------------- transport
+const port = 18650
+const log = new LogBus({ capacity: 200 })
+const conn = new OneBotConnection({ config: { ...baseConfig, port }, log })
+const events = []
+conn.onEvent = (frame) => events.push(frame)
+await conn.start()
+t('reverse listener binds', conn.state === 'connecting' || conn.state === 'online')
+
+const dial = (token) => new Promise((resolve) => {
+  const ws = new WebSocket('ws://127.0.0.1:' + port + '/', { headers: { authorization: 'Bearer ' + token } })
+  ws.addEventListener('open', () => resolve({ ok: true, ws }))
+  ws.addEventListener('error', () => resolve({ ok: false }))
+  setTimeout(() => resolve({ ok: false, timeout: true }), 3000)
+})
+
+const good = await dial('test-token')
+t('correct token dials in', good.ok === true)
+t('transport reports online', conn.state === 'online')
+const bad = await dial('wrong')
+t('wrong token is rejected', bad.ok === false)
+
+// self id is learned from a meta event
+good.ws.send(JSON.stringify({ post_type: 'meta_event', meta_event_type: 'lifecycle', self_id: 10001 }))
+await wait(150)
+t('self id learned from meta event', conn.selfId === '10001')
+
+// pushed message reaches the event handler
+good.ws.send(JSON.stringify({ post_type: 'message', message_type: 'private', user_id: 2, message_id: 1, message: [], sender: {} }))
+await wait(150)
+t('pushed event is dispatched', events.some((f) => f.post_type === 'message'))
+
+// action roundtrip: the gateway echoes our echo
+good.ws.addEventListener('message', (event) => {
+  const frame = JSON.parse(event.data)
+  good.ws.send(JSON.stringify({ echo: frame.echo, status: 'ok', retcode: 0, data: { message_id: 777 } }))
+})
+const data = await conn.call('send_private_msg', { user_id: 2, message: [] })
+t('action response resolves', data.message_id === 777)
+t('action was logged as send then recv',
+  log.snapshot(0, 500).entries.some((e) => e.kind === 'send' && e.action === 'send_private_msg')
+  && log.snapshot(0, 500).entries.some((e) => e.kind === 'recv' && e.retcode === 0))
+
+// a failed action rejects with the gateway's wording
+good.ws.send(JSON.stringify({ echo: 'missing', status: 'failed', retcode: 100, wording: 'bad' }))
+await wait(100)
+t('token never reaches the log', !JSON.stringify(log.snapshot(0, 500)).includes('test-token'))
+
+// an action with no link rejects instead of hanging
+good.ws.close()
+await wait(250)
+t('link loss flips to offline', conn.state === 'offline')
+let rejected = false
+try { await conn.call('send_private_msg', {}) } catch { rejected = true }
+t('call without a link rejects', rejected)
+await conn.stop()
+
+// busy port must not throw out of start() silently
+const blocker = createServer(() => {})
+await new Promise((resolve) => blocker.listen(18651, '127.0.0.1', resolve))
+const log2 = new LogBus({ capacity: 50 })
+const busy = new OneBotConnection({ config: { ...baseConfig, port: 18651 }, log: log2 })
+let busyRejected = false
+try { await busy.start() } catch { busyRejected = true }
+t('busy port rejects start', busyRejected)
+t('busy port is logged', log2.snapshot(0, 50).entries.some((e) => e.kind === 'error' && e.port === 18651))
+await busy.stop()
+await new Promise((resolve) => blocker.close(resolve))
+
+// ---------------------------------------------------------------- bridge
+const sent = []
+const transport = {
+  selfId: '10001',
+  state: 'online',
+  sendText: async (chat, text) => { sent.push(text); return { message_id: sent.length } },
+  call: async () => ({}),
+}
+const created = []
+const createdOptions = []
+const resumeIds = []
+let sessionEvent
+let liveAgent
+const agents = {
+  get: (id) => (liveAgent !== undefined && liveAgent.session.id === id ? liveAgent : undefined),
+  async create(options) {
+    created.push(options.sessionId)
+    createdOptions.push(options.agentOptions)
+    const session = { id: options.sessionId }
+    return { agent: { session, followups: [], followup(m) { this.followups.push(m) } }, dispose: async () => {} }
+  },
+  async resume(options) {
+    if (!resumeIds.includes(options.resumeSessionId)) throw new Error('no persisted session')
+    const session = { id: options.resumeSessionId }
+    return { agent: { session, followups: [], followup(m) { this.followups.push(m) } }, dispose: async () => {} }
+  },
+}
+const ctx = {
+  on: (name, cb) => { if (name === 'session/event') sessionEvent = cb; return () => {} },
+  agents,
+  // The Host's default-model owner; a fresh agent must start on it.
+  get: (name) => (name === 'agentDefaultModel'
+    ? { currentSelection: () => ({ provider: 'localhost', model: 'group/never-stuck' }) }
+    : undefined),
+}
+const titles = []
+const bridge = new ChatBridge({
+  ctx, config: baseConfig, connection: transport, log,
+  sessionTitle: { rename: (_session, title) => titles.push(title) },
+  describeError: (error) => String(error?.message ?? error),
+})
+bridge.start()
+
+const inbound = (overrides) => ({
+  post_type: 'message', message_type: 'private', user_id: 20002, message_id: 1,
+  message: [{ type: 'text', data: { text: '你好' } }], sender: { nickname: '小明' }, ...overrides,
+})
+
+await bridge.handleInbound(inbound({}))
+const chat = bridge.chats.get('private:20002')
+t('private message creates a session', chat !== undefined)
+t('agent starts on the host default model', createdOptions.length === 1
+  && createdOptions[0].provider === 'localhost' && createdOptions[0].model === 'group/never-stuck',
+  JSON.stringify(createdOptions[0]))
+t('session id is derived from the chat', chat.sessionId === 'onebot-private-20002')
+t('title is pinned to the id', titles[0] === chat.sessionId)
+t('message reaches the agent', chat.agent.followups.length === 1 && chat.agent.followups[0].role === 'user')
+
+await bridge.handleInbound(inbound({ message_type: 'group', group_id: 888, message_id: 2 }))
+t('group message without a mention is ignored', bridge.chats.has('group:888') === false)
+
+await bridge.handleInbound(inbound({
+  message_type: 'group', group_id: 888, message_id: 3, sender: { card: '小明' }, time: 1700000000,
+  message: [{ type: 'at', data: { qq: '10001' } }, { type: 'text', data: { text: ' 帮我看看' } }],
+}))
+const groupChat = bridge.chats.get('group:888')
+t('mentioned group message is handled', groupChat !== undefined)
+t('group text carries the speaker prefix', /^\[\d\d:\d\d 小明\(20002\)\] /.test(groupChat.agent.followups[0].content[0].text))
+
+const before = groupChat.agent.followups.length
+await bridge.handleInbound(inbound({
+  message_type: 'group', group_id: 888, message_id: 3, sender: { card: '小明' },
+  message: [{ type: 'at', data: { qq: '10001' } }, { type: 'text', data: { text: ' 重复' } }],
+}))
+t('duplicate message id is skipped', groupChat.agent.followups.length === before)
+
+// outbound: text is buffered and sent once when the turn ends
+sessionEvent({ id: chat.sessionId }, { type: 'turn/start', data: { turn: 1 } })
+sessionEvent({ id: chat.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第一段' }, { type: 'reasoning', text: '内部' }, { type: 'text', text: '第二段' }] } } })
+t('nothing is sent mid-turn', sent.length === 0)
+sessionEvent({ id: chat.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
+await wait(50)
+t('one message is sent at turn end', sent.length === 1)
+t('only text blocks are joined', sent[0] === '第一段\n第二段')
+
+// a message queued mid-turn must not wipe the running turn's buffer
+sessionEvent({ id: chat.sessionId }, { type: 'turn/start', data: { turn: 2 } })
+sessionEvent({ id: chat.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'T2' }] } } })
+await bridge.handleInbound(inbound({ message_id: 4, message: [{ type: 'text', data: { text: '排队' } }] }))
+sessionEvent({ id: chat.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
+await wait(50)
+t('queued message preserves the running turn text', sent[1] === 'T2', JSON.stringify(sent[1]))
+
+// an errored turn with no text still reports something
+sessionEvent({ id: chat.sessionId }, { type: 'turn/start', data: { turn: 3 } })
+sessionEvent({ id: chat.sessionId }, { type: 'turn/end', data: { reason: { kind: 'error', error: { message: '模型出错' } } } })
+await wait(50)
+t('errored turn sends a notice', sent.length === 3 && sent[2].startsWith('⚠️'))
+
+// events from other sessions are ignored
+sessionEvent({ id: 'web-session' }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'x' }] } } })
+t('foreign sessions are ignored', sent.length === 3)
+
+// restart resumes the same session instead of creating a new one
+await bridge.stop()
+resumeIds.push(chat.sessionId)
+const bridge2 = new ChatBridge({ ctx, config: baseConfig, connection: transport, log, describeError: String })
+bridge2.start()
+await bridge2.handleInbound(inbound({ message_id: 9 }))
+t('restart resumes the same session', bridge2.chats.get('private:20002').sessionId === chat.sessionId)
+
+// a session already live elsewhere (opened in the Web UI) is reused, not recreated
+await bridge2.stop()
+const liveSessionId = 'onebot-private-20002'
+liveAgent = { session: { id: liveSessionId }, followups: [], followup(m) { this.followups.push(m) } }
+const bridge3 = new ChatBridge({ ctx, config: baseConfig, connection: transport, log, describeError: String })
+bridge3.start()
+await bridge3.handleInbound(inbound({ user_id: 20002, message_id: 11 }))
+const borrowedChat = bridge3.chats.get('private:20002')
+t('live agent is reused', borrowedChat !== undefined && borrowedChat.agent === liveAgent)
+t('borrowed agent is not disposed by the plugin', borrowedChat.borrowed === true)
+t('reused agent receives the message', liveAgent.followups.length === 1)
+await bridge3.stop()
+t('stopping does not dispose a borrowed agent', liveAgent.session !== undefined)
+
+// allowlist blocks a chat that is not listed
+const bridge4 = new ChatBridge({ ctx, config: { ...baseConfig, allowFrom: ['99999'] }, connection: transport, log, describeError: String })
+bridge4.start()
+await bridge4.handleInbound(inbound({ message_id: 10 }))
+t('allowlist blocks the chat', bridge4.chats.has('private:20002') === false)
+await bridge4.stop()
+
+console.log(`\n${pass} passed, ${fail} failed`)
+process.exit(fail === 0 ? 0 : 1)

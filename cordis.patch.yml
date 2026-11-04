@@ -1,0 +1,13 @@
+# Profile layer contributed by this bundle.
+#
+# One Loader row: the Host half owns the OneBot connection, the chat↔session
+# bridge and the two browser-facing JSON routes; the browser half (declared by
+# `dsh.client` in package.json) registers the config page on the plugin's own
+# detail page and the log page in the sidebar.
+#
+# Configuration is NOT a Loader `config:` block — it lives in
+# `<profile>/onebot-mini.json`, written by the config page, so a save reconnects
+# the WebSocket instead of restarting the plugin fiber. See README.
+- insert:
+    - id: onebot-mini
+      name: 'dsh-onebot-mini'

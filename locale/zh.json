@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "OneBot 通道",
+    "description": "把 DeepSeek Harness 接到 OneBot 11 网关（NapCat）：QQ 消息进入 dsh 会话，回复发回 QQ，并记录 WebSocket 收发。"
+  }
+}

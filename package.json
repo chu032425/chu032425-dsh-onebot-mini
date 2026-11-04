@@ -1,0 +1,63 @@
+{
+  "name": "dsh-onebot-mini",
+  "version": "0.1.0",
+  "description": "OneBot 11 (NapCat) channel for DeepSeek Harness: QQ messages reach a dsh agent and replies go back through the OneBot API, with a config page and a live WebSocket log page.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.js",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "config.js",
+    "logbus.js",
+    "wire.js",
+    "connection.js",
+    "bridge.js",
+    "tools.js",
+    "api.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "test/*.mjs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
+    }
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "onebot",
+    "onebot11",
+    "qq",
+    "napcat",
+    "qq-bot",
+    "channel"
+  ],
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "test": "node test/unit.test.mjs && node test/client.test.mjs && node test/runtime.test.mjs"
+  }
+}

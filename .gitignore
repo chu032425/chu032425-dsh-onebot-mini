@@ -1,0 +1,4 @@
+.scratch/
+*.log
+*.log.jsonl
+node_modules/
