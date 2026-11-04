@@ -140,6 +140,8 @@ const sheet = injected.find((node) => node.id === 'onebot-mini-stylesheet')
 t('a responsive stylesheet is installed', sheet !== undefined && sheet.textContent.includes('@media (max-width:720px)'))
 t('the narrow layout stacks the shell', sheet !== undefined && sheet.textContent.includes('.obm-shell{grid-template-columns:minmax(0,1fr)'))
 t('the rail becomes horizontal when narrow', sheet !== undefined && sheet.textContent.includes('.obm-rail{flex-direction:row'))
+t('the narrow rail stays on one scrollable row', sheet !== undefined && sheet.textContent.includes('flex-wrap:nowrap')
+  && sheet.textContent.includes('overflow-x:auto'))
 for (const key of ['contactsTitle', 'contactsFriends', 'contactsGroups', 'contactsCount', 'contactsEmpty', 'contactsOffline']) {
   t('contacts copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
