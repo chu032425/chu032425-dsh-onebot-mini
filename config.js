@@ -96,6 +96,19 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
 
+/**
+ * Fields that only apply to one connection mode.
+ *
+ * The config page hides a field whose mode is not the current one, so a reverse
+ * setup never shows a "gateway URL" box it ignores and a forward setup never
+ * shows a "listen address/port" it never binds.
+ */
+export const MODE_FIELDS = Object.freeze({
+  host: 'reverse',
+  port: 'reverse',
+  url: 'forward',
+})
+
 /** Fields that must never leave the Host in the clear. */
 const SECRET_FIELDS = new Set(['accessToken'])
 
@@ -245,6 +258,7 @@ export class ConfigStore {
       groups: FIELD_GROUPS,
       kinds: FIELD_KINDS,
       defaults: DEFAULTS,
+      modeFields: MODE_FIELDS,
     }
   }
 }

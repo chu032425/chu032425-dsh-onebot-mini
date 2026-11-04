@@ -4,7 +4,7 @@
  */
 import { rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { acceptKey, takeFrame, encodeText, encodeControl } from '../wire.js'
-import { normalizeConfig, ConfigStore, DEFAULTS } from '../config.js'
+import { normalizeConfig, ConfigStore, DEFAULTS, MODE_FIELDS, FIELD_GROUPS } from '../config.js'
 import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
@@ -57,6 +57,17 @@ t('session prefix rejects digit start', normalizeConfig({ sessionPrefix: '1qq' }
 t('session prefix rejects CJK', normalizeConfig({ sessionPrefix: '我的QQ' }).value.sessionPrefix === 'onebot')
 t('session prefix rejects spaces', normalizeConfig({ sessionPrefix: 'a b' }).value.sessionPrefix === 'onebot')
 t('session prefix empty means default', normalizeConfig({ sessionPrefix: '' }).value.sessionPrefix === 'onebot')
+
+// mode-scoped fields: the form shows only the current mode's connection inputs
+t('host and port belong to reverse', MODE_FIELDS.host === 'reverse' && MODE_FIELDS.port === 'reverse')
+t('url belongs to forward', MODE_FIELDS.url === 'forward')
+t('mode and token belong to both modes', MODE_FIELDS.mode === undefined && MODE_FIELDS.accessToken === undefined)
+const connectionFields = FIELD_GROUPS.find((group) => group.id === 'connection').fields
+t('connection group carries both mode inputs', connectionFields.includes('host') && connectionFields.includes('port') && connectionFields.includes('url'))
+const reverseVisible = connectionFields.filter((field) => MODE_FIELDS[field] === undefined || MODE_FIELDS[field] === 'reverse')
+const forwardVisible = connectionFields.filter((field) => MODE_FIELDS[field] === undefined || MODE_FIELDS[field] === 'forward')
+t('reverse view omits url', !reverseVisible.includes('url') && reverseVisible.includes('host') && reverseVisible.includes('port'))
+t('forward view omits host and port', !forwardVisible.includes('host') && !forwardVisible.includes('port') && forwardVisible.includes('url'))
 
 const path = '/tmp/onebot-mini-unit.json'
 rmSync(path, { force: true })

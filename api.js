@@ -13,7 +13,7 @@
  *        → { ok: true }
  */
 
-import { DEFAULTS, FIELD_GROUPS, FIELD_KINDS } from './config.js'
+import { DEFAULTS, FIELD_GROUPS, FIELD_KINDS, MODE_FIELDS } from './config.js'
 
 /** Route path prefix. */
 export const API_PREFIX = '/onebot-mini/api'
@@ -89,6 +89,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig }) 
         groups: FIELD_GROUPS,
         kinds: FIELD_KINDS,
         defaults: DEFAULTS,
+        modeFields: MODE_FIELDS,
       })
     },
   })
@@ -145,6 +146,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig }) 
         groups: FIELD_GROUPS,
         kinds: FIELD_KINDS,
         defaults: DEFAULTS,
+        modeFields: MODE_FIELDS,
       })
     },
   })
