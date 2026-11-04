@@ -487,6 +487,94 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     },
   })
 
+  /**
+   * The profile page's data: one account's details, the bot's own by default.
+   *
+   * `user_id` picks the account; without it the bot's own profile is built from
+   * `get_login_info` plus `get_stranger_info` on that id, which is the only way
+   * to read fields like level, signature and VIP that `get_login_info` omits.
+   *
+   * Every field is optional. `get_stranger_info` is a Go-CQHTTP-era action that
+   * some gateways answer with fewer fields, so a missing value stays empty
+   * rather than failing the whole page.
+   */
+  const disposeProfile = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/profile',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      const url = new URL(String(req.url ?? '/'), 'http://localhost')
+      const requested = String(url.searchParams.get('user_id') ?? '').trim()
+      const connection = getConnection()
+      if (connection === undefined || connection.state !== 'online') {
+        sendJson(res, 200, { available: false, error: 'not connected', state: 'offline', userId: requested })
+        return
+      }
+
+      const optional = async (action, params) => {
+        try {
+          return await connection.call(action, params)
+        } catch {
+          return undefined
+        }
+      }
+
+      const botId = String(connection.selfId ?? '')
+      const userId = requested !== '' ? requested : botId
+      if (userId === '') {
+        sendJson(res, 200, { available: false, error: 'the bot account is not known yet', state: connection.state, userId: '' })
+        return
+      }
+
+      // Only read the login info when this is the bot itself, or when the bot
+      // id is still unknown: it is a cheap way to fill the nickname.
+      const needLogin = requested === '' || botId === ''
+      const [login, stranger, userStatus, like] = await Promise.all([
+        needLogin ? optional('get_login_info', {}) : Promise.resolve(undefined),
+        optional('get_stranger_info', { user_id: Number(userId), no_cache: true }),
+        optional('nc_get_user_status', { user_id: String(userId) }),
+        optional('get_profile_like', { user_id: String(userId), start: 0, count: 10 }),
+      ])
+
+      const statusCode = userStatus === undefined ? undefined : Number(userStatus?.status ?? NaN)
+      const isSelf = userId === botId
+      sendJson(res, 200, {
+        available: stranger !== undefined || login !== undefined,
+        error: '',
+        state: connection.state,
+        selfId: botId,
+        isSelf,
+        userId,
+        nickname: String(stranger?.nickname ?? login?.nickname ?? '').trim(),
+        uid: String(stranger?.uid ?? ''),
+        qid: String(stranger?.qid ?? '').trim(),
+        remark: String(stranger?.remark ?? '').trim(),
+        signature: String(stranger?.long_nick ?? '').trim(),
+        sex: String(stranger?.sex ?? '').trim(),
+        age: Number(stranger?.age ?? 0) || 0,
+        level: Number(stranger?.qqLevel ?? stranger?.level ?? 0) || 0,
+        loginDays: Number(stranger?.login_days ?? 0) || 0,
+        regTime: Number(stranger?.reg_time ?? 0) || 0,
+        vip: stranger?.is_vip === true,
+        yearsVip: stranger?.is_years_vip === true,
+        vipLevel: Number(stranger?.vip_level ?? 0) || 0,
+        online: Number.isFinite(statusCode) ? statusCode === 10 : undefined,
+        // A like summary is a nicety, not the point of the page, so a gateway
+        // that lacks it just leaves the count at zero.
+        likeCount: Number(like?.total_count ?? like?.like_count ?? 0) || 0,
+      })
+    },
+  })
+
   const disposeClear = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/logs/clear',
@@ -513,6 +601,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     disposeMembers()
     disposeFriend()
     disposeQzone()
+    disposeProfile()
     disposeClear()
   }
 }

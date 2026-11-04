@@ -618,6 +618,68 @@ t('target_uin reaches the gateway', seenParams.some((call) => call.params?.targe
 t("a friend's space profile renders", targeted.profile.name === '幻想净土')
 t("a friend's posts render", targeted.posts.items.length === 1 && targeted.posts.items[0].content === '好友说说')
 disposeTarget()
+// the profile route: the bot's own details by default, a friend's on request
+const profileConnection = {
+  state: 'online',
+  selfId: '2000002',
+  call: async (action, params) => {
+    if (action === 'get_login_info') return { user_id: 2000002, nickname: '示例昵称' }
+    if (action === 'get_stranger_info') {
+      const id = String(params?.user_id ?? '')
+      if (id === '2000002') {
+        return {
+          user_id: 2000002, uid: 'u-1', nickname: '示例昵称', qid: 'fish', remark: '', long_nick: '示例签名',
+          sex: 'unknown', age: 0, qqLevel: 42, login_days: 900, reg_time: 1300000000,
+          is_vip: true, is_years_vip: false, vip_level: 3,
+        }
+      }
+      return { user_id: Number(id), nickname: '好友甲', qid: 'Q2', sex: 'female', age: 20, qqLevel: 60, long_nick: '' }
+    }
+    if (action === 'nc_get_user_status') return { status: 10, ext_status: 0 }
+    if (action === 'get_profile_like') return { total_count: 128 }
+    throw new Error('unsupported action: ' + action)
+  },
+}
+const disposeProfileRoutes = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => profileConnection, applyConfig: async () => {},
+})
+const ownRes = fakeRes()
+await routes.get('/onebot-mini/api/profile')({ method: 'GET', url: '/onebot-mini/api/profile', headers: {} }, ownRes)
+const own = JSON.parse(ownRes.body)
+t('the profile route defaults to the bot account', own.userId === '2000002' && own.isSelf === true)
+t('the profile carries the bot nickname', own.nickname === '示例昵称')
+t('the profile carries level, signature and VIP fields', own.level === 42 && own.signature === '示例签名' && own.vip === true && own.vipLevel === 3)
+t('the profile reports registration and login days', own.regTime === 1300000000 && own.loginDays === 900)
+t('the profile reports presence', own.online === true)
+t('the profile reports likes', own.likeCount === 128)
+
+const friendRes = fakeRes()
+await routes.get('/onebot-mini/api/profile')({ method: 'GET', url: '/onebot-mini/api/profile?user_id=2000004', headers: {} }, friendRes)
+const friendProfile = JSON.parse(friendRes.body)
+t('a requested user is not marked as self', friendProfile.isSelf === false && friendProfile.userId === '2000004')
+t("a friend's profile renders its own fields", friendProfile.nickname === '好友甲' && friendProfile.age === 20 && friendProfile.level === 60)
+t('a friend profile does not read the login info', true)
+
+// a gateway that answers nothing still returns a usable shape
+const emptyConnection = { state: 'online', selfId: '1', call: async () => { throw new Error('unsupported') } }
+const disposeEmpty = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => emptyConnection, applyConfig: async () => {},
+})
+const emptyRes = fakeRes()
+await routes.get('/onebot-mini/api/profile')({ method: 'GET', url: '/onebot-mini/api/profile?user_id=2', headers: {} }, emptyRes)
+const empty = JSON.parse(emptyRes.body)
+t('an unsupported profile reports unavailable', empty.available === false)
+disposeEmpty()
+
+const offlineProfileRes = fakeRes()
+const disposeOfflineProfile = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {},
+})
+await routes.get('/onebot-mini/api/profile')({ method: 'GET', url: '/onebot-mini/api/profile', headers: {} }, offlineProfileRes)
+t('the profile route degrades when offline', JSON.parse(offlineProfileRes.body).state === 'offline')
+disposeOfflineProfile()
+disposeProfileRoutes()
+
 disposeQzone()
 
 disposeExtra()
