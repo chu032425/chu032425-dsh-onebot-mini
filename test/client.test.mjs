@@ -159,6 +159,9 @@ for (const key of ['cacheTitle', 'cacheTotal', 'cacheConfig', 'cacheLogs', 'cach
 }
 t('qzone settings group label present', zh.groupQzone === '空间' && en.groupQzone === 'Qzone')
 t('media group label present', zh.groupMedia === '媒体' && en.groupMedia === 'Media')
+for (const key of ['hintSenderPrefixLocked', 'hintSenderPrefixFree']) {
+  t('prefix lock copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
 t('delete-source setting labelled', typeof zh.fieldDeleteSentMedia === 'string' && zh.fieldDeleteSentMedia !== '' && typeof en.fieldDeleteSentMedia === 'string')
 for (const key of ['profileTitle', 'profileChoose', 'profileSelf', 'profileNickname', 'profileSignature',
   'profileLevel', 'profileVip', 'profileOnline', 'profileOnlineUnknown', 'profileUnavailable', 'profileEmpty']) {

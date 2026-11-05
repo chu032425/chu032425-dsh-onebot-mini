@@ -233,6 +233,13 @@ export function normalizeConfig(raw) {
   // flattened to the same safe alphabet the chat body already uses. A value that
   // flattens to nothing usable (CJK only, punctuation only) falls back to the
   // default instead of producing a dangling '-' prefix, and says so.
+  // Steering a running answer inside a group needs the speaker prefix: without it
+  // several people's messages arrive indistinguishable, so the prefix is forced
+  // on while autoInterject is enabled. Turning autoInterject off releases it.
+  if (value.autoInterject !== false) {
+    value.senderPrefix = true
+  }
+
   // An emptied prompt would leave the model with no guidance, so a blank value
   // silently returns to the shipped default. Driven by the same registry the
   // Prompt page renders, so a newly registered prompt gets the same treatment.

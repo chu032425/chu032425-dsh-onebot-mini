@@ -52,6 +52,14 @@ t('string list is trimmed', JSON.stringify(good.value.allowFrom) === '["1","2"]'
 t('unknown enum falls back', normalizeConfig({ mode: 'weird' }).value.mode === 'reverse')
 t('non-boolean boolean falls back', normalizeConfig({ senderPrefix: 'yes' }).value.senderPrefix === true)
 
+// steering requires the speaker prefix, so the prefix is forced on while it is
+// enabled and released when it is turned off
+const prefixLocked = normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', autoInterject: true, senderPrefix: false })
+t('the speaker prefix is forced on while steering is enabled', prefixLocked.value.senderPrefix === true)
+const prefixFree = normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', autoInterject: false, senderPrefix: false })
+t('the speaker prefix is free again when steering is off', prefixFree.value.senderPrefix === false)
+t('the default keeps both on', DEFAULTS.autoInterject === true && DEFAULTS.senderPrefix === true)
+
 // session prefix: lowercase-letter start, safe alphabet, default on rejection
 t('session prefix default', DEFAULTS.sessionPrefix === 'onebot')
 t('session prefix accepts lowercase', normalizeConfig({ sessionPrefix: 'qq-bot' }).value.sessionPrefix === 'qq-bot')
