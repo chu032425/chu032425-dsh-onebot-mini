@@ -66,6 +66,21 @@ async function readJsonBody(req) {
  * @returns the disposer.
  */
 export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels, getSessionIdForChat, forgetChat, reattachWorkspace }) {
+  // Read the effective config from whichever store shape the caller passed:
+  // a real ConfigStore has `read()`, while a lightweight test/route stub may only
+  // expose `snapshot()`.
+  const readConfig = () => {
+    try {
+      if (typeof store?.read === 'function') return store.read()
+    } catch {
+      // fall through to snapshot
+    }
+    try {
+      return store?.snapshot?.()?.config ?? {}
+    } catch {
+      return {}
+    }
+  }
   const disposeState = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/state',
@@ -652,8 +667,9 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         sendJson(res, 400, { error: 'url is missing or not an allowed image host' })
         return
       }
-      const config = store.read()
+      const config = readConfig()
       const cached = await fetchIntoCache(qq, source, {
+        config,
         maxKb: config.imageCacheMaxKb,
         totalMb: config.imageCacheTotalMb,
         maxStreamMb: config.imageShowMaxMb,
@@ -724,7 +740,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         sendJson(res, 200, { ok: false, error: 'not connected' })
         return
       }
-      const config = store.read()
+      const config = readConfig()
       const result = await sendMedia(connection, {
         chatType: body?.chatType,
         chatId: body?.chatId,
@@ -775,7 +791,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         return
       }
       try {
-        sendJson(res, 200, await inventory())
+        sendJson(res, 200, await inventory(readConfig()))
       } catch (error) {
         sendJson(res, 500, { error: String(error?.message ?? error) })
       }
@@ -809,7 +825,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         sendJson(res, 400, { error: String(error?.message ?? error) })
         return
       }
-      const result = await clearCache(body?.target)
+      const result = await clearCache(body?.target, readConfig())
       if (result.ok === true) {
         log.record('bridge', { note: 'cache cleared', target: String(body?.target ?? ''), freed: result.freed })
       }

@@ -8,8 +8,8 @@
 - 模型回复 → 通过 OneBot 接口发回原聊天；
 - `onebot_call` 工具：模型可直接调 OneBot 动作（发图、发文件、群管理、戳一戳、撤回、QQ 空间…），
   按 [NapCat 接口文档](https://napcat.apifox.cn/) 收录 **118 个动作 / 9 个分组**，可在左侧「工具」菜单按分组/动作开关；
-- **收到的媒体可读取**：用户发来的图片/语音/视频/文件自动下载到插件缓存目录 `onebot-mini-cache/inbound/`
-  （与 QQ 空间图片缓存同一个根目录，统一在「缓存」页可查、可清理），消息里给出本机路径（图片用 `read_image` 看，文件用 `read`/`bash` 读，语音在识别器就绪时自动转写）；
+- **收到的媒体可读取**：用户发来的图片/语音/视频/文件自动下载到工作区下的 `onebot-mini-cache/QQ/<QQ号或群号>/`
+  （与 QQ 空间图片缓存同一处，统一在「缓存」页可查、可清理），消息里给出本机路径（图片用 `read_image` 看，文件用 `read`/`bash` 读，语音在识别器就绪时自动转写）；
 - **配置页**：改连接参数并立即重连；
 - **好友与群组页**：好友可展开看在线状态，群可展开看成员列表；
 - **访问控制页**：私聊/群聊的白名单与黑名单，用下拉菜单挑选；
@@ -107,9 +107,9 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 用户发来的图片、语音、视频、文件不再只是 `[图片]` 这样的占位符：
 
 - 图片、语音、视频会从网关给的 URL（或经 `get_file` 拿到的下载地址）下载到
-  `<profile>/onebot-mini-cache/inbound/<chat>/`（与 QQ 空间图片缓存同一个根目录，
+  会话工作区下的 `onebot-mini-cache/QQ/<QQ号或群号>/`（与 QQ 空间图片缓存同一处，
   统一在「缓存」页展示与清理），消息文本里给出本机绝对路径：
-  `[图片: /home/node/.dsh/profiles/web/onebot-mini-cache/inbound/private-2000001/…-image.png]`；
+  `[图片: /workspace/QQ/onebot-mini-cache/QQ/2000001/…-image.png]`；
 - 模型据此用自带工具读取：图片走 `read_image`，文本/表格/压缩包走 `read` 或 `bash`；
 - 语音在宿主 `speechToText` 服务已有**就绪**识别器时自动转写，附在
   `[语音: …]（转写：…）` 后面；没有就绪识别器则只给路径，不强行下载模型；
@@ -117,7 +117,7 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 - 下载失败、超过 `inboundMediaMaxMb`、或关闭了 `inboundMedia` 时，退回不带路径的占位符，
   模型会如实说明没收到，而不是编造内容；
 - 图片扩展名按**魔数**判定（PNG/JPEG/GIF/WebP），避免「PNG 存成 .jpg 导致 read_image 类型不符」；
-- 这些文件不会被自动清理（与「缓存页」一致：手动清理，无定时任务；在「缓存」页按 `inbound` 这一项清空即可）。
+- 这些文件不会被自动清理（与「缓存页」一致：手动清理，无定时任务；在「缓存」页按对应 `QQ/<号>` 项清空即可）。
 
 ## 会话工作区
 
@@ -269,8 +269,8 @@ QQ 空间、群相册。
 
 说说里的图片会显示成缩略图，点开看原图。图片**下载一次就缓存在本地**，之后不再重复请求。
 
-- 缓存位置：`<DSH_HOME>/profiles/<profile>/onebot-mini-cache/<QQ号>/<hash>.<ext>`
-  —— 用 QQ 号分文件夹，不同账号互不影响；
+- 缓存位置：`<workspacePath>/onebot-mini-cache/QQ/<QQ号>/<hash>.<ext>`
+  —— 用 QQ 号分文件夹，不同账号互不影响；与收到的媒体缓存在同一棵树下（见「缓存目录约定」）；
 - **下载前先判大小**：先发 `HEAD` 看 `Content-Length`，超过 `imageCacheMaxKb`（默认 1024 KB）
   就直接放弃，不读正文；没有 `Content-Length` 时边读边计数，超了立即中断；
 - **总量有上限**：`imageCacheTotalMb`（默认 100 MB），每次写入后按最旧优先清理，直到不超预算；
@@ -347,6 +347,31 @@ QQ 空间、群相册。
 - 占位符会按当前配置**实时展开**，所以改了动作开关不用再改提示词；
 - `onebot_call` 描述里的 `{enabledNote}` 会在工具启用时展开成「只接受已启用动作」那句，关闭时为空；
 - 每一项都有自己的「恢复默认」，保存时只提交改动过的项。
+
+## 缓存目录约定（新增缓存必须遵守）
+
+**所有会话缓存都放在配置的会话工作区下，按下面的路径写，不要再另选位置：**
+
+```
+{workspacePath}/onebot-mini-cache/QQ/{QQ号或群号}/<缓存文件>
+```
+
+- `QQ空间图片`：`{workspacePath}/onebot-mini-cache/QQ/<QQ号>/<hash>.<ext>`
+- `收到的媒体`（图片/语音/视频/文件）：`{workspacePath}/onebot-mini-cache/QQ/<QQ号或群号>/…`
+- 没有对应 QQ 号/群号的缓存：`{workspacePath}/onebot-mini-cache/<自定义名称>/`
+- 例（工作区 `/workspace/QQ`）：
+  `/workspace/QQ/onebot-mini-cache/QQ/2000001/`、`/workspace/QQ/onebot-mini-cache/QQ/2000003/`
+
+理由：QQ 空间按账号抓取、收发消息都带 QQ 号/群号，用 `QQ/{号}` 二级目录即可同时覆盖空间与聊天媒体；
+统一到 `onebot-mini-cache/` 一棵树下，「缓存」页一处可视、一处清理；放在工作区内，模型用
+`read_image`/`read` 也能直接读。
+
+- 设置文件 `onebot-mini.json` 与日志 `onebot-mini.log.jsonl` 仍在 profile 目录（`~/.dsh/profiles/<profile>/`），
+  它们不是缓存，不适用上面的约定；
+- 若配置里没有 `workspacePath`（正常不会），缓存退回 `~/.dsh/profiles/<profile>/onebot-mini-cache/` 以保可用。
+
+> 代码里这条约定集中实现在 `cachepaths.js`（`cacheBase` / `accountDir`），**新增任何写缓存的代码都请复用它**，
+> 不要自己拼路径，避免以后又散落各处。
 
 ## 缓存页
 

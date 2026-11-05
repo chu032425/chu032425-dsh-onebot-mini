@@ -27,8 +27,8 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { configPath } from './config.js'
+import { join } from 'node:path'
+import { accountDir as accountCacheDir, cacheBase, profileCacheRoot } from './cachepaths.js'
 
 /** Hosts a Qzone image URL is allowed to point at. Suffix match, dot-anchored. */
 const ALLOWED_HOST_SUFFIXES = Object.freeze([
@@ -79,18 +79,22 @@ export function isAllowedImageUrl(raw) {
   return ALLOWED_HOST_SUFFIXES.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix))
 }
 
-/** The cache root, beside the config file. */
+/**
+ * The profile-local cache root (fallback when no workspace is configured), kept
+ * beside the config file. Prefer `cacheBase(config)` — see cachepaths.js for the
+ * full directory convention.
+ */
 export function cacheRoot() {
-  return join(dirname(configPath()), 'onebot-mini-cache')
+  return profileCacheRoot()
 }
 
 /**
  * The directory for one account's cached images.
+ * @param config - the effective plugin config (decides the workspace base).
  * @param qq - the account id; only digits are kept so a path cannot escape.
  */
-export function accountDir(qq) {
-  const safe = String(qq ?? '').replace(/[^0-9]/g, '')
-  return join(cacheRoot(), safe === '' ? 'unknown' : safe)
+export function accountDir(config, qq) {
+  return accountCacheDir(config, qq)
 }
 
 /** The file name for one URL, stable across runs. */
@@ -132,21 +136,39 @@ async function inventory(dir) {
  *
  * Runs after a write, not before, so a page load never spends time on a full
  * directory scan when nothing changed.
+ * @param config - the effective plugin config (decides the cache base).
  * @param totalMb - the total cap in megabytes.
  * @param keep - a file to never evict (the one just written).
  */
-export async function prune(totalMb, keep) {
+export async function prune(config, totalMb, keep) {
   const budget = Math.max(1, Number(totalMb) || 100) * 1024 * 1024
-  const root = cacheRoot()
-  let accounts
+  const base = cacheBase(config)
+  let top
   try {
-    accounts = await readdir(root)
+    top = await readdir(base)
   } catch {
     return
   }
+  // Accounts live under `<base>/QQ/<id>/`; extra cache buckets sit directly
+  // under `<base>/<name>/`. Walk both.
+  const dirs = []
+  for (const name of top) {
+    const dir = join(base, name)
+    if (name === 'QQ') {
+      let accounts = []
+      try {
+        accounts = await readdir(dir)
+      } catch {
+        accounts = []
+      }
+      for (const account of accounts) dirs.push(join(dir, account))
+    } else {
+      dirs.push(dir)
+    }
+  }
   const all = []
-  for (const account of accounts) {
-    all.push(...await inventory(join(root, account)))
+  for (const dir of dirs) {
+    all.push(...await inventory(dir))
   }
   let total = all.reduce((sum, file) => sum + file.size, 0)
   if (total <= budget) return
@@ -228,16 +250,17 @@ async function download(url, maxBytes, streamMaxBytes) {
  * for the same key await the same promise instead of downloading twice.
  * @param qq - the account (the cache folder).
  * @param url - the image URL.
- * @param options - `maxKb` per-file cap, `totalMb` total cap.
+ * @param options - `config` (decides the workspace cache base), `maxKb` per-file cap, `totalMb` total cap.
  * @returns `{ ok: true, path, contentType, cached }` or `{ ok: false, reason }`.
  */
 export async function fetchIntoCache(qq, url, options = {}) {
   if (!isAllowedImageUrl(url)) return { ok: false, reason: 'the image host is not allowed' }
+  const config = options.config
   const maxBytes = Math.max(1, Number(options.maxKb ?? 1024)) * 1024
   const streamMaxBytes = Math.max(1, Number(options.maxStreamMb ?? 32)) * 1024 * 1024
   const totalMb = Number(options.totalMb ?? 100)
-  const dir = accountDir(qq)
-  const key = String(qq) + '|' + String(url)
+  const dir = accountDir(config, qq)
+  const key = cacheBase(config) + '|' + String(qq) + '|' + String(url)
   if (inflight.has(key)) return inflight.get(key)
 
   const task = (async () => {
@@ -268,7 +291,7 @@ export async function fetchIntoCache(qq, url, options = {}) {
     const path = join(dir, fileNameFor(url, downloaded.contentType))
     await writeFile(path, downloaded.buffer)
     // Prune lazily: the write is what can push the cache over budget.
-    void prune(totalMb, path).catch(() => undefined)
+    void prune(config, totalMb, path).catch(() => undefined)
     return { ok: true, path, contentType: downloaded.contentType, cached: false }
   })()
 

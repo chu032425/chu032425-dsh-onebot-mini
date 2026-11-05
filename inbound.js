@@ -25,7 +25,7 @@
 
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { cacheRoot } from './imagecache.js'
+import { accountDir } from './cachepaths.js'
 
 /** Segment kinds handled here. */
 export const INBOUND_KINDS = Object.freeze(['image', 'record', 'video', 'file'])
@@ -40,22 +40,24 @@ const TRANSCRIBE_TIMEOUT_MS = 30000
 let sequence = 0
 
 /**
- * The inbox root for a chat.
+ * The cache directory for one chat's incoming media.
  *
- * Kept beside the Qzone image cache, under the plugin's `onebot-mini-cache/`
- * directory, so all plugin-produced files live in one place and show up on the
- * 「缓存」page. Files are read-only to the agent (the session sandbox allows
- * reads anywhere), so storing them outside the workspace is fine.
+ * Follows the plugin-wide cache convention (see cachepaths.js):
+ * `{workspacePath}/onebot-mini-cache/QQ/{qq号或群号}/`. Because it lives inside
+ * the session workspace, the agent can `read_image`/`read` these files directly.
  *
- * `config.inboundDir` is an internal override (tests / advanced setups); it is
+ * `config.inboundDir` is an internal override (tests / advanced setups) and is
  * not a documented setting, so a normal config object has no such key.
  * @param config - the effective config.
- * @returns the absolute inbox root.
+ * @param chat - `{ kind, id }` for the chat, whose id is the QQ号 or 群号.
+ * @param chatId - canonical chat id, used by the override path only.
+ * @returns the absolute cache directory for this chat's media.
  */
-export function inboxRoot(config) {
+export function inboxRoot(config, chat, chatId) {
   const override = String(config?.inboundDir ?? '').trim()
-  if (override !== '') return override
-  return join(cacheRoot(), 'inbound')
+  if (override !== '') return join(override, chatFolder(chatId))
+  const key = chat !== null && typeof chat === 'object' && chat.id !== undefined ? String(chat.id) : String(chatId ?? '')
+  return accountDir(config, key)
 }
 
 /**
@@ -366,7 +368,7 @@ async function ingestSegment({ segment, chatId, chat, connection, config, getSpe
   const data = segment?.data !== null && typeof segment?.data === 'object' ? segment.data : {}
   const suggested = safeFileName(data.name ?? (typeof data.file === 'string' && !/^(https?|base64|file):/i.test(data.file) ? data.file : ''))
   const extension = (kind === 'image' ? sniffImageExtension(read.bytes) : '') || extensionFor(kind, read.contentType, suggested)
-  const folder = join(inboxRoot(config), chatFolder(chatId))
+  const folder = inboxRoot(config, chat, chatId)
   sequence += 1
   const stem = Date.now() + '-' + sequence + '-' + kind
   const fileName = suggested !== '' ? stem + '-' + suggested : stem + '.' + extension

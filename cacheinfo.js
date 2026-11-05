@@ -4,8 +4,8 @@
  * The plugin owns three kinds of storage:
  *  - its settings file, which must never be removed through this page;
  *  - the JSONL log, which the operator may clear;
- *  - the Qzone image cache, grouped one folder per account, which the operator
- *    may clear as a whole or per account.
+ *  - the session cache (Qzone images + incoming media), which lives under the
+ *    configured workspace per cachepaths.js: `{workspacePath}/onebot-mini-cache/QQ/{qq}/`.
  *
  * The point is visibility: the operator can see what has accumulated and how
  * much room it takes, and clear it deliberately. Nothing here runs on a timer;
@@ -16,7 +16,7 @@ import { existsSync } from 'node:fs'
 import { readdir, rm, stat, truncate } from 'node:fs/promises'
 import { join } from 'node:path'
 import { configPath, logPath } from './config.js'
-import { cacheRoot } from './imagecache.js'
+import { accountDir, cacheBase } from './cachepaths.js'
 
 /** The most individual cache files listed at once; the rest are summarized. */
 const MAX_LISTED_FILES = 200
@@ -69,16 +69,61 @@ async function countLines(path) {
 }
 
 /**
+ * List the account cache directories under one cache base.
+ *
+ * Accounts live under `<base>/QQ/<id>/`; extra named buckets sit directly under
+ * `<base>/<name>/` (see cachepaths.js).
+ * @param base - the cache base directory.
+ * @returns an array of `{ account, path }`.
+ */
+async function listAccountDirs(base) {
+  const out = []
+  let top = []
+  try {
+    top = await readdir(base)
+  } catch {
+    return out
+  }
+  for (const name of top.sort()) {
+    const dir = join(base, name)
+    if (name === 'QQ') {
+      let accounts = []
+      try {
+        accounts = await readdir(dir)
+      } catch {
+        accounts = []
+      }
+      for (const account of accounts.sort()) {
+        const accountPath = join(dir, account)
+        try {
+          if ((await stat(accountPath)).isDirectory()) out.push({ account, path: accountPath })
+        } catch {
+          // vanished between readdir and stat
+        }
+      }
+    } else {
+      try {
+        if ((await stat(dir)).isDirectory()) out.push({ account: name, path: dir })
+      } catch {
+        // vanished
+      }
+    }
+  }
+  return out
+}
+
+/**
  * Build the whole inventory.
+ * @param config - the effective plugin config (decides the workspace cache base).
  * @returns a JSON-serializable description of every plugin-owned file.
  */
-export async function inventory() {
-  const config = { path: configPath(), exists: false, size: 0, mtime: 0 }
-  const configInfo = await fileInfo(config.path)
+export async function inventory(config) {
+  const configFile = { path: configPath(), exists: false, size: 0, mtime: 0 }
+  const configInfo = await fileInfo(configFile.path)
   if (configInfo !== undefined) {
-    config.exists = true
-    config.size = configInfo.size
-    config.mtime = configInfo.mtime
+    configFile.exists = true
+    configFile.size = configInfo.size
+    configFile.mtime = configInfo.mtime
   }
 
   const logs = []
@@ -88,52 +133,43 @@ export async function inventory() {
     logs.push({ path: logFile, size: logInfo.size, mtime: logInfo.mtime, lines: await countLines(logFile) })
   }
 
-  const root = cacheRoot()
+  const root = cacheBase(config)
   const accounts = []
   const files = []
   let truncated = false
   let cacheTotal = 0
-  if (existsSync(root)) {
-    let names = []
+  for (const { account, path: dir } of await listAccountDirs(root)) {
+    let entries = []
     try {
-      names = await readdir(root)
+      entries = await readdir(dir)
     } catch {
-      names = []
+      continue
     }
-    for (const name of names.sort()) {
-      const dir = join(root, name)
-      let entries = []
-      try {
-        entries = await readdir(dir)
-      } catch {
-        continue
+    let accountSize = 0
+    let accountCount = 0
+    for (const entry of entries) {
+      const info = await fileInfo(join(dir, entry))
+      if (info === undefined) continue
+      accountSize += info.size
+      accountCount += 1
+      if (files.length < MAX_LISTED_FILES) {
+        files.push({ account, name: entry, size: info.size, mtime: info.mtime, kind: kindOf(entry) })
+      } else {
+        truncated = true
       }
-      let accountSize = 0
-      let accountCount = 0
-      for (const entry of entries) {
-        const info = await fileInfo(join(dir, entry))
-        if (info === undefined) continue
-        accountSize += info.size
-        accountCount += 1
-        if (files.length < MAX_LISTED_FILES) {
-          files.push({ account: name, name: entry, size: info.size, mtime: info.mtime, kind: kindOf(entry) })
-        } else {
-          truncated = true
-        }
-      }
-      accounts.push({ account: name, path: dir, size: accountSize, count: accountCount })
-      cacheTotal += accountSize
     }
+    accounts.push({ account, path: dir, size: accountSize, count: accountCount })
+    cacheTotal += accountSize
   }
 
-  const totalBytes = config.size
+  const totalBytes = configFile.size
     + logs.reduce((sum, item) => sum + item.size, 0)
     + cacheTotal
 
   return {
     root,
     totalBytes,
-    config,
+    config: configFile,
     logs,
     cache: { totalBytes: cacheTotal, accounts, files, truncated },
   }
@@ -145,9 +181,10 @@ export async function inventory() {
  * `target` is one of: `logs`, `files`, `account:<qq>`, `all`. The settings file
  * is never a valid target — losing it would silently reset the whole channel.
  * @param target - what to clear.
+ * @param config - the effective plugin config (decides the workspace cache base).
  * @returns `{ ok, freed, error? }` with the number of bytes removed.
  */
-export async function clearCache(target) {
+export async function clearCache(target, config) {
   const what = String(target ?? '').trim()
   let freed = 0
 
@@ -160,15 +197,13 @@ export async function clearCache(target) {
   }
 
   const clearAllImages = async () => {
-    const before = await inventory()
-    await rm(cacheRoot(), { recursive: true, force: true })
+    const before = await inventory(config)
+    await rm(cacheBase(config), { recursive: true, force: true })
     freed += before.cache.totalBytes
   }
 
   const clearAccount = async (qq) => {
-    const safe = String(qq ?? '').replace(/[^0-9]/g, '')
-    if (safe === '') return
-    const dir = join(cacheRoot(), safe)
+    const dir = accountDir(config, qq)
     if (!existsSync(dir)) return
     let size = 0
     try {

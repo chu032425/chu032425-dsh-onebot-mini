@@ -28,6 +28,7 @@
     "tools.js",
     "toolcatalog.js",
     "imagecache.js",
+    "cachepaths.js",
     "media.js",
     "cacheinfo.js",
     "inbound.js",
