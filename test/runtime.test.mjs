@@ -257,6 +257,8 @@ t('unconfigured model falls back to the host default', bridge.modelOptions()?.pr
 t('new session applies the configured permission', calls.permissionSet.includes('workspace-write'))
 t('a missing workspace is created', workspaceCalls.created.includes('/workspace/QQ'))
 t('the session is attached to the workspace', workspaceCalls.attached.includes(chat.sessionId))
+const reattached = await bridge.reattachWorkspace('private:20002')
+t('reattach reports the session and a successful attach', reattached.ok === true && reattached.sessionId === 'onebot-private-20002')
 
 await bridge.handleInbound(inbound({ message_type: 'group', group_id: 888, message_id: 2 }))
 t('group message without a mention is ignored', bridge.chats.has('group:888') === false)

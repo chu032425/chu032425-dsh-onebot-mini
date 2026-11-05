@@ -65,7 +65,7 @@ async function readJsonBody(req) {
  *   providers for the pickers.
  * @returns the disposer.
  */
-export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels, getSessionIdForChat, forgetChat }) {
+export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels, getSessionIdForChat, forgetChat, reattachWorkspace }) {
   const disposeState = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/state',
@@ -928,6 +928,49 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     },
   })
 
+  // Re-attach a chat's session to its configured workspace. Idempotent; used to
+  // heal a session that landed under "Ungrouped" (e.g. after a restart).
+  const disposeAttach = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/attach',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (typeof reattachWorkspace !== 'function') {
+        sendJson(res, 200, { ok: false, error: 'not supported' })
+        return
+      }
+      let chatId = ''
+      if (req.method === 'POST') {
+        let body
+        try {
+          body = await readJsonBody(req)
+        } catch (error) {
+          sendJson(res, 400, { error: String(error?.message ?? error) })
+          return
+        }
+        chatId = String(body?.chatId ?? '').trim()
+      } else {
+        const url = new URL(String(req.url ?? '/'), 'http://localhost')
+        chatId = String(url.searchParams.get('chatId') ?? '').trim()
+      }
+      if (chatId === '') {
+        sendJson(res, 400, { error: 'chatId is required' })
+        return
+      }
+      try {
+        const result = await reattachWorkspace(chatId)
+        sendJson(res, 200, result)
+      } catch (error) {
+        sendJson(res, 500, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  })
+
   return () => {
     disposeState()
     disposeConfig()
@@ -939,6 +982,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     disposeImage()
     disposeForget()
     disposeToolProbe()
+    disposeAttach()
     disposeSendMedia()
     disposeMediaKinds()
     disposeCache()

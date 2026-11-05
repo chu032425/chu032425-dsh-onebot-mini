@@ -267,6 +267,7 @@ export function apply(ctx) {
       listModels,
       getSessionIdForChat: (chatId) => bridge.sessionOf(chatId),
       forgetChat: (chatId) => bridge.forgetChat(chatId),
+      reattachWorkspace: (chatId) => bridge.reattachWorkspace(chatId),
     })
 
     try {

@@ -397,6 +397,10 @@ export class ChatBridge {
       length: text.length,
       messageId: String(frame.message_id ?? ''),
     })
+    // Idempotent: re-attach on every message so a session that landed ungrouped
+    // (e.g. a resume that created a fresh id, or an attach that ran before the
+    // workspace registry was ready) heals itself on the next message.
+    await this.attachWorkspace(record.sessionId)
     // A private chat steers straight into a running answer: the same person is
     // correcting or adding to what is still being written, so waiting for a
     // separate turn would answer twice. No model judgement is involved.
@@ -742,14 +746,46 @@ export class ChatBridge {
   async attachWorkspace(sessionId) {
     const registry = typeof this.getWorkspaceRegistry === 'function' ? this.getWorkspaceRegistry() : undefined
     const path = String(this.config.workspacePath ?? '').trim()
-    if (registry === undefined || path === '') return
-    try {
-      const workspace = await registry.resolveByPath(path)
-      if (workspace === undefined) return
-      await workspace.attachSession(sessionId)
-    } catch (error) {
-      this.log.record('bridge', { note: 'workspace attach skipped', sessionId, error: this.describeError(error) })
+    if (registry === undefined || path === '') {
+      return { ok: false, reason: registry === undefined ? 'the workspace registry is not available yet' : 'no workspacePath configured' }
     }
+    try {
+      let workspace = await registry.resolveByPath(path)
+      // A deleted registration must not leave the session ungrouped: recreate it
+      // and retry before giving up.
+      if (workspace === undefined) {
+        await this.ensureWorkspace(true)
+        workspace = await registry.resolveByPath(path)
+        if (workspace === undefined && typeof registry.create === 'function') workspace = await registry.create(path)
+      }
+      if (workspace === undefined) {
+        this.log.record('warn', { note: 'workspace attach skipped: cannot resolve the workspace', sessionId, path })
+        return { ok: false, reason: 'cannot resolve or create the workspace at ' + path }
+      }
+      const before = Array.isArray(workspace.sessionIds) && workspace.sessionIds.includes(sessionId)
+      await workspace.attachSession(sessionId)
+      const after = Array.isArray(workspace.sessionIds) ? workspace.sessionIds.includes(sessionId) : undefined
+      if (!before) this.log.record('bridge', { note: 'workspace attached', sessionId, path, verified: after })
+      return { ok: true, added: !before, verified: after }
+    } catch (error) {
+      this.log.record('warn', { note: 'workspace attach skipped', sessionId, path, error: this.describeError(error) })
+      return { ok: false, reason: this.describeError(error) }
+    }
+  }
+
+  /**
+   * Re-attach one chat's session to the configured workspace.
+   *
+   * The session id is derived from the chat id even when no live record exists
+   * (after a restart), so this can heal a session that landed ungrouped.
+   * @param chatId - canonical chat id.
+   * @returns the attach outcome.
+   */
+  async reattachWorkspace(chatId) {
+    const sessionId = this.sessionOf(chatId) ?? sessionIdOf(chatId, this.config.sessionPrefix)
+    const result = await this.attachWorkspace(sessionId)
+    this.log.record('bridge', { note: 'workspace reattach requested', chatId, sessionId, ok: result.ok, verified: result.verified, reason: result.reason })
+    return { chatId, sessionId, ...result }
   }
 
   /**
