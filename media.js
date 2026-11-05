@@ -204,8 +204,11 @@ export async function buildReplySegments(text, options = {}) {
     } else {
       const read = await readFileAsBase64(source)
       if (read.ok !== true) {
+        // The reason carries an absolute path and an errno string. That is
+        // useless (and leaky) in a chat, so the reader sees a short notice while
+        // the full reason goes to the log.
         warnings.push(kind + ': ' + read.reason)
-        pushText('[' + kind + ' failed: ' + read.reason + ']')
+        pushText(mediaFailureNotice(kind))
         continue
       }
       built = buildSegment(kind, { base64: read.base64 }, kind === 'file' ? basename(source) : undefined)
@@ -216,4 +219,18 @@ export async function buildReplySegments(text, options = {}) {
   pushText(input.slice(lastIndex))
 
   return { segments, warnings, sourcePaths }
+}
+
+
+/**
+ * The chat-facing notice for a media attachment that could not be sent.
+ *
+ * Kept short and free of paths or errno text: the chat should not learn the
+ * host's directory layout, and the operator has the log for the real reason.
+ * @param kind - image / record / video / file.
+ * @returns one short sentence.
+ */
+export function mediaFailureNotice(kind) {
+  const noun = kind === 'image' ? '图片' : (kind === 'record' ? '语音' : (kind === 'video' ? '视频' : '文件'))
+  return '（' + noun + '没发出去：文件不存在或无法读取）'
 }

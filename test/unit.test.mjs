@@ -179,7 +179,7 @@ t('an account folder keeps only digits', accountDir('2000002').endsWith('/200000
 t('a hostile account id cannot escape the cache root', !accountDir('../etc').includes('..'))
 
 // --- media segments
-import { buildSegment, MEDIA_KINDS, readFileAsBase64, MAX_MEDIA_BYTES, safeUnlink } from '../media.js'
+import { buildSegment, MEDIA_KINDS, readFileAsBase64, MAX_MEDIA_BYTES, safeUnlink, mediaFailureNotice } from '../media.js'
 t('an image segment uses base64 when given base64', JSON.stringify(buildSegment('image', { base64: 'AAA' })) === '{"type":"image","data":{"file":"base64://AAA"}}')
 t('a segment uses the url when given a url', JSON.stringify(buildSegment('image', { url: 'http://x/y.png' })) === '{"type":"image","data":{"file":"http://x/y.png"}}')
 t('a file segment carries its name', JSON.stringify(buildSegment('file', { url: 'http://x/y.zip' }, 'a.zip')) === '{"type":"file","data":{"file":"http://x/y.zip","name":"a.zip"}}')
@@ -189,6 +189,10 @@ const readBack = await readFileAsBase64('/tmp/onebot-mini-unit.json')
 t('a local file is read into base64', readBack.ok === true && typeof readBack.base64 === 'string' && readBack.base64.length > 0)
 const missingFile = await readFileAsBase64('/tmp/definitely-not-here-xyz')
 t('a missing file is reported', missingFile.ok === false && missingFile.reason !== '')
+
+// the chat-facing notice must be short and free of paths or errno text
+t('the media failure notice hides the path', !mediaFailureNotice('image').includes('/') && !mediaFailureNotice('image').includes('ENOENT'))
+t('the media failure notice names the kind', mediaFailureNotice('image').includes('图片') && mediaFailureNotice('file').includes('文件'))
 
 // safe deletion: only inside the allowed roots, never a directory, never a root
 const victim = '/tmp/onebot-unlink-' + process.pid + '.txt'

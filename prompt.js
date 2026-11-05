@@ -78,7 +78,9 @@ export function mediaParagraph() {
   return '- To send an image, voice clip, video or file as its own message, call the onebot_send_media tool. '
     + 'To attach media to a reply message (so text and attachment arrive together), write a marker in your reply: '
     + '[[image:/abs/path.png]], [[record:/abs/a.wav]], [[video:/abs/a.mp4]] or [[file:/abs/a.zip]] — the path may also be an http(s) URL. '
-    + 'The plugin replaces each marker with a real attachment. Only send media when the user asks for it.'
+    + 'The plugin replaces each marker with a real attachment. Only send media when the user asks for it.\n'
+    + '- You cannot see the disk. Before naming a local file, call onebot_list_files on its directory and use a name it returns. '
+    + 'Never guess a filename: a wrong path produces a failed attachment, and the user only sees a short notice.'
 }
 
 /** The speaker-prefix line. */

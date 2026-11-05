@@ -884,7 +884,8 @@ sessionEvent({ id: chatDegrade.sessionId }, { type: 'turn/end', data: { reason: 
 await wait(120)
 const degradeMsg = notes[notes.length - 1] ?? []
 t('a missing media file still sends the text', degradeMsg.length >= 1 && degradeMsg.every((seg) => seg.type === 'text'))
-t('the missing media is reported inline', degradeMsg.some((seg) => String(seg.data.text).includes('failed')))
+t('the missing media is reported inline without paths', degradeMsg.some((seg) => String(seg.data.text).includes('没发出去'))
+  && !degradeMsg.some((seg) => String(seg.data.text).includes('ENOENT')))
 await bridgeDegrade.stop()
 
 // the cache route returns an inventory (read-only; clears are covered by unit tests)

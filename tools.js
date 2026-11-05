@@ -88,6 +88,60 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
     },
   })
 
+  // A file-listing tool: the model has no way to see the disk, so without this it
+  // invents plausible filenames and the send fails. Listing is cheap and keeps
+  // guesses honest.
+  agentCtx.tools.register({
+    name: 'onebot_list_files',
+    description: 'List files in a directory on the DSH host, so you can pick a real file '
+      + 'before calling onebot_send_media. Returns names, sizes and whether each is a directory.',
+    parameters: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'Absolute directory path, e.g. /workspace/QQ.' },
+        filter: { type: 'string', description: 'Optional case-insensitive substring to match in file names.' },
+        limit: { type: 'number', description: 'Maximum entries to return (default 100).' },
+      },
+      required: ['dir'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: OUTPUT_SCHEMA,
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+    },
+    timeoutMs: 30000,
+    isConcurrencySafe: () => true,
+    async execute(args) {
+      const dir = String(args?.dir ?? '').trim()
+      if (dir === '') return { ok: false, error: 'dir must not be empty' }
+      const needle = String(args?.filter ?? '').trim().toLowerCase()
+      const limit = Math.max(1, Math.min(500, Math.trunc(Number(args?.limit ?? 100)) || 100))
+      try {
+        const { readdir, stat } = await import('node:fs/promises')
+        const { join } = await import('node:path')
+        const names = await readdir(dir)
+        const entries = []
+        for (const name of names.sort()) {
+          if (needle !== '' && !name.toLowerCase().includes(needle)) continue
+          if (entries.length >= limit) break
+          let isDirectory = false
+          let size = 0
+          try {
+            const info = await stat(join(dir, name))
+            isDirectory = info.isDirectory()
+            size = info.size
+          } catch {
+            continue
+          }
+          entries.push({ name, isDirectory, size })
+        }
+        return { ok: true, data: { dir, count: entries.length, entries } }
+      } catch (error) {
+        return { ok: false, error: String(error?.message ?? error) }
+      }
+    },
+  })
+
   // A dedicated media tool: `onebot_call` can send an image too, but only from a
   // URL the gateway can read. This one also accepts a path on this host and
   // inlines the bytes, which is what makes "reply with a local picture" work.
