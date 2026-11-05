@@ -145,7 +145,7 @@ t('the qzone picker offers a dropdown and a manual box', typeof zh.qzoneTargetPl
   && zh.qzoneTargetPlaceholder.includes('QQ') && typeof zh.qzoneTargetMine === 'string' && zh.qzoneTargetMine !== '')
 t('profile menu label present', zh.tabProfile === '个人资料' && en.tabProfile === 'Profile')
 t('cache menu label present', zh.tabCache === '缓存' && en.tabCache === 'Cache')
-for (const key of ['cacheTitle', 'cacheTotal', 'cacheConfig', 'cacheLogs', 'cacheImages', 'cacheClearLogs',
+for (const key of ['cacheTitle', 'cacheTotal', 'cacheConfig', 'cacheLogs', 'cacheFiles', 'cacheKindImage', 'cacheKindAudio', 'cacheKindVideo', 'cacheKindFile', 'cacheClearLogs',
   'cacheClearImages', 'cacheCleared', 'cacheConfirm', 'cacheConfirmYes', 'cacheConfirmNo', 'cacheNoFiles']) {
   t('cache copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }

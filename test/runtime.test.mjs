@@ -889,7 +889,7 @@ await routes.get('/onebot-mini/api/cache')({ method: 'GET', url: '/onebot-mini/a
 const cacheBody = JSON.parse(cacheRes.body)
 t('the cache route answers 200', cacheRes.statusCode === 200)
 t('the cache route reports a total', typeof cacheBody.totalBytes === 'number' && cacheBody.totalBytes >= 0)
-t('the cache route lists image accounts', Array.isArray(cacheBody.images?.accounts))
+t('the cache route lists cache accounts', Array.isArray(cacheBody.cache?.accounts))
 t('the cache route reports the log file', Array.isArray(cacheBody.logs))
 disposeCacheRoutes()
 

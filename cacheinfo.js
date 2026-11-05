@@ -22,6 +22,22 @@ import { cacheRoot } from './imagecache.js'
 const MAX_LISTED_FILES = 200
 
 /**
+ * Classify one cache file by extension.
+ *
+ * The cache is not only pictures: future features may cache media or other
+ * payloads, so every entry gets a coarse kind the page can show.
+ * @param name - the file name.
+ * @returns `image` | `audio` | `video` | `file`.
+ */
+function kindOf(name) {
+  const ext = String(name).toLowerCase().split('.').pop() ?? ''
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'avif'].includes(ext)) return 'image'
+  if (['wav', 'mp3', 'amr', 'silk', 'ogg', 'flac', 'm4a', 'aac'].includes(ext)) return 'audio'
+  if (['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext)) return 'video'
+  return 'file'
+}
+
+/**
  * Size and mtime of one file, or undefined when it is absent.
  * @param path - the file path.
  * @returns `{ size, mtime }` or undefined.
@@ -76,7 +92,7 @@ export async function inventory() {
   const accounts = []
   const files = []
   let truncated = false
-  let imageTotal = 0
+  let cacheTotal = 0
   if (existsSync(root)) {
     let names = []
     try {
@@ -100,33 +116,33 @@ export async function inventory() {
         accountSize += info.size
         accountCount += 1
         if (files.length < MAX_LISTED_FILES) {
-          files.push({ account: name, name: entry, size: info.size, mtime: info.mtime })
+          files.push({ account: name, name: entry, size: info.size, mtime: info.mtime, kind: kindOf(entry) })
         } else {
           truncated = true
         }
       }
       accounts.push({ account: name, path: dir, size: accountSize, count: accountCount })
-      imageTotal += accountSize
+      cacheTotal += accountSize
     }
   }
 
   const totalBytes = config.size
     + logs.reduce((sum, item) => sum + item.size, 0)
-    + imageTotal
+    + cacheTotal
 
   return {
     root,
     totalBytes,
     config,
     logs,
-    images: { totalBytes: imageTotal, accounts, files, truncated },
+    cache: { totalBytes: cacheTotal, accounts, files, truncated },
   }
 }
 
 /**
  * Remove a chosen slice of storage.
  *
- * `target` is one of: `logs`, `images`, `account:<qq>`, `all`. The settings file
+ * `target` is one of: `logs`, `files`, `account:<qq>`, `all`. The settings file
  * is never a valid target — losing it would silently reset the whole channel.
  * @param target - what to clear.
  * @returns `{ ok, freed, error? }` with the number of bytes removed.
@@ -146,7 +162,7 @@ export async function clearCache(target) {
   const clearAllImages = async () => {
     const before = await inventory()
     await rm(cacheRoot(), { recursive: true, force: true })
-    freed += before.images.totalBytes
+    freed += before.cache.totalBytes
   }
 
   const clearAccount = async (qq) => {
@@ -170,7 +186,7 @@ export async function clearCache(target) {
   try {
     if (what === 'logs') {
       await clearLogs()
-    } else if (what === 'images') {
+    } else if (what === 'files' || what === 'images') {
       await clearAllImages()
     } else if (what === 'all') {
       await clearLogs()

@@ -782,7 +782,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
   /**
    * Clear one slice of storage at the operator's request.
    *
-   * Body: `{ target: 'logs' | 'images' | 'account:<qq>' | 'all' }`. Nothing here
+   * Body: `{ target: 'logs' | 'files' | 'account:<qq>' | 'all' }`. Nothing here
    * runs on its own; this is the manual counterpart to the inventory.
    */
   const disposeCacheClear = ctx.webServer.register({
