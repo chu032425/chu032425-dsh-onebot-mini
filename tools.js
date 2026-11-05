@@ -56,11 +56,17 @@ const OUTPUT_SCHEMA = Object.freeze({
  *   of being relayed. The caller omits the tool entirely when nothing is allowed.
  */
 export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia, prompts, recordLog }) {
+  // Any context with a `tools` service works: an agent-scoped ctx registers for
+  // that agent only, the plugin's own ctx registers globally. The latter is the
+  // fallback for a reused live agent whose setup never ran.
+  const tools = agentCtx?.tools ?? agentCtx?.get?.('tools')
+  if (tools === undefined || typeof tools.register !== 'function') return []
+  const disposers = []
   const allowed = allow instanceof Set ? allow : undefined
   // The chat this agent serves, so a media send can default to it instead of
   // making the model repeat the target on every call.
   const [defaultType, defaultId] = String(chatId ?? '').split(':')
-  agentCtx.tools.register({
+  disposers.push(tools.register({
     name: 'onebot_call',
     // The description is a configurable prompt; the caller renders the dynamic
     // enabled-actions note into it. Fall back to the default when none is passed.
@@ -86,12 +92,12 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
         return { ok: false, error: String(error?.message ?? error) }
       }
     },
-  })
+  }))
 
   // A file-listing tool: the model has no way to see the disk, so without this it
   // invents plausible filenames and the send fails. Listing is cheap and keeps
   // guesses honest.
-  agentCtx.tools.register({
+  disposers.push(tools.register({
     name: 'onebot_list_files',
     description: 'List files in a directory on the DSH host, so you can pick a real file '
       + 'before calling onebot_send_media. Returns names, sizes and whether each is a directory.',
@@ -140,12 +146,12 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
         return { ok: false, error: String(error?.message ?? error) }
       }
     },
-  })
+  }))
 
   // A dedicated media tool: `onebot_call` can send an image too, but only from a
   // URL the gateway can read. This one also accepts a path on this host and
   // inlines the bytes, which is what makes "reply with a local picture" work.
-  agentCtx.tools.register({
+  disposers.push(tools.register({
     name: 'onebot_send_media',
     description: (typeof prompts?.media === 'string' && prompts.media !== '') ? prompts.media : DEFAULT_TOOL_MEDIA_PROMPT,
     parameters: {
@@ -188,5 +194,6 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
       })
       return result
     },
-  })
+  }))
+  return disposers
 }

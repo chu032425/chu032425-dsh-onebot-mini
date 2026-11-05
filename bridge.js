@@ -565,6 +565,14 @@ export class ChatBridge {
       this.chats.set(chatId, record)
       this.bySession.set(sessionId, chatId)
       this.log.record('bridge', { note: 'reusing a live agent for this chat', chatId, sessionId })
+      // A reused agent was probably created before any setup ran (an old version,
+      // or opened directly in the Web UI), so its tools were never registered.
+      // Register them at the plugin/global scope so every agent sees them. The
+      // disposers live as long as the plugin does, which is fine: registration is
+      // idempotent per name and the plugin does not unload per chat.
+      // Best-effort: a reused agent's tools must not block message delivery. If
+      // registration fails the message still goes out via followup.
+      try { await this.registerGlobalTools() } catch (e) { this.log.record('warn', { note: 'global tool registration failed', chatId, error: this.describeError(e) }) }
       if (this.config.titleEqualsId) this.pinTitle(live.session, sessionId)
       return record
     }
@@ -774,6 +782,30 @@ export class ChatBridge {
    * @returns the setup callback.
    */
   /**
+   * Register the plugin's tools at the global scope, for agents whose setup
+   * never ran (a reused live agent). Safe to call repeatedly: `register` returns
+   * a disposer and duplicate names within one layer are replaced.
+   */
+  async registerGlobalTools() {
+    const allow = computeAllowlist(this.config)
+    if (allow === null) return
+    const { registerTools } = await requireToolsOnce()
+    registerTools(this.ctx, {
+      connection: this.connection,
+      allow,
+      chatId: '',
+      deleteSentMedia: this.config.deleteSentMedia === true,
+      prompts: {
+        call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
+        media: String(this.config.toolMediaPrompt ?? '').trim() !== ''
+          ? String(this.config.toolMediaPrompt)
+          : DEFAULT_TOOL_MEDIA_PROMPT,
+      },
+      recordLog: (note) => this.log.record('bridge', { note }),
+    })
+  }
+
+  /**
    * Resolve the preset id to mount: the configured one when it still exists,
    * otherwise the deployment default. A deleted or broken preset must not leave
    * the agent without its composition.
@@ -809,7 +841,7 @@ export class ChatBridge {
       // at creation time: an existing chat keeps the tool set it was created with.
       const allow = computeAllowlist(this.config)
       if (allow !== null) {
-        const { registerTools } = await import('./tools.js')
+        const { registerTools } = await requireToolsOnce()
         registerTools(agentCtx, {
           connection: this.connection,
           allow,
@@ -972,6 +1004,13 @@ export function textOfMessage(message) {
  * @param config - the effective config.
  * @returns the section text.
  */
+/** Load the tools module once; subsequent calls reuse the cached ESM binding. */
+let toolsModule
+async function requireToolsOnce() {
+  toolsModule ??= await import('./tools.js')
+  return toolsModule
+}
+
 export function buildPlatformPrompt(config) {
   // The prose lives in the config now (editable from the Prompt page); the code
   // only fills the dynamic parts, so an operator can rewrite the wording without
