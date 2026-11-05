@@ -13,7 +13,6 @@ import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
   isAddressed, speakerPrefix, speakerKey, textOfMessage,
 } from '../bridge.js'
-import { transcribeViaGateway } from '../stt.js'
 import { tmpdir } from 'node:os'
 
 let pass = 0
@@ -62,46 +61,28 @@ t('the reply group holds only the interject switch', JSON.stringify(FIELD_GROUPS
 // delete-inbound-media mirrors delete-sent-media and defaults on
 t('the inbound-delete switch defaults on', DEFAULTS.deleteInboundMedia === true)
 t('the inbound-delete switch is a boolean field', FIELD_KINDS.deleteInboundMedia === 'boolean')
-t('the media group orders inbound delete before sent delete', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'media').fields) === '["inboundMedia","inboundMediaMaxMb","deleteInboundMedia","deleteSentMedia","sttEnabled"]')
+t('the media group orders inbound delete before sent delete', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'media').fields) === '["inboundMedia","inboundMediaMaxMb","deleteInboundMedia","deleteSentMedia"]')
 t('a non-boolean inbound-delete falls back to the default', normalizeConfig({ deleteInboundMedia: 'no' }).value.deleteInboundMedia === true)
 t('an explicit false inbound-delete is kept', normalizeConfig({ deleteInboundMedia: false }).value.deleteInboundMedia === false)
 
-// voice -> text: the gateway's own fetch_ptt_text action (no local model/ffmpeg)
-t('the voice-transcribe switch defaults on', DEFAULTS.sttEnabled === true)
-t('the voice-transcribe switch is a boolean field', FIELD_KINDS.sttEnabled === 'boolean')
-t('a non-boolean voice switch falls back to the default', normalizeConfig({ sttEnabled: 'no' }).value.sttEnabled === true)
+// voice: code only downloads and annotates the message id. It makes NO non-standard
+// call itself — the prompt guides the model to call onebot_call's fetch_ptt_text.
+t('sttEnabled is not a config field', DEFAULTS.sttEnabled === undefined && FIELD_KINDS.sttEnabled === undefined)
 t('ffmpegPath is not a config field', DEFAULTS.ffmpegPath === undefined && FIELD_KINDS.ffmpegPath === undefined)
 {
-  let captured
-  const conn = { call: async (action, params) => { captured = { action, params }; return { text: '  你好呀  ' } } }
-  const text = await transcribeViaGateway(conn, '12345')
-  t('gateway transcript is trimmed', text === '你好呀')
-  t('gateway action + numeric id', captured.action === 'fetch_ptt_text' && captured.params.message_id === 12345)
-}
-{
-  let captured
-  const conn = { call: async (action, params) => { captured = { action, params }; return { text: 'x' } } }
-  await transcribeViaGateway(conn, 'abc')
-  t('gateway keeps a non-numeric id as string', captured.params.message_id === 'abc')
-}
-t('gateway "" when messageId empty', (await transcribeViaGateway({ call: async () => ({ text: 'x' }) }, '')) === '')
-t('gateway "" when no connection', (await transcribeViaGateway(undefined, '1')) === '')
-t('gateway "" when call throws', (await transcribeViaGateway({ call: async () => { throw new Error('no such action') } }, '1')) === '')
-t('gateway "" when text missing', (await transcribeViaGateway({ call: async () => ({}) }, '1')) === '')
-{
-  // A record segment whose payload is inline base64, with the gateway returning a
-  // transcript: the placeholder must carry the （转写：…） tail.
-  const dir = pathJoin(tmpdir(), 'onebot-stt-test-' + Date.now())
+  const dir = pathJoin(tmpdir(), 'onebot-voice-test-' + Date.now())
   mkdirSync(dir, { recursive: true })
+  let called = false
   const outcome = await buildInboundText({
     segments: [{ type: 'record', data: { file: 'base64://' + Buffer.from([0xff, 0xf3, 0x00, 0x00]).toString('base64') } }],
     chatId: 'private:1',
     chat: { kind: 'private', id: '1' },
-    connection: { call: async () => ({ text: '你好' }) },
-    config: { inboundMedia: true, inboundMediaMaxMb: 20, sttEnabled: true, inboundDir: dir },
+    connection: { call: async () => { called = true; return { text: 'x' } } },
+    config: { inboundMedia: true, inboundMediaMaxMb: 20, inboundDir: dir },
     messageId: '999',
   })
-  t('record placeholder carries the gateway transcript', outcome.text.startsWith('[语音: ') && outcome.text.includes('（转写：你好）'), outcome.text)
+  t('record placeholder carries the message id', outcome.text.startsWith('[语音: ') && outcome.text.includes('（消息ID: 999）'), outcome.text)
+  t('code makes no extension call for a voice clip', called === false)
   rmSync(dir, { recursive: true, force: true })
 }
 

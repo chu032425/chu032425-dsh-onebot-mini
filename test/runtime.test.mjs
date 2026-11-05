@@ -227,10 +227,11 @@ t('message reaches the agent', chat.agent.followups.length === 1 && chat.agent.f
 t('the preset is actually mounted', calls.mounted.length > 0)
 t('onebot_call is registered by default', toolDefs.some((def) => def.name === 'onebot_call'))
 
-// A voice message: the bridge asks the gateway (NapCat fetch_ptt_text) for the
-// transcript and hands it to the agent as （转写：…）, without any local audio work.
+// A voice message: the bridge only downloads it and hands the agent the path plus
+// the gateway message id. The code itself never calls the fetch_ptt_text extension;
+// the prompt tells the model it may call it through onebot_call.
 {
-  const sttDir = mkdtempSync(pathJoin(tmpdir(), 'onebot-stt-rt-'))
+  const sttDir = mkdtempSync(pathJoin(tmpdir(), 'onebot-voice-rt-'))
   const prevCall = transport.call
   const voiceCalls = []
   transport.call = async (action, params) => {
@@ -245,8 +246,8 @@ t('onebot_call is registered by default', toolDefs.some((def) => def.name === 'o
   const chatV = bridge.chats.get('private:20002')
   const last = chatV.agent.followups[chatV.agent.followups.length - 1]
   const content = JSON.stringify(last.content)
-  t('a voice message asks the gateway for its text', voiceCalls.some((p) => String(p.message_id) === '4242'), JSON.stringify(voiceCalls))
-  t('the gateway transcript reaches the agent', content.includes('（转写：这是语音内容）'), content)
+  t('the voice message reaches the agent with its message id', content.includes('[语音: ') && content.includes('（消息ID: 4242）'), content)
+  t('the code does not itself call fetch_ptt_text', voiceCalls.length === 0, JSON.stringify(voiceCalls))
   transport.call = prevCall
   delete bridge.config.inboundDir
   rmSync(sttDir, { recursive: true, force: true })

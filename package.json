@@ -32,7 +32,6 @@
     "media.js",
     "cacheinfo.js",
     "inbound.js",
-    "stt.js",
     "prompt.js",
     "api.js",
     "lib/client.js",

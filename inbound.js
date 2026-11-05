@@ -14,9 +14,10 @@
  *   [文件: 报告.pdf, /workspace/QQ/qq-inbox/…/…-0-file.pdf]
  *
  * The agent then reaches the bytes with its normal tools — `read_image` for a
- * picture, `read`/`bash` for text and archives. A voice clip is additionally
- * transcribed by the gateway itself (`fetch_ptt_text`, QQ's own voice-to-text),
- * so a spoken message becomes readable text too — no local model, no ffmpeg.
+ * picture, `read`/`bash` for text and archives. A voice clip is only downloaded
+ * and annotated with its gateway message id; the prompt then guides the model to
+ * call `onebot_call`'s `fetch_ptt_text` itself if it wants QQ's transcript. This
+ * module issues no non-standard action on its own.
  *
  * Only http(s) URLs from the gateway frame are fetched. Nothing here trusts the
  * model, and a failed download degrades to the old placeholder instead of
@@ -26,7 +27,6 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { accountDir } from './cachepaths.js'
-import { transcribeViaGateway } from './stt.js'
 
 /** Segment kinds handled here. */
 export const INBOUND_KINDS = Object.freeze(['image', 'record', 'video', 'file'])
@@ -451,16 +451,18 @@ async function ingestSegment({ segment, chatId, chat, connection, config, messag
     return { placeholder: mediaPlaceholder(kind), warning: kind + ': ' + reason }
   }
 
-  let transcript = ''
-  if (kind === 'record' && config?.sttEnabled !== false && typeof messageId === 'string' && messageId !== '') {
-    // Ask the gateway (NapCat) for QQ's own voice-to-text result of this message.
-    // Clean and portable: it is an action on the gateway we already talk to — no
-    // extra plugin, npm package, local model, or system ffmpeg.
-    transcript = await transcribeViaGateway(connection, messageId, { log })
+  // Voice: the code stays on the standard protocol and only downloads the file.
+  // It never calls a non-standard action itself — instead it hands the model the
+  // local path plus the gateway message id, and the prompt tells the model it may
+  // call onebot_call's `fetch_ptt_text` (a gateway extension) to get QQ's own
+  // transcript. That keeps every hard-coded action in this plugin standard.
+  let placeholder = mediaPlaceholder(kind, path, suggested !== '' ? suggested : undefined)
+  if (kind === 'record' && typeof messageId === 'string' && messageId !== '') {
+    placeholder += '（消息ID: ' + messageId + '）'
   }
   return {
-    placeholder: mediaPlaceholder(kind, path, suggested !== '' ? suggested : undefined, transcript),
-    saved: { kind, path, bytes: read.bytes.length, transcript },
+    placeholder,
+    saved: { kind, path, bytes: read.bytes.length },
   }
 }
 
