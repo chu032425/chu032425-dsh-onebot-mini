@@ -222,10 +222,6 @@ export class ChatBridge {
     this.buffers = new Map()
     /** chatId → buffered inbound messages waiting out the debounce window. */
     this.inboundQueue = new Map()
-    /** chatId → messages accepted but not yet handed to a busy agent, in order. */
-    this.pendingDelivery = new Map()
-    /** chatId → true while a drain loop owns that chat's pending queue. */
-    this.draining = new Map()
     /** chatId → message ids already handled (reconnect replay guard). */
     this.seen = new Map()
     this.dedupWindowMs = 300000
@@ -266,7 +262,6 @@ export class ChatBridge {
       if (entry.timer !== undefined) clearTimeout(entry.timer)
     }
     this.inboundQueue.clear()
-    this.pendingDelivery.clear()
     const chats = [...this.chats.values()]
     this.chats.clear()
     this.bySession.clear()
@@ -344,9 +339,12 @@ export class ChatBridge {
    */
   async enqueue(chatId, chat, text, frame) {
     if (this.stopping) return
+    // Groups do not debounce at all: every message is delivered on arrival, so a
+    // second person is never held back behind the first. Only private chats
+    // merge consecutive lines, because there is only one speaker to merge.
     const isGroup = chat.kind === 'group'
-    const delay = Math.max(0, Number(isGroup ? this.config.groupDebounceMs : this.config.privateDebounceMs) || 0)
-    const cap = Math.max(0, Number(isGroup ? this.config.groupDebounceMaxMs : this.config.privateDebounceMaxMs) || 0)
+    const delay = isGroup ? 0 : Math.max(0, Number(this.config.privateDebounceMs) || 0)
+    const cap = isGroup ? 0 : Math.max(0, Number(this.config.privateDebounceMaxMs) || 0)
     // Only one person's consecutive messages merge. A different speaker ends the
     // current window immediately: merging two people's lines would make the model
     // treat unrelated requests as one, which the speaker prefix cannot fix.
@@ -448,20 +446,12 @@ export class ChatBridge {
       length: text.length,
       messageId: String(frame.message_id ?? ''),
     })
-    const speaker = speakerKey(frame, chat.kind)
-    const isGroup = chat.kind === 'group'
-    const interjectOn = isGroup
-      ? this.config.groupAutoInterject !== false
-      : this.config.privateAutoInterject !== false
-
-    // A busy agent gets either steering (if the judge agrees) or a place in the
-    // plugin's own queue. The queue lives here, not in the agent inbox, so a
-    // later message from the same person can still be merged into it.
-    if (record.agent?.status === 'running') {
-      let mode = 'queue'
-      if (interjectOn && typeof record.agent?.steer === 'function') {
-        mode = await this.judgeInterject(chatId, text, isGroup)
-      }
+    // Only a private chat may steer a running answer. In a group the message
+    // simply queues as the next turn: several people share one conversation, so
+    // inserting into someone else's answer would mix up speakers.
+    const interjectOn = chat.kind === 'private' && this.config.privateAutoInterject !== false
+    if (interjectOn && record.agent?.status === 'running' && typeof record.agent?.steer === 'function') {
+      const mode = await this.judgeInterject(chatId, text)
       if (mode === 'steer') {
         try {
           const message = await createPluginUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE })
@@ -469,17 +459,12 @@ export class ChatBridge {
           this.log.record('bridge', { note: 'steered into the running turn', chatId, length: text.length })
           return
         } catch (error) {
-          this.log.record('warn', { note: 'steer failed; queueing instead', chatId, error: this.describeError(error) })
+          this.log.record('warn', { note: 'steer failed; falling back to a follow-up', chatId, error: this.describeError(error) })
         }
       }
-      await this.enqueuePending(chatId, { text, speaker, frame, chat })
-      this.scheduleDrain(chatId)
-      return
     }
 
     await this.sendToAgent(chatId, record, text, frame)
-    // Anything that piled up while the agent was busy goes out as it frees up.
-    this.scheduleDrain(chatId)
   }
 
   /**
@@ -505,93 +490,6 @@ export class ChatBridge {
     } catch (error) {
       this.log.record('error', { note: 'delivery failed for ' + chatId, error: this.describeError(error) })
     }
-  }
-
-  /**
-   * Add one message to a chat's pending queue, merging it into the previous
-   * entry when the same person is still talking and the merge judge agrees.
-   *
-   * Merging only ever happens within one speaker: combining two people's lines
-   * would make the model treat unrelated requests as a single turn.
-   * @param chatId - canonical chat id.
-   * @param item - `{ text, speaker, frame, chat }`.
-   */
-  async enqueuePending(chatId, item) {
-    const queue = this.pendingDelivery.get(chatId) ?? []
-    const last = queue[queue.length - 1]
-    if (last !== undefined && last.speaker === item.speaker && this.config.autoInterject !== false) {
-      const verdict = await this.judgeMerge(chatId, last.text, item.text)
-      if (verdict === 'merge') {
-        last.text = last.text + '\n' + item.text
-        last.frame = item.frame
-        this.log.record('bridge', { note: 'queued message merged with the previous one', chatId, speaker: item.speaker })
-        return
-      }
-    }
-    queue.push({ ...item, queuedAt: Date.now() })
-    this.pendingDelivery.set(chatId, queue)
-    this.log.record('bridge', { note: 'queued while the agent is busy', chatId, pending: queue.length })
-  }
-
-  /**
-   * Start draining a chat's pending queue once its agent goes idle.
-   *
-   * Only one drain loop runs per chat; it waits for quiescence between items so
-   * the agent never receives two turns at once.
-   * @param chatId - canonical chat id.
-   */
-  scheduleDrain(chatId) {
-    if (this.draining.get(chatId) === true) return
-    this.draining.set(chatId, true)
-    void (async () => {
-      try {
-        while (!this.stopping) {
-          const queue = this.pendingDelivery.get(chatId)
-          if (queue === undefined || queue.length === 0) break
-          const record = this.chats.get(chatId)
-          if (record === undefined) break
-          try {
-            if (typeof record.agent?.whenIdle === 'function') await record.agent.whenIdle()
-          } catch {
-            // A failed wait must not strand the queue; fall through and send.
-          }
-          if (this.stopping) break
-          const next = queue.shift()
-          if (next === undefined) break
-          this.log.record('bridge', { note: 'releasing a queued message', chatId, remaining: queue.length })
-          await this.sendToAgent(chatId, record, next.text, next.frame)
-        }
-      } finally {
-        const queue = this.pendingDelivery.get(chatId)
-        if (queue !== undefined && queue.length === 0) this.pendingDelivery.delete(chatId)
-        this.draining.delete(chatId)
-      }
-    })()
-  }
-
-  /**
-   * The pending queues, for the settings page.
-   * @returns an array of `{ chatId, kind, pending, oldestMs, items }`.
-   */
-  queueSnapshot() {
-    const out = []
-    for (const [chatId, queue] of this.pendingDelivery.entries()) {
-      if (queue.length === 0) continue
-      const oldest = queue[0].queuedAt ?? 0
-      out.push({
-        chatId,
-        kind: chatId.startsWith('group:') ? 'group' : 'private',
-        pending: queue.length,
-        oldestMs: oldest === 0 ? 0 : Date.now() - oldest,
-        items: queue.map((item) => ({
-          speaker: String(item.speaker ?? ''),
-          length: item.text.length,
-          preview: item.text.replace(/\s+/g, ' ').slice(0, 80),
-          waitedMs: item.queuedAt === undefined ? 0 : Date.now() - item.queuedAt,
-        })),
-      })
-    }
-    return out
   }
 
   /**
@@ -636,7 +534,7 @@ export class ChatBridge {
    * @param text - the new message text.
    * @returns `'steer'` or `'followup'`.
    */
-  async judgeInterject(chatId, text, isGroup) {
+  async judgeInterject(chatId, text) {
     let timer
     try {
       const llm = this.ctx.get('llm')
@@ -654,7 +552,7 @@ export class ChatBridge {
         provider: target.provider,
         model: target.model,
         system: prompt,
-        messages: [{ role: 'user', content: [{ type: 'text', text: (isGroup ? 'Group message: ' : 'Message: ') + text }] }],
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'New message: ' + text }] }],
         temperature: 0,
         maxTokens: 16,
         signal: controller.signal,
@@ -668,56 +566,6 @@ export class ChatBridge {
     } catch (error) {
       this.log.record('warn', { note: 'interject judge failed; queueing instead', chatId, error: this.describeError(error) })
       return 'followup'
-    } finally {
-      if (timer !== undefined) clearTimeout(timer)
-    }
-  }
-
-  /**
-   * Ask the small model whether a queued line continues the previous one.
-   *
-   * Only used for the same speaker, so merging never mixes two people. A failure
-   * or a non-merge verdict keeps them separate, which is the safe default.
-   * @param chatId - canonical chat id, for logging.
-   * @param previous - the queued text so far.
-   * @param next - the newly arrived text.
-   * @returns `'merge'` or `'separate'`.
-   */
-  async judgeMerge(chatId, previous, next) {
-    let timer
-    try {
-      const llm = this.ctx.get('llm')
-      if (llm === undefined || typeof llm.stream !== 'function') return 'separate'
-      const target = await this.resolveJudgeModel(llm)
-      if (target === undefined) return 'separate'
-      const controller = new AbortController()
-      timer = setTimeout(() => controller.abort(), 4000)
-      if (typeof timer.unref === 'function') timer.unref()
-      const system = 'You decide whether two consecutive messages from the same person should be answered as one request. '
-        + 'Answer exactly one word: MERGE if the second continues or completes the first, SEPARATE if it is a new or different request. '
-        + 'When unsure, answer SEPARATE.'
-      let out = ''
-      const stream = llm.stream({
-        provider: target.provider,
-        model: target.model,
-        system,
-        messages: [{
-          role: 'user',
-          content: [{ type: 'text', text: 'First: ' + previous + '\nSecond: ' + next }],
-        }],
-        temperature: 0,
-        maxTokens: 16,
-        signal: controller.signal,
-      })
-      for await (const chunk of stream) {
-        if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') out += chunk.text
-      }
-      const verdict = /merge/i.test(out) && !/separate/i.test(out) ? 'merge' : 'separate'
-      this.log.record('bridge', { note: 'merge judge', chatId, verdict, raw: out.trim().slice(0, 24) })
-      return verdict
-    } catch (error) {
-      this.log.record('warn', { note: 'merge judge failed; keeping messages separate', chatId, error: this.describeError(error) })
-      return 'separate'
     } finally {
       if (timer !== undefined) clearTimeout(timer)
     }

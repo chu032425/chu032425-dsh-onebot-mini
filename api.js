@@ -65,7 +65,7 @@ async function readJsonBody(req) {
  *   providers for the pickers.
  * @returns the disposer.
  */
-export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels, getPendingQueues }) {
+export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels }) {
   const disposeState = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/state',
@@ -98,7 +98,6 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         modeFields: MODE_FIELDS,
         toolCatalog: TOOL_GROUPS,
         promptDefs: PROMPT_DEFS,
-        queues: typeof getPendingQueues === 'function' ? getPendingQueues() : [],
         workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
         agentPresets: typeof listAgentPresets === 'function' ? await listAgentPresets() : { available: false, presets: [] },
         permissionPresets: typeof listPermissionPresets === 'function' ? listPermissionPresets() : { available: false, options: [], defaultPreset: '' },
@@ -162,7 +161,6 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         modeFields: MODE_FIELDS,
         toolCatalog: TOOL_GROUPS,
         promptDefs: PROMPT_DEFS,
-        queues: typeof getPendingQueues === 'function' ? getPendingQueues() : [],
         workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
         agentPresets: typeof listAgentPresets === 'function' ? await listAgentPresets() : { available: false, presets: [] },
         permissionPresets: typeof listPermissionPresets === 'function' ? listPermissionPresets() : { available: false, options: [], defaultPreset: '' },

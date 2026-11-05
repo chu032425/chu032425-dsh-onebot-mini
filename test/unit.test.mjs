@@ -52,19 +52,13 @@ t('string list is trimmed', JSON.stringify(good.value.allowFrom) === '["1","2"]'
 t('unknown enum falls back', normalizeConfig({ mode: 'weird' }).value.mode === 'reverse')
 t('non-boolean boolean falls back', normalizeConfig({ senderPrefix: 'yes' }).value.senderPrefix === true)
 
-// steering requires the speaker prefix, so the prefix is forced on while it is
-// enabled and released when it is turned off
-const prefixLocked = normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', autoInterject: true, senderPrefix: false })
-t('the speaker prefix is forced on while steering is enabled', prefixLocked.value.senderPrefix === true)
-const prefixFree = normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', autoInterject: false, senderPrefix: false })
-t('the speaker prefix is free again when steering is off', prefixFree.value.senderPrefix === false)
-t('the default keeps both on', DEFAULTS.autoInterject === true && DEFAULTS.senderPrefix === true)
-t('private and group debounce both default to 3000', DEFAULTS.privateDebounceMs === 3000 && DEFAULTS.groupDebounceMs === 3000)
-t('the per-kind merge caps default to their windows', DEFAULTS.privateDebounceMaxMs === 3000 && DEFAULTS.groupDebounceMaxMs === 3000)
-t('a per-kind cap never falls below its window', normalizeConfig({ groupDebounceMaxMs: 200, groupDebounceMs: 1200 }).value.groupDebounceMaxMs === 1200)
-t('an out-of-range per-kind cap falls back', normalizeConfig({ privateDebounceMaxMs: 999999 }).value.privateDebounceMaxMs === 3000)
-t('a legacy single debounceMs sets both kinds', normalizeConfig({ debounceMs: 1500 }).value.privateDebounceMs === 1500 && normalizeConfig({ debounceMs: 1500 }).value.groupDebounceMs === 1500)
-t('a per-kind value beats the legacy one', normalizeConfig({ debounceMs: 1500, privateDebounceMs: 800 }).value.privateDebounceMs === 800)
+t('the default keeps steering on and the prefix on', DEFAULTS.autoInterject === true && DEFAULTS.senderPrefix === true)
+t('private debounce defaults to 3000', DEFAULTS.privateDebounceMs === 3000)
+t('the private merge cap defaults to its window', DEFAULTS.privateDebounceMaxMs === 3000)
+t('a private cap never falls below its window', normalizeConfig({ privateDebounceMaxMs: 200, privateDebounceMs: 1200 }).value.privateDebounceMaxMs === 1200)
+t('an out-of-range private cap falls back', normalizeConfig({ privateDebounceMaxMs: 999999 }).value.privateDebounceMaxMs === 3000)
+t('a legacy single debounceMs maps to the private field', normalizeConfig({ debounceMs: 1500 }).value.privateDebounceMs === 1500)
+t('no group debounce config remains', !('groupDebounceMs' in DEFAULTS) && !('groupAutoInterject' in DEFAULTS))
 
 // session prefix: lowercase-letter start, safe alphabet, default on rejection
 t('session prefix default', DEFAULTS.sessionPrefix === 'onebot')

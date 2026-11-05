@@ -76,12 +76,10 @@ export const DEFAULTS = Object.freeze({
   // waiting longer is safe, while a group must answer promptly or a second person
   // would be kept waiting.
   privateDebounceMs: 3000,
+  privateDebounceMs: 3000,
   privateDebounceMaxMs: 3000,
   privateAutoInterject: true,
-  groupDebounceMs: 3000,
-  groupDebounceMaxMs: 3000,
-  groupAutoInterject: true,
-  // Kept for older configs; mapped into the per-kind fields during normalize.
+  // Legacy single-kind fields kept so older configs still load.
   debounceMs: 3000,
   debounceMaxMs: 3000,
   autoInterject: true,
@@ -129,9 +127,6 @@ export const FIELD_KINDS = Object.freeze({
   privateDebounceMs: 'number',
   privateDebounceMaxMs: 'number',
   privateAutoInterject: 'boolean',
-  groupDebounceMs: 'number',
-  groupDebounceMaxMs: 'number',
-  groupAutoInterject: 'boolean',
   debounceMs: 'number',
   debounceMaxMs: 'number',
   autoInterject: 'boolean',
@@ -146,8 +141,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
   { id: 'media', fields: ['deleteSentMedia'] },
-  { id: 'replyPrivate', fields: ['privateDebounceMs', 'privateDebounceMaxMs', 'privateAutoInterject'] },
-  { id: 'replyGroup', fields: ['groupDebounceMs', 'groupDebounceMaxMs', 'groupAutoInterject'] },
+  { id: 'reply', fields: ['privateDebounceMs', 'privateDebounceMaxMs', 'privateAutoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
@@ -236,14 +230,10 @@ export function normalizeConfig(raw) {
   value.debounceMs = clampWindow(legacyDebounce, 'debounceMs')
   value.debounceMaxMs = clampCap(legacyMax, 'debounceMaxMs')
   value.privateDebounceMs = clampWindow(source.privateDebounceMs === undefined ? value.debounceMs : value.privateDebounceMs, 'privateDebounceMs')
-  value.groupDebounceMs = clampWindow(source.groupDebounceMs === undefined ? value.debounceMs : value.groupDebounceMs, 'groupDebounceMs')
   value.privateDebounceMaxMs = clampCap(source.privateDebounceMaxMs === undefined ? value.debounceMaxMs : value.privateDebounceMaxMs, 'privateDebounceMaxMs')
-  value.groupDebounceMaxMs = clampCap(source.groupDebounceMaxMs === undefined ? value.debounceMaxMs : value.groupDebounceMaxMs, 'groupDebounceMaxMs')
   if (typeof source.privateAutoInterject !== 'boolean') value.privateAutoInterject = legacyInterject
-  if (typeof source.groupAutoInterject !== 'boolean') value.groupAutoInterject = legacyInterject
   // A cap below the window would flush before the window settles.
   if (value.privateDebounceMaxMs > 0 && value.privateDebounceMaxMs < value.privateDebounceMs) value.privateDebounceMaxMs = value.privateDebounceMs
-  if (value.groupDebounceMaxMs > 0 && value.groupDebounceMaxMs < value.groupDebounceMs) value.groupDebounceMaxMs = value.groupDebounceMs
   value.sendTimeoutMs = Math.trunc(value.sendTimeoutMs)
   if (value.sendTimeoutMs < 1000 || value.sendTimeoutMs > 600000) {
     problems.push('sendTimeoutMs must be 1000-600000')
@@ -280,12 +270,6 @@ export function normalizeConfig(raw) {
   // flattened to the same safe alphabet the chat body already uses. A value that
   // flattens to nothing usable (CJK only, punctuation only) falls back to the
   // default instead of producing a dangling '-' prefix, and says so.
-  // Steering a running answer inside a group needs the speaker prefix: without
-  // it several people's messages arrive indistinguishable, so the prefix is
-  // forced on while group steering is enabled.
-  if (value.groupAutoInterject !== false) {
-    value.senderPrefix = true
-  }
 
   // An emptied prompt would leave the model with no guidance, so a blank value
   // silently returns to the shipped default. Driven by the same registry the
