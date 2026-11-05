@@ -11,7 +11,7 @@ import { TOOL_GROUPS, ALL_ACTIONS, isKnownAction, computeAllowlist, actionLabel,
 import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
-  isAddressed, speakerPrefix, textOfMessage,
+  isAddressed, speakerPrefix, speakerKey, textOfMessage,
 } from '../bridge.js'
 
 let pass = 0
@@ -134,6 +134,9 @@ t('unknown bot fails closed', isAddressed({ message: [{ type: 'at', data: { qq: 
 t('mention via cq string', isAddressed({ message: '[CQ:at,qq=10001] hi' }, '10001') === true)
 t('group prefix has speaker', speakerPrefix({ sender: { card: '小明' }, user_id: 20002, time: 1700000000 }, 'group', true).startsWith('['))
 t('private prefix is empty', speakerPrefix({ sender: {} }, 'private', true) === '')
+t('a group speaker key is the sender id', speakerKey({ user_id: 111 }, 'group') === '111')
+t('different group senders get different keys', speakerKey({ user_id: 111 }, 'group') !== speakerKey({ user_id: 222 }, 'group'))
+t('a private chat has one speaker key', speakerKey({ user_id: 111 }, 'private') === speakerKey({ user_id: 222 }, 'private'))
 t('prefix can be disabled', speakerPrefix({ sender: { card: 'x' } }, 'group', false) === '')
 t('only text blocks are joined', textOfMessage({ content: [{ type: 'text', text: 'a' }, { type: 'reasoning', text: 'secret' }, { type: 'text', text: 'b' }] }) === 'a\nb')
 t('empty content yields empty text', textOfMessage({ content: [] }) === '')

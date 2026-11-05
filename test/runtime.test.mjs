@@ -1006,5 +1006,40 @@ await wait(100)
 t('autoInterject off queues instead of steering', offQueued.length === 1)
 await bridgeNoSteer.stop()
 
+// ---------------------------------------------------------------- group debounce per speaker
+const groupDeliveries = []
+const groupAgents = {
+  get: () => undefined,
+  async create(options) {
+    const agent = { session: { id: options.sessionId }, status: 'idle', followups: [], followup(m) { this.followups.push(m); groupDeliveries.push(String(m.content[0].text)) } }
+    if (typeof options.setup === 'function') await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: () => () => {} } })
+    return { agent, dispose: async () => {} }
+  },
+  async resume() { throw new Error('no persisted session') },
+}
+const groupCtx = { on: () => () => {}, agents: groupAgents, get: (n) => (n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'p', model: 'm' }) } : undefined) }
+const bridgeGroup = new ChatBridge({
+  ctx: groupCtx,
+  config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 120, requireMention: false, senderPrefix: true, botQQ: '10001' },
+  connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
+})
+bridgeGroup.start()
+const groupMsg = (userId, text, messageId) => ({
+  post_type: 'message', message_type: 'group', group_id: 888, user_id: userId, message_id: messageId,
+  message: [{ type: 'text', data: { text } }], sender: { card: 'U' + userId }, time: 1700000000,
+})
+
+// one person's two lines merge; a second person starts their own window
+await bridgeGroup.handleInbound(groupMsg(111, '第一句', 501))
+await bridgeGroup.handleInbound(groupMsg(111, '第二句', 502))
+await bridgeGroup.handleInbound(groupMsg(222, '另一个人', 503))
+await wait(300)
+t('one speaker\'s lines merge into a single turn', groupDeliveries.filter((d) => d.includes('第一句')).length === 1)
+t('the merged turn holds both lines of that speaker', groupDeliveries.some((d) => d.includes('第一句') && d.includes('第二句')))
+t('a different speaker is not merged into that turn', !groupDeliveries.some((d) => d.includes('第一句') && d.includes('另一个人')))
+t('the other speaker gets their own delivery', groupDeliveries.some((d) => d.includes('另一个人')))
+t('both deliveries keep the speaker prefix', groupDeliveries.every((d) => d.startsWith('[')))
+await bridgeGroup.stop()
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

@@ -168,6 +168,20 @@ export function isAddressed(frame, botId) {
  * @param enabled - whether the prefix is configured on.
  * @returns the prefix (possibly empty).
  */
+/**
+ * The identity that decides whether two messages may merge.
+ *
+ * In a group it is the sender, so different people never share a window; in a
+ * private chat there is only one speaker, so a constant is enough.
+ * @param frame - the inbound event.
+ * @param chatKind - `private` or `group`.
+ * @returns a stable key for the speaker.
+ */
+export function speakerKey(frame, chatKind) {
+  if (chatKind !== 'group') return 'private'
+  return String(frame?.user_id ?? '')
+}
+
 export function speakerPrefix(frame, chatKind, enabled) {
   if (!enabled || chatKind !== 'group') return ''
   const sender = frame.sender !== null && typeof frame.sender === 'object' ? frame.sender : {}
@@ -326,9 +340,17 @@ export class ChatBridge {
   async enqueue(chatId, chat, text, frame) {
     if (this.stopping) return
     const delay = Math.max(0, Number(this.config.debounceMs) || 0)
+    // Only one person's consecutive messages merge. A different speaker ends the
+    // current window immediately: merging two people's lines would make the model
+    // treat unrelated requests as one, which the speaker prefix cannot fix.
+    const speaker = speakerKey(frame, chat.kind)
+    const current = this.inboundQueue.get(chatId)
+    if (current !== undefined && current.speaker !== speaker) {
+      await this.flush(chatId)
+    }
     let entry = this.inboundQueue.get(chatId)
     if (entry === undefined) {
-      entry = { texts: [], chat, frame, timer: undefined }
+      entry = { texts: [], chat, frame, speaker, timer: undefined }
       this.inboundQueue.set(chatId, entry)
     }
     entry.texts.push(text)
@@ -341,7 +363,7 @@ export class ChatBridge {
       return
     }
     entry.timer = setTimeout(() => { void this.flush(chatId) }, delay)
-    if (typeof entry.timer.unref === 'function') entry.timer.unref()
+    if (entry.timer.unref === 'function') entry.timer.unref()
   }
 
   /**
