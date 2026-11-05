@@ -158,7 +158,9 @@ for (const key of ['cacheTitle', 'cacheTotal', 'cacheConfig', 'cacheLogs', 'cach
 }
 t('qzone settings group label present', zh.groupQzone === '空间' && en.groupQzone === 'Qzone')
 t('media group label present', zh.groupMedia === '媒体' && en.groupMedia === 'Media')
-for (const key of ['groupReply', 'fieldPrivateDebounceMs', 'fieldPrivateDebounceMaxMs', 'fieldGroupDebounceMs', 'fieldGroupDebounceMaxMs', 'queueTitle', 'queueEmpty', 'queueCount']) {
+for (const key of ['groupReply', 'groupReplyPrivate', 'groupReplyGroup', 'fieldPrivateDebounceMs', 'fieldPrivateDebounceMaxMs',
+  'fieldPrivateAutoInterject', 'fieldGroupDebounceMs', 'fieldGroupDebounceMaxMs', 'fieldGroupAutoInterject',
+  'queueTitle', 'queueEmpty', 'queueCount', 'queueRefresh', 'queueGroup', 'queuePrivate']) {
   t('reply/queue copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' || typeof en[key] === 'string' && en[key] !== '')
 }
 for (const key of ['hintSenderPrefixLocked', 'hintSenderPrefixFree']) {
