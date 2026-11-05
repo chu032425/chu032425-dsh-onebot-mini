@@ -571,8 +571,15 @@ export class ChatBridge {
       // disposers live as long as the plugin does, which is fine: registration is
       // idempotent per name and the plugin does not unload per chat.
       // Best-effort: a reused agent's tools must not block message delivery. If
-      // registration fails the message still goes out via followup.
-      try { await this.registerGlobalTools() } catch (e) { this.log.record('warn', { note: 'global tool registration failed', chatId, error: this.describeError(e) }) }
+      // registration fails the message still goes out via followup. Register on
+      // the live agent's own ctx as well: a global registration is visible to
+      // agents created later, but an agent that already exists resolves its
+      // tools from its own scope.
+      try {
+        await this.registerToolsFor(live.ctx, chatId)
+      } catch (e) {
+        this.log.record('warn', { note: 'tool registration for the reused agent failed', chatId, error: this.describeError(e) })
+      }
       if (this.config.titleEqualsId) this.pinTitle(live.session, sessionId)
       return record
     }
@@ -786,14 +793,21 @@ export class ChatBridge {
    * never ran (a reused live agent). Safe to call repeatedly: `register` returns
    * a disposer and duplicate names within one layer are replaced.
    */
-  async registerGlobalTools() {
+  async registerToolsFor(scopeCtx, chatId) {
     const allow = computeAllowlist(this.config)
     if (allow === null) return
     const { registerTools } = await requireToolsOnce()
-    registerTools(this.ctx, {
+    // Record what actually happened: a silent no-op here is exactly what made the
+    // model claim it had no permission to send images.
+    const toolsService = scopeCtx?.tools ?? scopeCtx?.get?.('tools')
+    if (toolsService === undefined || typeof toolsService.register !== 'function') {
+      this.log.record('warn', { note: 'tool registration skipped: no tools service on that ctx', chatId })
+      return
+    }
+    registerTools(scopeCtx, {
       connection: this.connection,
       allow,
-      chatId: '',
+      chatId,
       deleteSentMedia: this.config.deleteSentMedia === true,
       prompts: {
         call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
@@ -803,6 +817,7 @@ export class ChatBridge {
       },
       recordLog: (note) => this.log.record('bridge', { note }),
     })
+    this.log.record('bridge', { note: 'tools registered for the reused agent', chatId, actions: allow.size })
   }
 
   /**
