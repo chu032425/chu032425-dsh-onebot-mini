@@ -815,6 +815,7 @@ export class ChatBridge {
           allow,
           chatId,
           deleteSentMedia: this.config.deleteSentMedia === true,
+          recordLog: (note) => this.log.record('bridge', { note }),
           prompts: {
             call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
             media: String(this.config.toolMediaPrompt ?? '').trim() !== ''

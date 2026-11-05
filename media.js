@@ -107,15 +107,17 @@ export async function sendMedia(connection, options) {
     : { user_id: Number(chatId), message: [segment] }
   try {
     const data = await connection.call(action, params)
-    // A source file is only removed after the gateway accepted the send, and
-    // only when the caller asked for it. A URL or inline base64 has nothing to
-    // clean up.
-    let deleted
+    // A source file is only removed after the gateway accepted the send, and only
+    // when the caller asked for it. The outcome is reported through `onCleanup`
+    // (the log), not in the tool result: the model only needs to know whether the
+    // message went out, and an extra field would trip the tool's output schema.
     if (options.deleteSource === true && typeof options.path === 'string' && options.path !== '') {
       const result = await safeUnlink(options.path)
-      deleted = result.ok === true ? 'deleted' : 'kept: ' + result.reason
+      if (typeof options.onCleanup === 'function') {
+        options.onCleanup(result.ok === true ? 'deleted' : 'kept: ' + result.reason)
+      }
     }
-    return deleted === undefined ? { ok: true, data } : { ok: true, data, source: deleted }
+    return { ok: true, data }
   } catch (error) {
     return { ok: false, error: String(error?.message ?? error) }
   }

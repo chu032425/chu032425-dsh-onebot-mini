@@ -279,5 +279,17 @@ t('the transport facade exposes status', facadeBlock.includes('status:'))
 t('the connection exposes sendMessage', (await import('../connection.js')).OneBotConnection.prototype.sendMessage !== undefined)
 t('the connection exposes sendText', (await import('../connection.js')).OneBotConnection.prototype.sendText !== undefined)
 
+// A tool result may only contain fields its output schema declares: an extra
+// field is rejected by the harness and the model sees an error even though the
+// action succeeded. sendMedia must therefore return exactly { ok, data, error }.
+import { readFileSync as readTools } from 'node:fs'
+const toolsSrc = readTools(new URL('../tools.js', import.meta.url), 'utf8')
+const schemaBlock = toolsSrc.slice(toolsSrc.indexOf('const OUTPUT_SCHEMA'), toolsSrc.indexOf('required:', toolsSrc.indexOf('const OUTPUT_SCHEMA')))
+t('the output schema declares ok, data and error', schemaBlock.includes('ok:') && schemaBlock.includes('data:') && schemaBlock.includes('error:'))
+t('the output schema no longer declares source', !schemaBlock.includes('source:'))
+const sendSrc = (await import('../media.js')).sendMedia.toString()
+t('sendMedia returns only ok/data', !sendSrc.includes('source:') && sendSrc.includes('return { ok: true, data }'))
+t('sendMedia still reports cleanup through a hook', sendSrc.includes('onCleanup'))
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
