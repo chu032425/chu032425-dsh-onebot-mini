@@ -91,6 +91,12 @@ export function apply(ctx) {
         if (connection === undefined) throw new Error('transport is not running')
         return connection.sendText(chat, text)
       },
+      // The bridge builds a full segment list (text plus any media markers), so
+      // the facade must expose the segment-level send as well.
+      sendMessage: (chat, message) => {
+        if (connection === undefined) throw new Error('transport is not running')
+        return connection.sendMessage(chat, message)
+      },
       call: (action, params) => {
         if (connection === undefined) throw new Error('transport is not running')
         return connection.call(action, params)

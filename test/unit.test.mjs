@@ -262,5 +262,18 @@ rmSync('/tmp/onebot-cache-test-home', { recursive: true, force: true })
 if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome
 if (prevProfile === undefined) delete process.env.DSH_PROFILE; else process.env.DSH_PROFILE = prevProfile
 
+// --- transport facade contract
+// The bridge calls `sendMessage` for every reply. A facade that only exposes
+// `sendText` silently breaks every reply, so both must be present.
+import { readFileSync as readSrc } from 'node:fs'
+const indexSrc = readSrc(new URL('../index.js', import.meta.url), 'utf8')
+const facadeBlock = indexSrc.slice(indexSrc.indexOf('const transport = {'), indexSrc.indexOf('const getWorkspaceRegistry'))
+t('the transport facade exposes sendText', facadeBlock.includes('sendText:'))
+t('the transport facade exposes sendMessage', facadeBlock.includes('sendMessage:'))
+t('the transport facade exposes call', facadeBlock.includes('call:'))
+t('the transport facade exposes status', facadeBlock.includes('status:'))
+t('the connection exposes sendMessage', (await import('../connection.js')).OneBotConnection.prototype.sendMessage !== undefined)
+t('the connection exposes sendText', (await import('../connection.js')).OneBotConnection.prototype.sendText !== undefined)
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
