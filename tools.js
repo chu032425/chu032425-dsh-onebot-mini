@@ -38,7 +38,14 @@ const OUTPUT_SCHEMA = Object.freeze({
   type: 'object',
   properties: {
     ok: { type: 'boolean', description: 'Whether the gateway accepted the action.' },
-    data: { type: 'object', additionalProperties: true, description: 'The action response data.' },
+    // OneBot is not consistent: some actions return an object (get_msg,
+    // get_group_info), some a bare array (get_group_member_list,
+    // get_friend_list, get_group_list), and some a scalar or null. The harness
+    // schema subset cannot express "object or array" with a single `type` and
+    // rejects type arrays, so `data` is deliberately left untyped (= any lossless
+    // JSON value). Pinning it to `object` used to fail the whole call with
+    // "value.data must be an object" on every array-returning action.
+    data: { description: 'The action response data: an object, array, or scalar, exactly as the gateway returned it.' },
     error: { type: 'string', description: 'Failure reason when ok is false.' },
   },
   required: ['ok'],
@@ -94,7 +101,10 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
       const params = args?.params !== null && typeof args?.params === 'object' ? args.params : {}
       try {
         const data = await connection.call(action, params)
-        return { ok: true, data: data !== null && typeof data === 'object' ? data : { value: data } }
+        // Pass the payload through verbatim (object, array or scalar); only map
+        // an absent payload to null, since `undefined` is not lossless JSON and
+        // would itself fail output validation.
+        return { ok: true, data: data === undefined ? null : data }
       } catch (error) {
         return { ok: false, error: String(error?.message ?? error) }
       }

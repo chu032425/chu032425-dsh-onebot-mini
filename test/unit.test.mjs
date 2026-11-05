@@ -302,6 +302,28 @@ const sendSrc = (await import('../media.js')).sendMedia.toString()
 t('sendMedia returns only ok/data', !sendSrc.includes('source:') && sendSrc.includes('return { ok: true, data }'))
 t('sendMedia still reports cleanup through a hook', sendSrc.includes('onCleanup'))
 
+// OneBot returns an array for list actions; the tool output must not force an
+// object, or the harness rejects the whole call ("value.data must be an object").
+const { registerTools } = await import('../tools.js')
+const captureTool = (call) => {
+  let def
+  registerTools(
+    { tools: { register: (d) => { if (d?.name === 'onebot_call') def = d; return () => {} } } },
+    { connection: { call }, allow: new Set(['get_group_member_list']), chatId: 'group:1', deleteSentMedia: false, prompts: {}, recordLog: () => {} },
+  )
+  return def
+}
+const arrayTool = captureTool(async () => [{ user_id: 1 }, { user_id: 2 }])
+const arrayOut = await arrayTool.execute({ action: 'get_group_member_list', params: {} })
+t('an array response is returned verbatim', arrayOut.ok === true && Array.isArray(arrayOut.data) && arrayOut.data.length === 2)
+t('the output schema does not pin data to object', arrayTool.output.schema.properties.data.type === undefined)
+const objectTool = captureTool(async () => ({ message_id: 7 }))
+const objectOut = await objectTool.execute({ action: 'get_group_member_list', params: {} })
+t('an object response is unchanged', objectOut.ok === true && objectOut.data.message_id === 7)
+const nullTool = captureTool(async () => undefined)
+const nullOut = await nullTool.execute({ action: 'get_group_member_list', params: {} })
+t('an absent payload becomes null (lossless JSON)', nullOut.ok === true && nullOut.data === null)
+
 // --- media prompt forbids the permission hallucination
 import { mediaParagraph } from '../prompt.js'
 const mediaText = mediaParagraph()
