@@ -1,64 +1,62 @@
 /**
- * The default channel prompt.
+ * 本插件注入给模型的所有提示词。
  *
- * This text used to be assembled inside bridge.js. It lives here now so it can
- * be persisted in the config and edited from the Prompt page, while the code
- * only supplies the few dynamic pieces.
+ * 这些文本过去散落在 bridge.js 里，现在集中到这里，以便持久化进配置、并在
+ * 「提示词」页面里直接编辑。代码只负责提供少量动态片段。
  *
- * Placeholders the template understands:
- *  - `{senderPrefix}` — a line about the group speaker prefix, or empty;
- *  - `{media}` — the media tool + marker paragraph, or empty when the tool is off;
- *  - `{actions}` — the tool-disabled note, or the enabled action list.
+ * 频道模板支持的占位符：
+ *  - `{senderPrefix}` —— 群聊发言人前缀说明，或空；
+ *  - `{media}` —— 媒体发送工具 + 标记段落，工具关闭时为空；
+ *  - `{tools}` —— 本插件工具清单（onebot_call / onebot_send_media /
+ *    onebot_list_files）以及「QQ 相关操作只能用这些工具」的硬规则；
+ *  - `{actions}` —— 工具关闭时的说明，或当前启用的动作清单。
  *
- * Every other line is plain prose the operator may rewrite. Keep the
- * placeholders if the dynamic parts matter; the renderer leaves an unknown
- * placeholder untouched rather than deleting text.
+ * 其余文字都是运营者可以随意改写的普通文案。需要动态部分时保留占位符即可；
+ * 渲染器遇到不认识的占位符会原样保留，而不是删掉整段文字。
  */
 
-/** The out-of-the-box template. */
+/** 开箱即用的频道模板。 */
 export const DEFAULT_CHANNEL_PROMPT = [
-  '## OneBot (QQ) channel',
-  'You are talking to a user through a QQ chat bridged by OneBot 11.',
-  '- QQ does not render Markdown. Answer in plain text; use numbered or dashed lists.',
-  '- One reply turn produces ONE outgoing message: the plugin buffers your text blocks and sends them when the turn ends. Do not try to split a reply into several messages.',
-  '- Incoming images, voices, videos and files appear as [图片] / [语音] / [视频] / [文件] placeholders. The plugin does not download them, so you cannot see their content; say so if the user asks about them.',
+  '## OneBot（QQ）通道',
+  '你正在通过 OneBot 11 桥接的 QQ 聊天与用户对话。',
+  '- QQ 不渲染 Markdown。请用纯文本回答，可用数字或短横线列表。',
+  '- 一轮回复只产生一条对外消息：插件会缓存你的文本块，并在本轮结束时统一发送。不要试图把一条回复拆成多条消息。',
+  '- 收到的图片、语音、视频、文件会显示为 [图片] / [语音] / [视频] / [文件] 占位符；插件不会下载它们，你也看不到其内容，用户问起时如实说明。',
+  '{tools}',
   '{senderPrefix}',
   '{media}',
   '{actions}',
-  '- There is no Web approval card on this channel: do not call exit_plan_mode. Write any plan as plain text instead.',
+  '- 本通道没有 Web 端的审批卡片：不要调用 exit_plan_mode，需要计划时用纯文本写出。',
 ].join('\n')
 
-/** The placeholders the channel template documents. */
-export const PROMPT_PLACEHOLDERS = Object.freeze(['{senderPrefix}', '{media}', '{actions}'])
+/** 频道模板声明的占位符。 */
+export const PROMPT_PLACEHOLDERS = Object.freeze(['{senderPrefix}', '{media}', '{tools}', '{actions}'])
 
 /**
- * The default description of the `onebot_call` tool.
+ * `onebot_call` 工具的默认描述。
  *
- * `{enabledNote}` expands to the "only enabled actions are accepted" sentence
- * when the tool is on, and to nothing when it is off.
+ * `{enabledNote}` 在工具有效时展开为「只接受已启用动作」的说明，关闭时展开为空。
  */
-export const DEFAULT_TOOL_CALL_PROMPT = 'Call one OneBot 11 action through the bridged gateway, for example send_group_msg, '
-  + 'send_private_msg, get_group_info or set_group_ban. Use this to send images, files or any message that is not plain text. '
-  + 'The action response comes back as JSON. {enabledNote}'
+export const DEFAULT_TOOL_CALL_PROMPT = '通过桥接网关执行一个 OneBot 11 动作，例如 send_private_msg、send_group_msg、'
+  + 'get_group_info、set_group_ban。用它发送图片、文件或任何非纯文本消息。动作结果以 JSON 返回。{enabledNote}'
 
-/** The default description of the `onebot_send_media` tool. */
-export const DEFAULT_TOOL_MEDIA_PROMPT = 'Send an image, voice clip, video or file to the current QQ chat. '
-  + 'Pass `path` for a local file (its bytes are sent inline), or `url`, or `base64`. '
-  + 'Defaults to the chat this conversation is in; override with chatType and chatId.'
+/** `onebot_send_media` 工具的默认描述。 */
+export const DEFAULT_TOOL_MEDIA_PROMPT = '向当前 QQ 会话发送图片、语音、视频或文件。'
+  + '用 path 传本机文件路径（会把文件字节内联发送），或用 url，或用 base64。'
+  + '默认发到当前会话；可用 chatType 和 chatId 指定其他目标。'
 
-/** The default instruction for the lightweight steer/follow-up judge. */
-export const DEFAULT_INTERJECT_PROMPT = 'You route a new QQ message for an assistant that may still be answering. '
-  + 'Answer with exactly one word: STEER or FOLLOWUP. '
-  + 'STEER means the message corrects, redirects, stops or urgently adds to the answer in progress, so it must reach the model at its next step. '
-  + 'FOLLOWUP means it is a separate next request that can wait until the current answer finishes. '
-  + 'When unsure, answer FOLLOWUP.'
+/** 轻量「插话 / 排队」判定器的默认指令。 */
+export const DEFAULT_INTERJECT_PROMPT = '你负责为一位可能仍在作答的助手转发一条新的 QQ 消息。'
+  + '只回答一个词：STEER 或 FOLLOWUP。'
+  + 'STEER 表示这条消息是在纠正、改变方向、叫停或紧急补充正在进行的回答，必须让它在模型的下一步执行时送达。'
+  + 'FOLLOWUP 表示它是一个独立的后续请求，可以等当前回答结束后再处理。'
+  + '拿不准时，回答 FOLLOWUP。'
 
 /**
- * Every model-facing prompt, in the order the Prompt page shows them.
+ * 每一个面向模型的提示词，按「提示词」页面展示顺序排列。
  *
- * This is the single registry: a new prompt added here appears on the page and
- * is persisted automatically. Each entry names the config field it reads, the
- * label key the page uses, the placeholders it understands, and its default.
+ * 这里是唯一的注册表：新增一项就等于在页面上出现一项，并自动持久化。每项声明
+ * 它读取的配置字段、页面用的标签键、它理解的占位符，以及默认值。
  *
  * @typedef {{ id: string, field: string, labelKey: string, placeholders: string[], default: string }} PromptDef
  * @type {readonly PromptDef[]}
@@ -71,40 +69,59 @@ export const PROMPT_DEFS = Object.freeze([
 ])
 
 /**
- * The media paragraph, when sending media is available.
- * @returns the paragraph.
+ * 本插件工具清单段落。
+ *
+ * 只有工具确实可用（`allow` 是 Set）时才输出；工具关闭时返回空串，整行会被
+ * 渲染器删掉，避免向模型宣传一个根本不存在的工具。工具清单本身是固定的三项，
+ * 因为 registerTools 总是同时注册它们。
+ * @param allow - computeAllowlist 得到的可用动作集合，或 null。
+ * @returns 工具清单段落，或空串。
  */
-export function mediaParagraph() {
-  return '- To send an image, voice clip, video or file as its own message, call the onebot_send_media tool. '
-    + 'To attach media to a reply message (so text and attachment arrive together), write a marker in your reply: '
-    + '[[image:/abs/path.png]], [[record:/abs/a.wav]], [[video:/abs/a.mp4]] or [[file:/abs/a.zip]] — the path may also be an http(s) URL. '
-    + 'The plugin replaces each marker with a real attachment. Only send media when the user asks for it.\n'
-    + '- You cannot see the disk. Before naming a local file, call onebot_list_files on its directory and use a name it returns. '
-    + 'Never guess a filename: a wrong path produces a failed attachment, and the user only sees a short notice.\n'
-    + '- When the user asks for a picture, voice, video or file, you MUST call onebot_send_media (after listing the directory). '
-    + 'Do not reply that you lack permission, that the account is restricted, that only an admin can send media, or that a tool is unavailable: '
-    + 'those claims are false on this channel. If a send genuinely fails, report the error the tool returned. '
-    + 'Never tell the user to make you an administrator as a way to send media.'
-}
-
-/** The speaker-prefix line. */
-export function senderPrefixParagraph() {
-  return '- Group messages are prefixed with [HH:MM nickname(QQ)] so you can tell speakers apart.'
+export function toolsParagraph(allow) {
+  if (!(allow instanceof Set)) return ''
+  return [
+    '## 本插件提供的工具（所有 QQ 相关操作都必须使用这些工具）',
+    '- onebot_call：执行任意 OneBot 11 动作（发消息、群管理、查询、互动、QQ 空间、群相册等）。把动作名放进 action，参数放进 params。',
+    '- onebot_send_media：向当前 QQ 会话发送图片、语音、视频或文件；可直接传本机文件路径（自动内联字节）或 URL。',
+    '- onebot_list_files：列出宿主机某个目录下的文件，发本地文件前先用它确认真实文件名。',
+    '- 所有 QQ 相关操作（发消息、发图片/语音/视频/文件、群管理、查询等）都必须通过上述工具完成；不要使用任何其他以 qq_ 开头的工具或第三方 QQ 工具。如果工具报错，请如实转述错误，不要声称没有权限。',
+  ].join('\n')
 }
 
 /**
- * Fill a template, dropping lines whose placeholder expanded to nothing.
+ * 媒体段落，在「可发送媒体」时使用。
+ * @returns 该段落。
+ */
+export function mediaParagraph() {
+  return '- 要把图片、语音、视频或文件作为单独一条消息发出时，调用 onebot_send_media 工具。'
+    + '要让它和文字一起作为一条回复发出时，在回复里写标记：'
+    + '[[image:/abs/path.png]]、[[record:/abs/a.wav]]、[[video:/abs/a.mp4]] 或 [[file:/abs/a.zip]]——路径也可以是 http(s) URL。'
+    + '插件会把每个标记替换成真实附件。仅在用户要求时才发送媒体。\n'
+    + '- 你看不到磁盘。在说出某个本地文件名之前，先对该目录调用 onebot_list_files，使用它返回的真实文件名。'
+    + '绝不臆造文件名：路径错误会导致附件发送失败，用户只会看到一条简短提示。\n'
+    + '- 当用户要图片、语音、视频或文件时，你【必须】调用 onebot_send_media（先列目录）。'
+    + '不要回复说你没有权限、账号受限、只有管理员才能发媒体、或工具不可用——这些说法在本通道都是错误的。'
+    + '如果确实发送失败，如实报告工具返回的错误。'
+    + '绝不要让用户把你设为管理员来换取发媒体的能力。'
+}
+
+/** 群聊发言人前缀说明。 */
+export function senderPrefixParagraph() {
+  return '- 群消息会带有 [HH:MM 昵称(QQ)] 前缀，以便区分不同发言人。'
+}
+
+/**
+ * 填充模板，丢掉展开为空的占位符所在行。
  *
- * A placeholder on its own line that yields no text would otherwise leave a
- * blank line behind, so empty expansions remove their line; repeated blank
- * lines are then collapsed.
- * @param template - the prompt template.
- * @param values - `{ senderPrefix, media, actions }` replacement text.
- * @returns the rendered prompt.
+ * 单独占一行的占位符若展开为空，会留下一行空白，所以空展开时整行删除；随后
+ * 再把连续的多行空白折叠起来。
+ * @param template - 提示词模板。
+ * @param values - `{ senderPrefix, media, tools, actions }` 替换文本。
+ * @returns 渲染后的提示词。
  */
 export function renderPrompt(template, values) {
   let text = String(template ?? '')
-  for (const key of ['senderPrefix', 'media', 'actions']) {
+  for (const key of ['senderPrefix', 'media', 'tools', 'actions']) {
     const value = String(values?.[key] ?? '')
     const pattern = new RegExp('^[ \\t]*\\{' + key + '\\}[ \\t]*$', 'm')
     if (value.trim() === '') {
@@ -118,18 +135,18 @@ export function renderPrompt(template, values) {
 
 
 /**
- * Fill the tool-call description.
+ * 填充工具调用描述。
  *
- * The enabled-actions sentence is dynamic (it disappears when the tool is off),
- * so it is a placeholder rather than baked into the editable text.
- * @param template - the configured description.
- * @param allow - the allowed action set from `computeAllowlist`, or null.
- * @returns the description to register on the tool.
+ * 「已启用动作」这句是动态的（工具关闭时消失），所以它做成占位符，而不是写死
+ * 进可编辑文本里。
+ * @param template - 配置里的描述文本。
+ * @param allow - computeAllowlist 得到的可用动作集合，或 null。
+ * @returns 注册到工具上的描述。
  */
 export function renderToolCallPrompt(template, allow) {
   const note = allow === null
     ? ''
-    : 'Only the actions enabled in the OneBot-Mini settings are accepted; anything else is refused.'
+    : '仅接受在 OneBot-Mini 设置中已启用的动作，其余一律拒绝。'
   const text = String(template ?? '').trim() !== '' ? String(template) : DEFAULT_TOOL_CALL_PROMPT
   return text.replace(/\{enabledNote\}/g, note).replace(/\s+$/, '')
 }

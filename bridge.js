@@ -15,7 +15,7 @@
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, actionLabel } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, senderPrefixParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, senderPrefixParagraph, toolsParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -1067,21 +1067,23 @@ export function buildPlatformPrompt(config) {
 
   const senderPrefix = config?.senderPrefix ? senderPrefixParagraph() : ''
   let media = ''
+  let tools = ''
   let actions = ''
   if (allow === null) {
-    actions = '- The onebot_call tool is disabled on this channel: you cannot call OneBot actions (send images or files, group management, queries). Reply with text only.'
+    actions = '- 本通道已关闭 onebot_call 工具：你无法调用任何 OneBot 动作（发图/发文件、群管理、查询等），只能用纯文本回复。'
   } else {
     media = mediaParagraph()
-    const lines = ['- To do anything other than reply in plain text, call the onebot_call tool with the OneBot action name and its params. '
-      + 'Only the actions listed below are accepted; anything else is refused.']
+    tools = toolsParagraph(allow)
+    const lines = ['- 除纯文本回复外的任何操作，都要调用 onebot_call 工具，并在 action 填 OneBot 动作名、params 填参数。'
+      + '下面只接受已启用的动作，其他一律拒绝。']
     // Advertise exactly what the operator left enabled, so the model never
     // wastes a turn on an action that would be refused.
     for (const group of enabledGroups(allow)) {
-      const names = group.actions.map((action) => action.name + ' (' + actionLabel(action.name) + ')').join(', ')
-      lines.push('  - ' + group.id + ': ' + names)
+      const names = group.actions.map((action) => action.name + ' (' + actionLabel(action.name) + ')').join('、')
+      lines.push('  - ' + group.id + '：' + names)
     }
     actions = lines.join('\n')
   }
 
-  return renderPrompt(template, { senderPrefix, media, actions })
+  return renderPrompt(template, { senderPrefix, media, tools, actions })
 }

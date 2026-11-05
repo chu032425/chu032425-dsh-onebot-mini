@@ -219,9 +219,9 @@ t('every registered prompt has a config default', PROMPT_DEFS.every((d) => typeo
 t('every registered prompt has a label key', PROMPT_DEFS.every((d) => typeof d.labelKey === 'string' && d.labelKey !== ''))
 const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', toolMediaPrompt: '' }).value
 t('every blank prompt returns to its default', PROMPT_DEFS.every((d) => blankAll[d.field] === DEFAULTS[d.field]))
-t('the tool-call prompt adds the enabled note when actions are allowed', renderToolCallPrompt('X {enabledNote}', new Set(['a'])).includes('Only the actions enabled'))
-t('the tool-call prompt drops the note when the tool is off', !renderToolCallPrompt('X {enabledNote}', null).includes('enabled'))
-t('the tool-call prompt falls back when empty', renderToolCallPrompt('', null).startsWith('Call one OneBot 11 action'))
+t('the tool-call prompt adds the enabled note when actions are allowed', renderToolCallPrompt('X {enabledNote}', new Set(['a'])).includes('仅接受在 OneBot-Mini 设置中已启用的动作'))
+t('the tool-call prompt drops the note when the tool is off', !renderToolCallPrompt('X {enabledNote}', null).includes('仅接受'))
+t('the tool-call prompt falls back when empty', renderToolCallPrompt('', null).startsWith('通过桥接网关执行一个 OneBot 11 动作'))
 
 // --- cache inventory and manual clearing (against a throwaway profile)
 import { inventory, clearCache } from '../cacheinfo.js'
@@ -294,10 +294,10 @@ t('sendMedia still reports cleanup through a hook', sendSrc.includes('onCleanup'
 // --- media prompt forbids the permission hallucination
 import { mediaParagraph } from '../prompt.js'
 const mediaText = mediaParagraph()
-t('the media paragraph requires calling the tool', mediaText.includes('MUST call onebot_send_media'))
-t('the media paragraph forbids claiming no permission', mediaText.includes('Do not reply that you lack permission'))
-t('the media paragraph forbids the admin excuse', mediaText.includes('Never tell the user to make you an administrator'))
-t('the media paragraph requires listing first', mediaText.includes('call onebot_list_files'))
+t('the media paragraph requires calling the tool', mediaText.includes('必须') && mediaText.includes('onebot_send_media'))
+t('the media paragraph forbids claiming no permission', mediaText.includes('不要回复说你没有权限'))
+t('the media paragraph forbids the admin excuse', mediaText.includes('绝不要让用户把你设为管理员'))
+t('the media paragraph requires listing first', mediaText.includes('onebot_list_files'))
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
