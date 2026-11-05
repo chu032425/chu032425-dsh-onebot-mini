@@ -19,6 +19,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
+import { DEFAULT_CHANNEL_PROMPT } from './prompt.js'
 
 /** The DSH home, honoring `$DSH_HOME` then `~/.dsh`. */
 export function dshHome() {
@@ -72,6 +73,7 @@ export const DEFAULTS = Object.freeze({
   logToFile: true,
   sendTimeoutMs: 30000,
   deleteSentMedia: true,
+  channelPrompt: DEFAULT_CHANNEL_PROMPT,
   imageCacheMaxKb: 1024,
   imageCacheTotalMb: 100,
   imageShowMaxMb: 32,
@@ -104,6 +106,7 @@ export const FIELD_KINDS = Object.freeze({
   logToFile: 'boolean',
   sendTimeoutMs: 'number',
   deleteSentMedia: 'boolean',
+  channelPrompt: 'text',
   imageCacheMaxKb: 'number',
   imageCacheTotalMb: 'number',
   imageShowMaxMb: 'number',
@@ -214,6 +217,12 @@ export function normalizeConfig(raw) {
   // flattened to the same safe alphabet the chat body already uses. A value that
   // flattens to nothing usable (CJK only, punctuation only) falls back to the
   // default instead of producing a dangling '-' prefix, and says so.
+  // An emptied prompt would leave the model with no channel guidance, so a blank
+  // value silently returns to the shipped default.
+  if (String(value.channelPrompt ?? '').trim() === '') {
+    value.channelPrompt = DEFAULTS.channelPrompt
+  }
+
   const rawPrefix = String(value.sessionPrefix ?? '').trim()
   if (/^[a-z][a-z0-9-]*$/.test(rawPrefix)) {
     value.sessionPrefix = rawPrefix

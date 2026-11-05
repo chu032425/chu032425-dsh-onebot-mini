@@ -15,6 +15,7 @@
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, actionLabel } from './toolcatalog.js'
+import { DEFAULT_CHANNEL_PROMPT, mediaParagraph, senderPrefixParagraph, renderPrompt } from './prompt.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -840,31 +841,31 @@ export function textOfMessage(message) {
  * @returns the section text.
  */
 export function buildPlatformPrompt(config) {
-  let text = '## OneBot (QQ) channel\n'
-  text += 'You are talking to a user through a QQ chat bridged by OneBot 11.\n'
-  text += '- QQ does not render Markdown. Answer in plain text; use numbered or dashed lists.\n'
-  text += '- One reply turn produces ONE outgoing message: the plugin buffers your text blocks and sends them when the turn ends. Do not try to split a reply into several messages.\n'
-  text += '- Incoming images, voices, videos and files appear as [图片] / [语音] / [视频] / [文件] placeholders. The plugin does not download them, so you cannot see their content; say so if the user asks about them.\n'
-  if (config.senderPrefix) {
-    text += '- Group messages are prefixed with [HH:MM nickname(QQ)] so you can tell speakers apart.\n'
-  }
+  // The prose lives in the config now (editable from the Prompt page); the code
+  // only fills the dynamic parts, so an operator can rewrite the wording without
+  // touching a build.
+  const template = String(config?.channelPrompt ?? '').trim() !== ''
+    ? String(config.channelPrompt)
+    : DEFAULT_CHANNEL_PROMPT
   const allow = computeAllowlist(config)
+
+  const senderPrefix = config?.senderPrefix ? senderPrefixParagraph() : ''
+  let media = ''
+  let actions = ''
   if (allow === null) {
-    text += '- The onebot_call tool is disabled on this channel: you cannot call OneBot actions (send images or files, group management, queries). Reply with text only.\n'
+    actions = '- The onebot_call tool is disabled on this channel: you cannot call OneBot actions (send images or files, group management, queries). Reply with text only.'
   } else {
-    text += '- To do anything other than reply in plain text, call the onebot_call tool with the OneBot action name and its params. '
-      + 'Only the actions listed below are accepted; anything else is refused.\n'
-    text += '- To send an image, voice clip, video or file as its own message, call the onebot_send_media tool. '
-      + 'To attach media to a reply message (so text and attachment arrive together), write a marker in your reply: '
-      + '[[image:/abs/path.png]], [[record:/abs/a.wav]], [[video:/abs/a.mp4]] or [[file:/abs/a.zip]] — the path may also be an http(s) URL. '
-      + 'The plugin replaces each marker with a real attachment. Only send media when the user asks for it.\n'
+    media = mediaParagraph()
+    const lines = ['- To do anything other than reply in plain text, call the onebot_call tool with the OneBot action name and its params. '
+      + 'Only the actions listed below are accepted; anything else is refused.']
     // Advertise exactly what the operator left enabled, so the model never
     // wastes a turn on an action that would be refused.
     for (const group of enabledGroups(allow)) {
       const names = group.actions.map((action) => action.name + ' (' + actionLabel(action.name) + ')').join(', ')
-      text += '  - ' + group.id + ': ' + names + '\n'
+      lines.push('  - ' + group.id + ': ' + names)
     }
+    actions = lines.join('\n')
   }
-  text += '- There is no Web approval card on this channel: do not call exit_plan_mode. Write any plan as plain text instead.\n'
-  return text
+
+  return renderPrompt(template, { senderPrefix, media, actions })
 }

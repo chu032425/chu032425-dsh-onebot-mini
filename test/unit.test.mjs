@@ -194,6 +194,15 @@ t('a root directory is refused', rootDir.ok === false)
 const dirPath = await safeUnlink('/tmp')
 t('the tmp root itself is refused', dirPath.ok === false)
 
+// --- the editable channel prompt
+import { DEFAULT_CHANNEL_PROMPT, renderPrompt, PROMPT_PLACEHOLDERS } from '../prompt.js'
+t('the default prompt documents its placeholders', PROMPT_PLACEHOLDERS.every((p) => DEFAULT_CHANNEL_PROMPT.includes(p)))
+t('renderPrompt fills a placeholder', renderPrompt('x {actions} y', { actions: 'Z' }).includes('x Z y'))
+t('renderPrompt drops an empty placeholder line', !renderPrompt('a\n{media}\nb', { media: '' }).includes('{media}'))
+t('an unknown placeholder is left alone', renderPrompt('keep {unknown}', {}).includes('{unknown}'))
+t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
+t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
+
 // --- cache inventory and manual clearing (against a throwaway profile)
 import { inventory, clearCache } from '../cacheinfo.js'
 const prevHome = process.env.DSH_HOME

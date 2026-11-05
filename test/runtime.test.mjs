@@ -235,6 +235,13 @@ const promptNoBan = buildPlatformPrompt({ ...baseConfig, onebotToolDisabled: ['s
 t('a disabled action is not advertised', !promptNoBan.includes('set_group_ban (禁言群成员)') && promptNoBan.includes('send_group_msg (发送群消息)'))
 t('the prompt advertises the media tool', promptAll.includes('onebot_send_media'))
 t('the prompt teaches the reply media markers', promptAll.includes('[[image:/abs/path.png]]'))
+
+// the prompt comes from config, so it can be edited without a rebuild
+const customPrompt = buildPlatformPrompt({ ...baseConfig, channelPrompt: 'MY PROMPT\n{actions}' })
+t('a custom prompt template is used', customPrompt.trim().startsWith('MY PROMPT'))
+t('the actions placeholder expands into the enabled list', customPrompt.includes('send_group_msg (发送群消息)'))
+const plainPrompt = buildPlatformPrompt({ ...baseConfig, channelPrompt: 'JUST TEXT' })
+t('a template without placeholders is used as-is', plainPrompt.trim() === 'JUST TEXT')
 t('the prompt omits the media tool when the tool is off', !promptOff.includes('onebot_send_media'))
 // an explicit provider::model in config wins over the deployment default
 const bridgeModel = new ChatBridge({
