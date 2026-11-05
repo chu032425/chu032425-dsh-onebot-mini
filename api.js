@@ -408,7 +408,10 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
       const url = new URL(String(req.url ?? '/'), 'http://localhost')
       const what = String(url.searchParams.get('what') ?? 'all')
       const targetUin = String(url.searchParams.get('target_uin') ?? '').trim()
-      const num = Math.min(50, Math.max(1, Number(url.searchParams.get('num') ?? 20) || 20))
+      // A Qzone page is mostly text but each post can carry images, and the
+      // gateway answers one action per page load. Keeping the page small is what
+      // keeps the panel responsive: 10 by default, 20 at the hard ceiling.
+      const num = Math.min(20, Math.max(1, Number(url.searchParams.get('num') ?? 10) || 10))
       const pos = Math.max(0, Number(url.searchParams.get('pos') ?? 0) || 0)
       const connection = getConnection()
       const offline = { available: false, error: 'not connected' }

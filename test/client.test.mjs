@@ -132,6 +132,8 @@ t('tools menu label present', zh.tabTools === '工具' && en.tabTools === 'Tools
 t('contacts menu label present', zh.tabContacts === '好友与群组' && en.tabContacts === 'Contacts')
 t('access menu label present', zh.tabAccess === '访问控制' && en.tabAccess === 'Access')
 t('qzone menu label present', zh.tabQzone === '空间' && en.tabQzone === 'Qzone')
+t('the qzone picker offers a dropdown and a manual box', typeof zh.qzoneTargetPlaceholder === 'string'
+  && zh.qzoneTargetPlaceholder.includes('QQ') && typeof zh.qzoneTargetMine === 'string' && zh.qzoneTargetMine !== '')
 t('profile menu label present', zh.tabProfile === '个人资料' && en.tabProfile === 'Profile')
 for (const key of ['profileTitle', 'profileChoose', 'profileSelf', 'profileNickname', 'profileSignature',
   'profileLevel', 'profileVip', 'profileOnline', 'profileOnlineUnknown', 'profileUnavailable', 'profileEmpty']) {

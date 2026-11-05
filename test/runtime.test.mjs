@@ -597,6 +597,30 @@ await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/a
 const listOnly = JSON.parse(listOnlyRes.body)
 t('what=list skips the other sections', listOnly.profile.available === false && listOnly.feeds.available === false)
 
+// the page size is clamped so a big space cannot stall the panel
+const seenNums = []
+const capConnection = {
+  state: 'online', selfId: '1',
+  call: async (action, params) => {
+    seenNums.push({ action, num: params?.num, count: params?.count })
+    return { total: 0, msglist: [] }
+  },
+}
+const disposeCap = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => capConnection, applyConfig: async () => {},
+})
+for (const asked of ['', '?num=999', '?num=0', '?num=abc']) {
+  const res = fakeRes()
+  await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/api/qzone' + asked, headers: {} }, res)
+}
+const listNums = seenNums.filter((call) => call.action === 'get_qzone_msg_list').map((call) => call.num)
+const feedCounts = seenNums.filter((call) => call.action === 'get_qzone_feeds').map((call) => call.count)
+t('the post page size defaults to 10', listNums[0] === 10)
+t('the post page size is capped at 20', listNums.every((num) => num <= 20) && listNums.includes(20))
+t('an invalid page size falls back to the default', listNums.includes(10))
+t('the feed page size follows the same cap', feedCounts.every((count) => count <= 20))
+disposeCap()
+
 // target_uin passes through, so the page can read a friend's space
 const seenParams = []
 const targetConnection = {
