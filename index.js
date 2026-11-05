@@ -273,6 +273,18 @@ export function apply(ctx) {
       log.record('error', { note: 'initial transport start failed: ' + describeError(error) })
     }
     log.record('bridge', { note: 'plugin mounted', mode: initial.mode, state: connection?.state ?? 'offline' })
+    // Startup self-check: confirm the tools service is reachable from this ctx.
+    // Without it every agent silently lacks the OneBot tools, which shows up as
+    // the model inventing reasons it cannot send anything.
+    try {
+      const toolsService = ctx.get('tools') ?? ctx.tools
+      log.record('bridge', {
+        note: toolsService === undefined ? 'startup check: no tools service on this ctx' : 'startup check: tools service is available',
+        hasRegister: typeof toolsService?.register === 'function',
+      })
+    } catch (error) {
+      log.record('warn', { note: 'startup check failed: ' + describeError(error) })
+    }
 
     return async () => {
       log.record('bridge', { note: 'plugin stopping' })
