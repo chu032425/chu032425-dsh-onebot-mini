@@ -43,7 +43,7 @@ export const PROMPT_PLACEHOLDERS = Object.freeze(['{senderPrefix}', '{media}', '
 export const DEFAULT_INBOUND_PROMPT = [
   '## 收到的媒体',
   '- 用户发来的图片会保存到本机，并给出形如 [图片: /绝对/路径.png] 的路径；回答前先用 read_image 工具查看这张图片，再据其内容作答。',
-  '- 语音会保存为音频文件并给出 [语音: /绝对/路径]（消息ID: …）。它不是文本，你无法直接听取。如果网关是 NapCat，可调用 onebot_call 工具的 fetch_ptt_text 动作（参数 message_id 用上面的消息ID）取 QQ 自带的语音转文字结果，再据此作答；网关不支持或取不到时，如实说明听不了，请用户改发文字。',
+  '- 语音会保存为音频文件并给出 [语音: /绝对/路径]（消息ID: …）。音频本身不是文本，你不能直接“听”。若要得到文字，请在下方「可用动作」中，按动作名称和中文注释自行查找合适的动作（例如注释为「获取语音转文字结果」的动作），用 onebot_call 调用并把消息ID作为参数；找不到合适动作或取不到结果时，如实说明听不了、请用户改发文字。',
   '- 视频会保存并给出 [视频: /绝对/路径]；文件会给出 [文件: 名称, /绝对/路径]。需要时用 read 或 bash 工具读取其中内容（如文本、表格、压缩包）。',
   '- 若占位符不带路径（只有 [图片] 这种），说明下载失败或未开启接收媒体：如实告诉用户你没有收到内容，不要凭空编造。',
 ].join('\n')
@@ -61,8 +61,8 @@ export function inboundParagraph() {
  *
  * `{enabledNote}` 在工具有效时展开为「只接受已启用动作」的说明，关闭时展开为空。
  */
-export const DEFAULT_TOOL_CALL_PROMPT = '通过桥接网关执行一个 OneBot 11 动作，例如 send_private_msg、send_group_msg、'
-  + 'get_group_info、set_group_ban。用它发送图片、文件或任何非纯文本消息。动作结果以 JSON 返回。{enabledNote}'
+export const DEFAULT_TOOL_CALL_PROMPT = '执行一个 OneBot 11 动作，例如 send_private_msg、send_group_msg、'
+  + 'get_group_info、set_group_ban。用它发送图片、文件或任何非纯文本消息。不确定用哪个动作时，按动作名称与中文注释自行挑选。动作结果以 JSON 返回。{enabledNote}'
 
 /** `onebot_send_media` 工具的默认描述。 */
 export const DEFAULT_TOOL_MEDIA_PROMPT = '向当前 QQ 会话发送图片、语音、视频或文件。'

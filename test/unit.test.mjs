@@ -11,7 +11,7 @@ import { TOOL_GROUPS, ALL_ACTIONS, STANDARD_ACTIONS, isKnownAction, computeAllow
 import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
-  isAddressed, speakerPrefix, speakerKey, textOfMessage,
+  isAddressed, speakerPrefix, speakerKey, textOfMessage, buildPlatformPrompt,
 } from '../bridge.js'
 import { tmpdir } from 'node:os'
 
@@ -262,7 +262,16 @@ const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', tool
 t('every blank prompt returns to its default', PROMPT_DEFS.every((d) => blankAll[d.field] === DEFAULTS[d.field]))
 t('the tool-call prompt adds the enabled note when actions are allowed', renderToolCallPrompt('X {enabledNote}', new Set(['a'])).includes('仅接受在 OneBot-Mini 设置中已启用的动作'))
 t('the tool-call prompt drops the note when the tool is off', !renderToolCallPrompt('X {enabledNote}', null).includes('仅接受'))
-t('the tool-call prompt falls back when empty', renderToolCallPrompt('', null).startsWith('通过桥接网关执行一个 OneBot 11 动作'))
+t('the tool-call prompt falls back when empty', renderToolCallPrompt('', null).startsWith('执行一个 OneBot 11 动作'))
+t('the tool-call prompt no longer mentions a gateway', !/网关|NapCat/.test(renderToolCallPrompt('', null)))
+// the channel prompt hands the model every enabled action with its Chinese annotation,
+// and carries no gateway-specific wording — the model discovers tools by name + annotation.
+{
+  const prompt = buildPlatformPrompt(DEFAULTS)
+  t('the channel prompt lists every catalog action by name', ALL_ACTIONS.every((name) => prompt.includes(name)))
+  t('the channel prompt pairs actions with Chinese annotations', prompt.includes('fetch_ptt_text (获取语音转文字结果)') && prompt.includes('send_group_msg (发送群消息)'))
+  t('the channel prompt has no gateway/NapCat wording', !/网关|NapCat/.test(prompt))
+}
 
 // --- cache inventory and manual clearing (against a throwaway profile)
 import { inventory, clearCache } from '../cacheinfo.js'
