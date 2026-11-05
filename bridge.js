@@ -350,7 +350,7 @@ export class ChatBridge {
     }
     let entry = this.inboundQueue.get(chatId)
     if (entry === undefined) {
-      entry = { texts: [], chat, frame, speaker, timer: undefined }
+      entry = { texts: [], chat, frame, speaker, timer: undefined, deadline: 0 }
       this.inboundQueue.set(chatId, entry)
     }
     entry.texts.push(text)
@@ -362,7 +362,19 @@ export class ChatBridge {
       await this.flush(chatId)
       return
     }
-    entry.timer = setTimeout(() => { void this.flush(chatId) }, delay)
+    // The window slides while the same speaker keeps talking, but it must never
+    // grow without bound: a flood would otherwise never flush. `deadline` is the
+    // moment this window can last at most, reset only when the speaker changes
+    // (via flush) — so a continuing speaker is served promptly.
+    const cap = Math.max(0, Number(this.config.debounceMaxMs) || 0)
+    const now = Date.now()
+    if (entry.deadline === 0 || now >= entry.deadline) {
+      // First message of the window, or the cap already passed: start a fresh
+      // deadline. If the cap is 0 there is no cap and the window slides freely.
+      entry.deadline = cap > 0 ? now + cap : 0
+    }
+    const settleIn = entry.deadline > 0 ? Math.min(delay, entry.deadline - now) : delay
+    entry.timer = setTimeout(() => { void this.flush(chatId) }, Math.max(0, settleIn))
     if (entry.timer.unref === 'function') entry.timer.unref()
   }
 

@@ -59,6 +59,9 @@ t('the speaker prefix is forced on while steering is enabled', prefixLocked.valu
 const prefixFree = normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', autoInterject: false, senderPrefix: false })
 t('the speaker prefix is free again when steering is off', prefixFree.value.senderPrefix === false)
 t('the default keeps both on', DEFAULTS.autoInterject === true && DEFAULTS.senderPrefix === true)
+t('debounceMaxMs defaults to 4000', DEFAULTS.debounceMaxMs === 4000)
+t('the merge cap is clamped and never falls below the window', normalizeConfig({ debounceMaxMs: 200, debounceMs: 1200 }).value.debounceMaxMs === 1200)
+t('an out-of-range merge cap falls back', normalizeConfig({ debounceMaxMs: 999999 }).value.debounceMaxMs === 4000)
 
 // session prefix: lowercase-letter start, safe alphabet, default on rejection
 t('session prefix default', DEFAULTS.sessionPrefix === 'onebot')

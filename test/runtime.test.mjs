@@ -1041,5 +1041,33 @@ t('the other speaker gets their own delivery', groupDeliveries.some((d) => d.inc
 t('both deliveries keep the speaker prefix', groupDeliveries.every((d) => d.startsWith('[')))
 await bridgeGroup.stop()
 
+// a continuing speaker must not starve later speakers forever: the window has a
+// hard deadline even when the same person keeps talking
+const floodDelivered = []
+const floodAgents = {
+  get: () => undefined,
+  async create(o) {
+    const agent = { session: { id: o.sessionId }, status: 'idle', followup(m) { floodDelivered.push(String(m.content[0].text)) } }
+    if (typeof o.setup === 'function') await o.setup({ systemPrompt: { section: () => () => {} }, tools: { register: () => () => {} } })
+    return { agent, dispose: async () => {} }
+  },
+  async resume() { throw new Error('none') },
+}
+const floodCtx = { on: () => () => {}, agents: floodAgents, get: (n) => (n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'p', model: 'm' }) } : undefined) }
+const bridgeFlood = new ChatBridge({
+  ctx: floodCtx,
+  config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 100, debounceMaxMs: 250, requireMention: false, senderPrefix: true, botQQ: '10001' },
+  connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
+})
+bridgeFlood.start()
+const floodMsg = (uid, text, messageId) => ({ post_type: 'message', message_type: 'group', group_id: 999, user_id: uid, message_id: messageId, message: [{ type: 'text', data: { text } }], sender: { card: 'U' + uid }, time: 1700000000 })
+// one speaker keeps talking faster than the window, so the cap forces flushes
+for (let i = 1; i <= 6; i++) await bridgeFlood.handleInbound(floodMsg(111, 'F' + i, 600 + i))
+await wait(500)
+const floodText = floodDelivered.join('|')
+t('a speaker who never pauses is served by the deadline cap', floodDelivered.length >= 1 && floodText.includes('F1'))
+t('the flushing speaker turns all arrive (no permanent starvation)', floodText.includes('F5') && floodText.includes('F6'))
+await bridgeFlood.stop()
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

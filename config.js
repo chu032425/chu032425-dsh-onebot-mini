@@ -73,6 +73,7 @@ export const DEFAULTS = Object.freeze({
   logToFile: true,
   sendTimeoutMs: 30000,
   debounceMs: 1200,
+  debounceMaxMs: 4000,
   autoInterject: true,
   deleteSentMedia: true,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
@@ -116,6 +117,7 @@ export const FIELD_KINDS = Object.freeze({
   toolMediaPrompt: 'text',
   interjectPrompt: 'text',
   debounceMs: 'number',
+  debounceMaxMs: 'number',
   autoInterject: 'boolean',
   imageCacheMaxKb: 'number',
   imageCacheTotalMb: 'number',
@@ -128,7 +130,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
   { id: 'media', fields: ['deleteSentMedia'] },
-  { id: 'reply', fields: ['debounceMs', 'autoInterject'] },
+  { id: 'reply', fields: ['debounceMs', 'debounceMaxMs', 'autoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
@@ -196,6 +198,16 @@ export function normalizeConfig(raw) {
   if (!Number.isFinite(value.debounceMs) || value.debounceMs < 0 || value.debounceMs > 10000) {
     problems.push('debounceMs must be 0-10000')
     value.debounceMs = DEFAULTS.debounceMs
+  }
+  value.debounceMaxMs = Math.trunc(value.debounceMaxMs)
+  if (!Number.isFinite(value.debounceMaxMs) || value.debounceMaxMs < 0 || value.debounceMaxMs > 60000) {
+    problems.push('debounceMaxMs must be 0-60000')
+    value.debounceMaxMs = DEFAULTS.debounceMaxMs
+  }
+  // A cap below the window would flush before the window ever settles, so the
+  // cap is raised to at least the window.
+  if (value.debounceMaxMs > 0 && value.debounceMaxMs < value.debounceMs) {
+    value.debounceMaxMs = value.debounceMs
   }
   value.sendTimeoutMs = Math.trunc(value.sendTimeoutMs)
   if (value.sendTimeoutMs < 1000 || value.sendTimeoutMs > 600000) {
