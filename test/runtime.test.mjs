@@ -930,7 +930,7 @@ const debounceAgents = {
   async resume() { throw new Error('no persisted session') },
 }
 const debounceCtx = { on: () => () => {}, agents: debounceAgents, get: (n) => (n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'p', model: 'm' }) } : undefined) }
-const bridgeDebounce = new ChatBridge({ ctx: debounceCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 80 }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+const bridgeDebounce = new ChatBridge({ ctx: debounceCtx, config: { ...baseConfig, workspacePath: "/workspace/QQ", privateDebounceMs: 80, privateDebounceMaxMs: 240, privateAutoInterject: false }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
 bridgeDebounce.start()
 await bridgeDebounce.handleInbound(inbound({ user_id: 41001, message_id: 410 }))
 await bridgeDebounce.handleInbound(inbound({ user_id: 41001, message_id: 411, message: [{ type: 'text', data: { text: '第二句' } }] }))
@@ -1020,7 +1020,7 @@ const groupAgents = {
 const groupCtx = { on: () => () => {}, agents: groupAgents, get: (n) => (n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'p', model: 'm' }) } : undefined) }
 const bridgeGroup = new ChatBridge({
   ctx: groupCtx,
-  config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 120, requireMention: false, senderPrefix: true, botQQ: '10001' },
+  config: { ...baseConfig, workspacePath: '/workspace/QQ', requireMention: false, groupDebounceMs: 120, groupDebounceMaxMs: 300, senderPrefix: true, botQQ: '10001' },
   connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
 })
 bridgeGroup.start()
@@ -1039,6 +1039,32 @@ t('the merged turn holds both lines of that speaker', groupDeliveries.some((d) =
 t('a different speaker is not merged into that turn', !groupDeliveries.some((d) => d.includes('第一句') && d.includes('另一个人')))
 t('the other speaker gets their own delivery', groupDeliveries.some((d) => d.includes('另一个人')))
 t('both deliveries keep the speaker prefix', groupDeliveries.every((d) => d.startsWith('[')))
+
+// ---- queueing while busy + same-speaker merge ----
+// A busy agent queues instead of dropping; a same-speaker message that the
+// merge judge says continues the first is folded into the queued item.
+const judgeCtx = {
+  on: () => () => {},
+  agents: { get: () => undefined },
+  get: (n) => {
+    if (n === 'llm') {
+      return { stream: () => (async function* () { yield { type: 'text-delta', text: 'MERGE' } })(), listProviders: async () => [{ id: 'p' }], listModels: async () => [{ id: 'm' }] }
+    }
+    if (n === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'p', model: 'm' }) }
+    return undefined
+  },
+}
+const bridgeQueue = new ChatBridge({ ctx: judgeCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeQueue.start()
+// two same-speaker lines, no debounce, agent never running so they enqueue and
+// the second one is judged MERGE against the first
+await bridgeQueue.enqueuePending('private:61234', { text: '第一件事', speaker: '61234', frame: {}, chat: { kind: 'private', id: '61234' } })
+await bridgeQueue.enqueuePending('private:61234', { text: '补充一句', speaker: '61234', frame: {}, chat: { kind: 'private', id: '61234' } })
+const qSnap = bridgeQueue.queueSnapshot()
+t('queued messages appear in the snapshot', qSnap.length >= 1, JSON.stringify(qSnap))
+t('a same-speaker merge keeps one item', qSnap.length >= 1 && qSnap[0].items.length === 1, JSON.stringify(qSnap.map((q) => q.items?.length)))
+t('the merged item holds both lines', qSnap.length >= 1 && qSnap[0].items[0].preview.includes('第一件事') && qSnap[0].items[0].preview.includes('补充一句'))
+await bridgeQueue.stop()
 await bridgeGroup.stop()
 
 // a continuing speaker must not starve later speakers forever: the window has a
@@ -1056,7 +1082,7 @@ const floodAgents = {
 const floodCtx = { on: () => () => {}, agents: floodAgents, get: (n) => (n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'p', model: 'm' }) } : undefined) }
 const bridgeFlood = new ChatBridge({
   ctx: floodCtx,
-  config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 100, debounceMaxMs: 250, requireMention: false, senderPrefix: true, botQQ: '10001' },
+  config: { ...baseConfig, workspacePath: '/workspace/QQ', requireMention: false, groupDebounceMs: 100, groupDebounceMaxMs: 250, senderPrefix: true, botQQ: '10001' },
   connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
 })
 bridgeFlood.start()
@@ -1068,6 +1094,21 @@ const floodText = floodDelivered.join('|')
 t('a speaker who never pauses is served by the deadline cap', floodDelivered.length >= 1 && floodText.includes('F1'))
 t('the flushing speaker turns all arrive (no permanent starvation)', floodText.includes('F5') && floodText.includes('F6'))
 await bridgeFlood.stop()
+
+// the state route carries the pending queue snapshot
+const snapWithQueue = {
+  store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {},
+  getPendingQueues: () => [{ chatId: 'group:888', kind: 'group', pending: 2, oldestMs: 1500, items: [] }],
+}
+const disposeSnap = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {}, getPendingQueues: () => [{ chatId: 'group:888', kind: 'group', pending: 2, oldestMs: 1500, items: [] }],
+})
+const snapRes = fakeRes()
+await routes.get('/onebot-mini/api/state')({ method: 'GET', url: '/onebot-mini/api/state', headers: {} }, snapRes)
+const snapBody = JSON.parse(snapRes.body)
+t('the state route reports pending queues', Array.isArray(snapBody.queues) && snapBody.queues.length === 1 && snapBody.queues[0].pending === 2)
+t('the queue entry reports its group', snapBody.queues[0].chatId === 'group:888')
+disposeSnap()
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

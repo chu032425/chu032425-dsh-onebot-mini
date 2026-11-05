@@ -259,6 +259,7 @@ export function apply(ctx) {
       listAgentPresets,
       listPermissionPresets,
       listModels,
+      getPendingQueues: () => bridge.queueSnapshot(),
     })
 
     try {

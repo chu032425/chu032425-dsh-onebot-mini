@@ -72,8 +72,18 @@ export const DEFAULTS = Object.freeze({
   logMessagePreview: true,
   logToFile: true,
   sendTimeoutMs: 30000,
-  debounceMs: 1200,
-  debounceMaxMs: 4000,
+  // Private and group chats behave differently: a private chat is one person, so
+  // waiting longer is safe, while a group must answer promptly or a second person
+  // would be kept waiting.
+  privateDebounceMs: 3000,
+  privateDebounceMaxMs: 3000,
+  privateAutoInterject: true,
+  groupDebounceMs: 3000,
+  groupDebounceMaxMs: 3000,
+  groupAutoInterject: true,
+  // Kept for older configs; mapped into the per-kind fields during normalize.
+  debounceMs: 3000,
+  debounceMaxMs: 3000,
   autoInterject: true,
   deleteSentMedia: true,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
@@ -116,6 +126,12 @@ export const FIELD_KINDS = Object.freeze({
   toolCallPrompt: 'text',
   toolMediaPrompt: 'text',
   interjectPrompt: 'text',
+  privateDebounceMs: 'number',
+  privateDebounceMaxMs: 'number',
+  privateAutoInterject: 'boolean',
+  groupDebounceMs: 'number',
+  groupDebounceMaxMs: 'number',
+  groupAutoInterject: 'boolean',
   debounceMs: 'number',
   debounceMaxMs: 'number',
   autoInterject: 'boolean',
@@ -130,7 +146,8 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
   { id: 'media', fields: ['deleteSentMedia'] },
-  { id: 'reply', fields: ['debounceMs', 'debounceMaxMs', 'autoInterject'] },
+  { id: 'replyPrivate', fields: ['privateDebounceMs', 'privateDebounceMaxMs', 'privateAutoInterject'] },
+  { id: 'replyGroup', fields: ['groupDebounceMs', 'groupDebounceMaxMs', 'groupAutoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
@@ -194,21 +211,39 @@ export function normalizeConfig(raw) {
     problems.push('port must be 1-65535')
     value.port = DEFAULTS.port
   }
-  value.debounceMs = Math.trunc(value.debounceMs)
-  if (!Number.isFinite(value.debounceMs) || value.debounceMs < 0 || value.debounceMs > 10000) {
-    problems.push('debounceMs must be 0-10000')
-    value.debounceMs = DEFAULTS.debounceMs
+  // Legacy single-kind settings (debounceMs/debounceMaxMs/autoInterject) still
+  // work: when a per-kind field was never written, it inherits the legacy value.
+  // An existing profile therefore keeps its behaviour after the split.
+  const legacyDebounce = Math.trunc(value.debounceMs)
+  const legacyMax = Math.trunc(value.debounceMaxMs)
+  const legacyInterject = value.autoInterject !== false
+  const clampWindow = (raw, field) => {
+    const num = Math.trunc(raw)
+    if (!Number.isFinite(num) || num < 0 || num > 10000) {
+      problems.push(field + ' must be 0-10000')
+      return DEFAULTS[field]
+    }
+    return num
   }
-  value.debounceMaxMs = Math.trunc(value.debounceMaxMs)
-  if (!Number.isFinite(value.debounceMaxMs) || value.debounceMaxMs < 0 || value.debounceMaxMs > 60000) {
-    problems.push('debounceMaxMs must be 0-60000')
-    value.debounceMaxMs = DEFAULTS.debounceMaxMs
+  const clampCap = (raw, field) => {
+    const num = Math.trunc(raw)
+    if (!Number.isFinite(num) || num < 0 || num > 60000) {
+      problems.push(field + ' must be 0-60000')
+      return DEFAULTS[field]
+    }
+    return num
   }
-  // A cap below the window would flush before the window ever settles, so the
-  // cap is raised to at least the window.
-  if (value.debounceMaxMs > 0 && value.debounceMaxMs < value.debounceMs) {
-    value.debounceMaxMs = value.debounceMs
-  }
+  value.debounceMs = clampWindow(legacyDebounce, 'debounceMs')
+  value.debounceMaxMs = clampCap(legacyMax, 'debounceMaxMs')
+  value.privateDebounceMs = clampWindow(source.privateDebounceMs === undefined ? value.debounceMs : value.privateDebounceMs, 'privateDebounceMs')
+  value.groupDebounceMs = clampWindow(source.groupDebounceMs === undefined ? value.debounceMs : value.groupDebounceMs, 'groupDebounceMs')
+  value.privateDebounceMaxMs = clampCap(source.privateDebounceMaxMs === undefined ? value.debounceMaxMs : value.privateDebounceMaxMs, 'privateDebounceMaxMs')
+  value.groupDebounceMaxMs = clampCap(source.groupDebounceMaxMs === undefined ? value.debounceMaxMs : value.groupDebounceMaxMs, 'groupDebounceMaxMs')
+  if (typeof source.privateAutoInterject !== 'boolean') value.privateAutoInterject = legacyInterject
+  if (typeof source.groupAutoInterject !== 'boolean') value.groupAutoInterject = legacyInterject
+  // A cap below the window would flush before the window settles.
+  if (value.privateDebounceMaxMs > 0 && value.privateDebounceMaxMs < value.privateDebounceMs) value.privateDebounceMaxMs = value.privateDebounceMs
+  if (value.groupDebounceMaxMs > 0 && value.groupDebounceMaxMs < value.groupDebounceMs) value.groupDebounceMaxMs = value.groupDebounceMs
   value.sendTimeoutMs = Math.trunc(value.sendTimeoutMs)
   if (value.sendTimeoutMs < 1000 || value.sendTimeoutMs > 600000) {
     problems.push('sendTimeoutMs must be 1000-600000')
@@ -245,10 +280,10 @@ export function normalizeConfig(raw) {
   // flattened to the same safe alphabet the chat body already uses. A value that
   // flattens to nothing usable (CJK only, punctuation only) falls back to the
   // default instead of producing a dangling '-' prefix, and says so.
-  // Steering a running answer inside a group needs the speaker prefix: without it
-  // several people's messages arrive indistinguishable, so the prefix is forced
-  // on while autoInterject is enabled. Turning autoInterject off releases it.
-  if (value.autoInterject !== false) {
+  // Steering a running answer inside a group needs the speaker prefix: without
+  // it several people's messages arrive indistinguishable, so the prefix is
+  // forced on while group steering is enabled.
+  if (value.groupAutoInterject !== false) {
     value.senderPrefix = true
   }
 

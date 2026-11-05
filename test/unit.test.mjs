@@ -59,9 +59,12 @@ t('the speaker prefix is forced on while steering is enabled', prefixLocked.valu
 const prefixFree = normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', autoInterject: false, senderPrefix: false })
 t('the speaker prefix is free again when steering is off', prefixFree.value.senderPrefix === false)
 t('the default keeps both on', DEFAULTS.autoInterject === true && DEFAULTS.senderPrefix === true)
-t('debounceMaxMs defaults to 4000', DEFAULTS.debounceMaxMs === 4000)
-t('the merge cap is clamped and never falls below the window', normalizeConfig({ debounceMaxMs: 200, debounceMs: 1200 }).value.debounceMaxMs === 1200)
-t('an out-of-range merge cap falls back', normalizeConfig({ debounceMaxMs: 999999 }).value.debounceMaxMs === 4000)
+t('private and group debounce both default to 3000', DEFAULTS.privateDebounceMs === 3000 && DEFAULTS.groupDebounceMs === 3000)
+t('the per-kind merge caps default to their windows', DEFAULTS.privateDebounceMaxMs === 3000 && DEFAULTS.groupDebounceMaxMs === 3000)
+t('a per-kind cap never falls below its window', normalizeConfig({ groupDebounceMaxMs: 200, groupDebounceMs: 1200 }).value.groupDebounceMaxMs === 1200)
+t('an out-of-range per-kind cap falls back', normalizeConfig({ privateDebounceMaxMs: 999999 }).value.privateDebounceMaxMs === 3000)
+t('a legacy single debounceMs sets both kinds', normalizeConfig({ debounceMs: 1500 }).value.privateDebounceMs === 1500 && normalizeConfig({ debounceMs: 1500 }).value.groupDebounceMs === 1500)
+t('a per-kind value beats the legacy one', normalizeConfig({ debounceMs: 1500, privateDebounceMs: 800 }).value.privateDebounceMs === 800)
 
 // session prefix: lowercase-letter start, safe alphabet, default on rejection
 t('session prefix default', DEFAULTS.sessionPrefix === 'onebot')
