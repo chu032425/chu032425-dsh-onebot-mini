@@ -26,9 +26,11 @@
  * "禁言群成员 / set_group_ban" without a second dictionary to keep in sync.
  */
 
+import { ACTION_DOCS, actionPrompt } from './actiondocs.js'
+
 /**
  * One catalogued action.
- * @typedef {{ name: string, zh: string, en: string }} ToolAction
+ * @typedef {{ name: string, zh: string, en: string, standard: boolean, params: ReadonlyArray<object>, defaultPrompt: string }} ToolAction
  */
 
 /**
@@ -36,8 +38,34 @@
  * @typedef {{ id: string, actions: ToolAction[] }} ToolGroup
  */
 
-/** Build one frozen action entry. */
-const a = (name, zh, en) => Object.freeze({ name, zh, en, standard: STANDARD_ACTIONS.has(name) })
+/**
+ * Build one frozen action entry.
+ *
+ * `params` and `defaultPrompt` come from `actiondocs.js`, so the Tools page and
+ * the channel prompt describe an action the same way. `defaultPrompt` is the
+ * built-in text an operator can override per action in the config.
+ */
+const a = (name, zh, en) => Object.freeze({
+  name,
+  zh,
+  en,
+  standard: STANDARD_ACTIONS.has(name),
+  params: ACTION_DOCS[name]?.params ?? Object.freeze([]),
+  defaultPrompt: actionPrompt(name, zh),
+})
+
+/** Chinese labels for each action group, used in the channel prompt. */
+export const GROUP_LABELS = Object.freeze({
+  message: '发送消息',
+  media: '媒体与文件',
+  group: '群管理',
+  query: '查询与信息',
+  interaction: '互动与消息操作',
+  request: '请求处理',
+  profile: '账号资料',
+  qzone: 'QQ 空间',
+  album: '群相册',
+})
 
 /**
  * The action names that belong to the OneBot 11 standard protocol

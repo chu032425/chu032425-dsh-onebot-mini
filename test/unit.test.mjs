@@ -195,6 +195,23 @@ t('the standard set has 40 OneBot 11 actions', STANDARD_ACTIONS.size === 40)
 t('the standard flag matches the STANDARD_ACTIONS set', TOOL_GROUPS.every((group) => group.actions.every((action) => action.standard === STANDARD_ACTIONS.has(action.name))))
 t('fetch_ptt_text is marked as an extension', TOOL_GROUPS.find((g) => g.id === 'interaction').actions.find((a) => a.name === 'fetch_ptt_text').standard === false)
 t('send_msg is marked standard', TOOL_GROUPS.find((g) => g.id === 'message').actions.find((a) => a.name === 'send_msg').standard === true)
+// every action ships a structured doc + a generated default prompt
+t('every catalogued action ships a default prompt', TOOL_GROUPS.every((group) => group.actions.every((action) => typeof action.defaultPrompt === 'string' && action.defaultPrompt.length > 0)))
+t('every catalogued action ships a params array', TOOL_GROUPS.every((group) => group.actions.every((action) => Array.isArray(action.params))))
+t('every documented parameter has a name, type, required flag and description', TOOL_GROUPS.every((group) => group.actions.every((action) => action.params.every((p) => typeof p.name === 'string' && p.name !== '' && typeof p.type === 'string' && typeof p.required === 'boolean' && typeof p.desc === 'string' && p.desc !== ''))))
+t('a documented action names its params and type labels', TOOL_GROUPS.find((g) => g.id === 'message').actions.find((a) => a.name === 'send_group_msg').defaultPrompt.includes('group_id（数字，必填）'))
+t('a no-arg action says so', TOOL_GROUPS.find((g) => g.id === 'query').actions.find((a) => a.name === 'get_login_info').defaultPrompt.includes('无需参数'))
+t('fetch_ptt_text documents its message_id parameter', TOOL_GROUPS.find((g) => g.id === 'interaction').actions.find((a) => a.name === 'fetch_ptt_text').defaultPrompt.includes('message_id'))
+// per-action prompt overrides live in config and are validated
+const promptNorm = normalizeConfig({ actionPrompts: { send_group_msg: '自定义群发说明', bogus_action: 'x', get_login_info: '   ', send_private_msg: 42 } }).value.actionPrompts
+t('a valid action prompt override is kept', promptNorm.send_group_msg === '自定义群发说明')
+t('unknown, blank and non-string prompt overrides are dropped', !('bogus_action' in promptNorm) && !('get_login_info' in promptNorm) && !('send_private_msg' in promptNorm))
+t('the default action override map is empty', JSON.stringify(DEFAULTS.actionPrompts) === '{}')
+{
+  const overridden = buildPlatformPrompt({ ...DEFAULTS, actionPrompts: { send_group_msg: '只发纯文本，禁止 CQ 码。' } })
+  t('an action prompt override replaces the built-in text', overridden.includes('send_group_msg：只发纯文本，禁止 CQ 码。'))
+  t('an untouched action keeps its built-in text', overridden.includes('send_private_msg：功能：发送私聊消息'))
+}
 t('unknown action is not in the catalog', isKnownAction('definitely_not_real') === false)
 t('a missing config enables every action', computeAllowlist({})?.size === ALL_ACTIONS.length)
 t('the master switch off disables the tool entirely', computeAllowlist({ onebotToolEnabled: false }) === null)
@@ -269,7 +286,8 @@ t('the tool-call prompt no longer mentions a gateway', !/网关|NapCat/.test(ren
 {
   const prompt = buildPlatformPrompt(DEFAULTS)
   t('the channel prompt lists every catalog action by name', ALL_ACTIONS.every((name) => prompt.includes(name)))
-  t('the channel prompt pairs actions with Chinese annotations', prompt.includes('fetch_ptt_text (获取语音转文字结果)') && prompt.includes('send_group_msg (发送群消息)'))
+  t('the channel prompt documents each action with its function', prompt.includes('fetch_ptt_text：功能：获取一条语音消息的转文字结果') && prompt.includes('send_group_msg：功能：发送群消息'))
+  t('the channel prompt carries parameter names and usage', prompt.includes('group_id（数字，必填）') && prompt.includes('用法：onebot_call(action="send_group_msg"'))
   t('the channel prompt has no gateway/NapCat wording', !/网关|NapCat/.test(prompt))
 }
 

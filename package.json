@@ -27,6 +27,7 @@
     "message.js",
     "tools.js",
     "toolcatalog.js",
+    "actiondocs.js",
     "imagecache.js",
     "cachepaths.js",
     "media.js",

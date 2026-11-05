@@ -256,11 +256,11 @@ t('onebot_call is registered by default', toolDefs.some((def) => def.name === 'o
 // the channel prompt advertises exactly the enabled actions
 const { buildPlatformPrompt } = await import('../bridge.js')
 const promptAll = buildPlatformPrompt(baseConfig)
-t('the prompt lists the enabled actions', promptAll.includes('send_group_msg (发送群消息)') && promptAll.includes('set_group_ban (禁言群成员)'))
+t('the prompt lists the enabled actions', promptAll.includes('send_group_msg：功能：发送群消息') && promptAll.includes('set_group_ban：功能：禁言群成员'))
 const promptOff = buildPlatformPrompt({ ...baseConfig, onebotToolEnabled: false })
-t('the prompt says the tool is off', promptOff.includes('已关闭 onebot_call 工具') && !promptOff.includes('send_group_msg (发送群消息)'))
+t('the prompt says the tool is off', promptOff.includes('已关闭 onebot_call 工具') && !promptOff.includes('send_group_msg：'))
 const promptNoBan = buildPlatformPrompt({ ...baseConfig, onebotToolDisabled: ['set_group_ban'] })
-t('a disabled action is not advertised', !promptNoBan.includes('set_group_ban (禁言群成员)') && promptNoBan.includes('send_group_msg (发送群消息)'))
+t('a disabled action is not advertised', !promptNoBan.includes('set_group_ban：') && promptNoBan.includes('send_group_msg：功能：发送群消息'))
 t('the prompt advertises the media tool', promptAll.includes('onebot_send_media'))
 t('the prompt teaches the reply media markers', promptAll.includes('[[image:/abs/path.png]]'))
 t('the prompt lists all three plugin tools', ['onebot_call', 'onebot_send_media', 'onebot_list_files'].every((name) => promptAll.includes(name)))
@@ -269,7 +269,7 @@ t('the prompt says QQ actions must use these tools', promptAll.includes('都必�
 // the prompt comes from config, so it can be edited without a rebuild
 const customPrompt = buildPlatformPrompt({ ...baseConfig, channelPrompt: 'MY PROMPT\n{actions}' })
 t('a custom prompt template is used', customPrompt.trim().startsWith('MY PROMPT'))
-t('the actions placeholder expands into the enabled list', customPrompt.includes('send_group_msg (发送群消息)'))
+t('the actions placeholder expands into the enabled list', customPrompt.includes('send_group_msg：功能：发送群消息'))
 const plainPrompt = buildPlatformPrompt({ ...baseConfig, channelPrompt: 'JUST TEXT' })
 t('a template without placeholders is used as-is', plainPrompt.trim() === 'JUST TEXT')
 t('the prompt omits the media tool when the tool is off', !promptOff.includes('onebot_send_media'))

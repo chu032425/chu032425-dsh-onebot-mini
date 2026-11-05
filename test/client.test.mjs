@@ -114,9 +114,11 @@ t('session mode is gone', !('fieldSessionMode' in zh) && !('modePlan' in zh))
 for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
   'toolGroupMessage', 'toolGroupMedia', 'toolGroupGroup', 'toolGroupQuery', 'toolGroupInteraction',
   'toolGroupRequest', 'toolGroupProfile', 'toolGroupQzone', 'toolGroupAlbum',
-  'toolActionsHint', 'toolNoteAuto', 'toolTotal', 'toolSearchPlaceholder', 'toolNoMatch']) {
+  'toolActionsHint', 'toolNoteAuto', 'toolTotal', 'toolSearchPlaceholder', 'toolNoMatch',
+  'toolPromptSummary', 'toolPromptHint', 'toolPromptReset', 'toolPromptCustom']) {
   t('tool config copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
+t('every catalog action ships a default prompt for the tools page', TOOL_GROUPS.every((group) => group.actions.every((action) => typeof action.defaultPrompt === 'string' && action.defaultPrompt !== '')))
 
 // Every catalogued action carries its annotation in the catalog itself, so the
 // list never shows a bare action id without an explanation next to it.

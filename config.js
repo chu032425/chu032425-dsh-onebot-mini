@@ -67,6 +67,11 @@ export const DEFAULTS = Object.freeze({
   agentModel: '',
   onebotToolEnabled: true,
   onebotToolDisabled: [],
+  // Per-action prompt overrides for the Tools page, keyed by action name. Only
+  // actions an operator actually edited are stored; a missing or blank entry
+  // means "use the built-in prompt from actiondocs.js". Kept out of the Settings
+  // page on purpose: it is edited from the Tools page.
+  actionPrompts: {},
   titleEqualsId: true,
   logCapacity: 500,
   logMessagePreview: true,
@@ -118,6 +123,7 @@ export const FIELD_KINDS = Object.freeze({
   agentModel: 'model',
   onebotToolEnabled: 'boolean',
   onebotToolDisabled: 'stringList',
+  actionPrompts: 'actionMap',
   titleEqualsId: 'boolean',
   logCapacity: 'number',
   logMessagePreview: 'boolean',
@@ -190,6 +196,17 @@ function coerce(field, raw) {
   if (kind === 'enum') return raw === 'reverse' || raw === 'forward' ? raw : fallback
   if (kind === 'permission') return String(raw)
   if (kind === 'model') return String(raw)
+  if (kind === 'actionMap') {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return fallback
+    const out = {}
+    for (const [name, text] of Object.entries(raw)) {
+      if (!isKnownAction(name)) continue
+      if (typeof text !== 'string') continue
+      if (text.trim() === '') continue
+      out[name] = text
+    }
+    return out
+  }
   return String(raw)
 }
 
