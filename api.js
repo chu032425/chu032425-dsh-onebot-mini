@@ -17,6 +17,7 @@ import { DEFAULTS, FIELD_GROUPS, FIELD_KINDS, MODE_FIELDS } from './config.js'
 import { TOOL_GROUPS } from './toolcatalog.js'
 import { fetchIntoCache, isAllowedImageUrl, readCached } from './imagecache.js'
 import { sendMedia, MEDIA_KINDS } from './media.js'
+import { PROMPT_DEFS } from './prompt.js'
 import { inventory, clearCache } from './cacheinfo.js'
 
 /** Route path prefix. */
@@ -96,6 +97,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         defaults: DEFAULTS,
         modeFields: MODE_FIELDS,
         toolCatalog: TOOL_GROUPS,
+        promptDefs: PROMPT_DEFS,
         workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
         agentPresets: typeof listAgentPresets === 'function' ? await listAgentPresets() : { available: false, presets: [] },
         permissionPresets: typeof listPermissionPresets === 'function' ? listPermissionPresets() : { available: false, options: [], defaultPreset: '' },
@@ -158,6 +160,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         defaults: DEFAULTS,
         modeFields: MODE_FIELDS,
         toolCatalog: TOOL_GROUPS,
+        promptDefs: PROMPT_DEFS,
         workspaces: typeof listWorkspaces === 'function' ? listWorkspaces() : { available: false, workspaces: [] },
         agentPresets: typeof listAgentPresets === 'function' ? await listAgentPresets() : { available: false, presets: [] },
         permissionPresets: typeof listPermissionPresets === 'function' ? listPermissionPresets() : { available: false, options: [], defaultPreset: '' },

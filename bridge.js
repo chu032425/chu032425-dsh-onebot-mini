@@ -15,7 +15,7 @@
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, actionLabel } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, mediaParagraph, senderPrefixParagraph, renderPrompt } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, mediaParagraph, senderPrefixParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -690,6 +690,12 @@ export class ChatBridge {
           allow,
           chatId,
           deleteSentMedia: this.config.deleteSentMedia === true,
+          prompts: {
+            call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
+            media: String(this.config.toolMediaPrompt ?? '').trim() !== ''
+              ? String(this.config.toolMediaPrompt)
+              : DEFAULT_TOOL_MEDIA_PROMPT,
+          },
         })
       }
       agentCtx.systemPrompt.section({

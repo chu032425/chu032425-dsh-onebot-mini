@@ -146,7 +146,9 @@ t('the qzone picker offers a dropdown and a manual box', typeof zh.qzoneTargetPl
 t('profile menu label present', zh.tabProfile === '个人资料' && en.tabProfile === 'Profile')
 t('cache menu label present', zh.tabCache === '缓存' && en.tabCache === 'Cache')
 t('prompt menu label present', zh.tabPrompts === '提示词' && en.tabPrompts === 'Prompt')
-for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsPlaceholderHint', 'promptsReset', 'promptsSave', 'promptsSaved']) {
+for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsReset', 'promptsSave', 'promptsSaved',
+  'promptDefChannel', 'promptDefChannelHint', 'promptDefToolCall', 'promptDefToolCallHint',
+  'promptDefToolMedia', 'promptDefToolMediaHint', 'promptsPlaceholders', 'promptsNoPlaceholders']) {
   t('prompt copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 for (const key of ['cacheTitle', 'cacheTotal', 'cacheConfig', 'cacheLogs', 'cacheFiles', 'cacheKindImage', 'cacheKindAudio', 'cacheKindVideo', 'cacheKindFile', 'cacheClearLogs',

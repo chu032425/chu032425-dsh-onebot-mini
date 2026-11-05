@@ -904,5 +904,17 @@ const cachePostRes = fakeRes()
 await routes.get('/onebot-mini/api/cache/clear')({ method: 'GET', url: '/onebot-mini/api/cache/clear', headers: {} }, cachePostRes)
 t('the cache clear route rejects GET', cachePostRes.statusCode === 405)
 
+// the state route exposes the prompt registry so the page can render each one
+const disposeState = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {},
+})
+const stateRes = fakeRes()
+await routes.get('/onebot-mini/api/state')({ method: 'GET', url: '/onebot-mini/api/state', headers: {} }, stateRes)
+const stateBody = JSON.parse(stateRes.body)
+t('the state route reports the prompt registry', Array.isArray(stateBody.promptDefs) && stateBody.promptDefs.length === 3)
+t('each prompt def names its config field', stateBody.promptDefs.every((d) => typeof d.field === 'string'))
+t('each prompt def carries its default', stateBody.promptDefs.every((d) => typeof d.default === 'string' && d.default !== ''))
+disposeState()
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

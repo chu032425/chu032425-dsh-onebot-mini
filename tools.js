@@ -12,6 +12,8 @@
  * which a git-installed plugin cannot resolve.
  */
 
+import { DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT } from './prompt.js'
+
 /** The tool definition, minus the parts that need a live connection. */
 const PARAMETERS = Object.freeze({
   type: 'object',
@@ -53,19 +55,16 @@ const OUTPUT_SCHEMA = Object.freeze({
  *   `allow` is a Set of action names; an action outside it is refused instead
  *   of being relayed. The caller omits the tool entirely when nothing is allowed.
  */
-export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia }) {
+export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia, prompts }) {
   const allowed = allow instanceof Set ? allow : undefined
   // The chat this agent serves, so a media send can default to it instead of
   // making the model repeat the target on every call.
   const [defaultType, defaultId] = String(chatId ?? '').split(':')
   agentCtx.tools.register({
     name: 'onebot_call',
-    description: 'Call one OneBot 11 action through the bridged gateway, for example send_group_msg, '
-      + 'send_private_msg, get_group_info or set_group_ban. Use this to send images, files or any '
-      + 'message that is not plain text. The action response comes back as JSON. '
-      + (allowed === undefined
-        ? ''
-        : 'Only the actions enabled in the OneBot-Mini settings are accepted; anything else is refused.'),
+    // The description is a configurable prompt; the caller renders the dynamic
+    // enabled-actions note into it. Fall back to the default when none is passed.
+    description: (typeof prompts?.call === 'string' && prompts.call !== '') ? prompts.call : DEFAULT_TOOL_CALL_PROMPT,
     parameters: PARAMETERS,
     output: {
       schema: OUTPUT_SCHEMA,
@@ -94,9 +93,7 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
   // inlines the bytes, which is what makes "reply with a local picture" work.
   agentCtx.tools.register({
     name: 'onebot_send_media',
-    description: 'Send an image, voice clip, video or file to the current QQ chat. '
-      + 'Pass `path` for a local file (its bytes are sent inline), or `url`, or `base64`. '
-      + 'Defaults to the chat this conversation is in; override with chatType and chatId.',
+    description: (typeof prompts?.media === 'string' && prompts.media !== '') ? prompts.media : DEFAULT_TOOL_MEDIA_PROMPT,
     parameters: {
       type: 'object',
       properties: {

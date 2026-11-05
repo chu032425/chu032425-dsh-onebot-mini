@@ -195,13 +195,21 @@ const dirPath = await safeUnlink('/tmp')
 t('the tmp root itself is refused', dirPath.ok === false)
 
 // --- the editable channel prompt
-import { DEFAULT_CHANNEL_PROMPT, renderPrompt, PROMPT_PLACEHOLDERS } from '../prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, renderPrompt, PROMPT_PLACEHOLDERS, PROMPT_DEFS, renderToolCallPrompt } from '../prompt.js'
 t('the default prompt documents its placeholders', PROMPT_PLACEHOLDERS.every((p) => DEFAULT_CHANNEL_PROMPT.includes(p)))
 t('renderPrompt fills a placeholder', renderPrompt('x {actions} y', { actions: 'Z' }).includes('x Z y'))
 t('renderPrompt drops an empty placeholder line', !renderPrompt('a\n{media}\nb', { media: '' }).includes('{media}'))
 t('an unknown placeholder is left alone', renderPrompt('keep {unknown}', {}).includes('{unknown}'))
 t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
 t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
+t('the prompt registry covers channel and both tools', PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,toolCallPrompt,toolMediaPrompt')
+t('every registered prompt has a config default', PROMPT_DEFS.every((d) => typeof DEFAULTS[d.field] === 'string' && DEFAULTS[d.field] !== ''))
+t('every registered prompt has a label key', PROMPT_DEFS.every((d) => typeof d.labelKey === 'string' && d.labelKey !== ''))
+const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', toolMediaPrompt: '' }).value
+t('every blank prompt returns to its default', PROMPT_DEFS.every((d) => blankAll[d.field] === DEFAULTS[d.field]))
+t('the tool-call prompt adds the enabled note when actions are allowed', renderToolCallPrompt('X {enabledNote}', new Set(['a'])).includes('Only the actions enabled'))
+t('the tool-call prompt drops the note when the tool is off', !renderToolCallPrompt('X {enabledNote}', null).includes('enabled'))
+t('the tool-call prompt falls back when empty', renderToolCallPrompt('', null).startsWith('Call one OneBot 11 action'))
 
 // --- cache inventory and manual clearing (against a throwaway profile)
 import { inventory, clearCache } from '../cacheinfo.js'

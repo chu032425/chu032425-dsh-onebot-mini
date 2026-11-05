@@ -19,7 +19,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** The DSH home, honoring `$DSH_HOME` then `~/.dsh`. */
 export function dshHome() {
@@ -74,6 +74,8 @@ export const DEFAULTS = Object.freeze({
   sendTimeoutMs: 30000,
   deleteSentMedia: true,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
+  toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
+  toolMediaPrompt: DEFAULT_TOOL_MEDIA_PROMPT,
   imageCacheMaxKb: 1024,
   imageCacheTotalMb: 100,
   imageShowMaxMb: 32,
@@ -107,6 +109,8 @@ export const FIELD_KINDS = Object.freeze({
   sendTimeoutMs: 'number',
   deleteSentMedia: 'boolean',
   channelPrompt: 'text',
+  toolCallPrompt: 'text',
+  toolMediaPrompt: 'text',
   imageCacheMaxKb: 'number',
   imageCacheTotalMb: 'number',
   imageShowMaxMb: 'number',
@@ -217,10 +221,11 @@ export function normalizeConfig(raw) {
   // flattened to the same safe alphabet the chat body already uses. A value that
   // flattens to nothing usable (CJK only, punctuation only) falls back to the
   // default instead of producing a dangling '-' prefix, and says so.
-  // An emptied prompt would leave the model with no channel guidance, so a blank
-  // value silently returns to the shipped default.
-  if (String(value.channelPrompt ?? '').trim() === '') {
-    value.channelPrompt = DEFAULTS.channelPrompt
+  // An emptied prompt would leave the model with no guidance, so a blank value
+  // silently returns to the shipped default. Driven by the same registry the
+  // Prompt page renders, so a newly registered prompt gets the same treatment.
+  for (const def of PROMPT_DEFS) {
+    if (String(value[def.field] ?? '').trim() === '') value[def.field] = DEFAULTS[def.field]
   }
 
   const rawPrefix = String(value.sessionPrefix ?? '').trim()
