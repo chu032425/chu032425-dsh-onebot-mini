@@ -16,6 +16,7 @@
 import { DEFAULTS, FIELD_GROUPS, FIELD_KINDS, MODE_FIELDS } from './config.js'
 import { TOOL_GROUPS } from './toolcatalog.js'
 import { fetchIntoCache, isAllowedImageUrl, readCached } from './imagecache.js'
+import { sendMedia, MEDIA_KINDS } from './media.js'
 
 /** Route path prefix. */
 export const API_PREFIX = '/onebot-mini/api'
@@ -683,6 +684,73 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     },
   })
 
+  /**
+   * Send one media segment to a chat.
+   *
+   * This is the operator-facing half of media sending: the browser posts a URL,
+   * a base64 payload, or a path on this host, and the plugin relays it as a
+   * OneBot media segment over the same WebSocket. A local path is read here and
+   * inlined as base64, so the gateway never needs to see this host's filesystem.
+   *
+   * Body: `{ chatType, chatId, kind, url? | base64? | path?, name? }`.
+   */
+  const disposeSendMedia = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/send-media',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      let body
+      try {
+        body = await readJsonBody(req)
+      } catch (error) {
+        sendJson(res, 400, { error: String(error?.message ?? error) })
+        return
+      }
+      const connection = getConnection()
+      if (connection === undefined || connection.state !== 'online') {
+        sendJson(res, 200, { ok: false, error: 'not connected' })
+        return
+      }
+      const result = await sendMedia(connection, {
+        chatType: body?.chatType,
+        chatId: body?.chatId,
+        kind: body?.kind,
+        url: body?.url,
+        base64: body?.base64,
+        path: body?.path,
+        name: body?.name,
+      })
+      sendJson(res, result.ok === true ? 200 : 400, result)
+    },
+  })
+
+  /**
+   * What media kinds this build can send. A tiny capability probe so a caller
+   * does not have to hard-code the list.
+   */
+  const disposeMediaKinds = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/media-kinds',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      sendJson(res, 200, { kinds: MEDIA_KINDS })
+    },
+  })
+
   const disposeClear = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/logs/clear',
@@ -711,6 +779,8 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     disposeQzone()
     disposeProfile()
     disposeImage()
+    disposeSendMedia()
+    disposeMediaKinds()
     disposeClear()
   }
 }

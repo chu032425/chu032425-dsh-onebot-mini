@@ -53,8 +53,11 @@ const OUTPUT_SCHEMA = Object.freeze({
  *   `allow` is a Set of action names; an action outside it is refused instead
  *   of being relayed. The caller omits the tool entirely when nothing is allowed.
  */
-export function registerTools(agentCtx, { connection, allow }) {
+export function registerTools(agentCtx, { connection, allow, chatId }) {
   const allowed = allow instanceof Set ? allow : undefined
+  // The chat this agent serves, so a media send can default to it instead of
+  // making the model repeat the target on every call.
+  const [defaultType, defaultId] = String(chatId ?? '').split(':')
   agentCtx.tools.register({
     name: 'onebot_call',
     description: 'Call one OneBot 11 action through the bridged gateway, for example send_group_msg, '
@@ -83,6 +86,54 @@ export function registerTools(agentCtx, { connection, allow }) {
       } catch (error) {
         return { ok: false, error: String(error?.message ?? error) }
       }
+    },
+  })
+
+  // A dedicated media tool: `onebot_call` can send an image too, but only from a
+  // URL the gateway can read. This one also accepts a path on this host and
+  // inlines the bytes, which is what makes "reply with a local picture" work.
+  agentCtx.tools.register({
+    name: 'onebot_send_media',
+    description: 'Send an image, voice clip, video or file to the current QQ chat. '
+      + 'Pass `path` for a local file (its bytes are sent inline), or `url`, or `base64`. '
+      + 'Defaults to the chat this conversation is in; override with chatType and chatId.',
+    parameters: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['image', 'record', 'video', 'file'], description: 'Kind of media.' },
+        path: { type: 'string', description: 'Local file path on the DSH host.' },
+        url: { type: 'string', description: 'A URL the gateway can reach.' },
+        base64: { type: 'string', description: 'Raw base64 payload (no data: prefix).' },
+        name: { type: 'string', description: 'Display name, for a file.' },
+        chatType: { type: 'string', enum: ['private', 'group'], description: 'Defaults to the current chat.' },
+        chatId: { type: 'string', description: 'Target id; defaults to the current chat.' },
+      },
+      required: ['kind'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: OUTPUT_SCHEMA,
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+    },
+    timeoutMs: 120000,
+    isConcurrencySafe: () => false,
+    async execute(args) {
+      const chatType = String(args?.chatType ?? defaultType ?? '').trim()
+      const targetId = String(args?.chatId ?? defaultId ?? '').trim()
+      if (chatType === '' || targetId === '') {
+        return { ok: false, error: 'chatType and chatId are required (the current chat is not known)' }
+      }
+      const { sendMedia } = await import('./media.js')
+      const result = await sendMedia(connection, {
+        chatType,
+        chatId: targetId,
+        kind: args?.kind,
+        path: args?.path,
+        url: args?.url,
+        base64: args?.base64,
+        name: args?.name,
+      })
+      return result
     },
   })
 }

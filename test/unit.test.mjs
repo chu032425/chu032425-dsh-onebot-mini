@@ -168,5 +168,17 @@ t('the cache root sits beside the config', cacheRoot().endsWith('onebot-mini-cac
 t('an account folder keeps only digits', accountDir('2000002').endsWith('/2000002'))
 t('a hostile account id cannot escape the cache root', !accountDir('../etc').includes('..'))
 
+// --- media segments
+import { buildSegment, MEDIA_KINDS, readFileAsBase64, MAX_MEDIA_BYTES } from '../media.js'
+t('an image segment uses base64 when given base64', JSON.stringify(buildSegment('image', { base64: 'AAA' })) === '{"type":"image","data":{"file":"base64://AAA"}}')
+t('a segment uses the url when given a url', JSON.stringify(buildSegment('image', { url: 'http://x/y.png' })) === '{"type":"image","data":{"file":"http://x/y.png"}}')
+t('a file segment carries its name', JSON.stringify(buildSegment('file', { url: 'http://x/y.zip' }, 'a.zip')) === '{"type":"file","data":{"file":"http://x/y.zip","name":"a.zip"}}')
+t('media kinds cover image, record, video and file', JSON.stringify(MEDIA_KINDS) === '["image","record","video","file"]')
+t('the media ceiling is 20 MB', MAX_MEDIA_BYTES === 20 * 1024 * 1024)
+const readBack = await readFileAsBase64('/tmp/onebot-mini-unit.json')
+t('a local file is read into base64', readBack.ok === true && typeof readBack.base64 === 'string' && readBack.base64.length > 0)
+const missingFile = await readFileAsBase64('/tmp/definitely-not-here-xyz')
+t('a missing file is reported', missingFile.ok === false && missingFile.reason !== '')
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

@@ -228,6 +228,8 @@ const promptOff = buildPlatformPrompt({ ...baseConfig, onebotToolEnabled: false 
 t('the prompt says the tool is off', promptOff.includes('onebot_call tool is disabled') && !promptOff.includes('send_group_msg (发送群消息)'))
 const promptNoBan = buildPlatformPrompt({ ...baseConfig, onebotToolDisabled: ['set_group_ban'] })
 t('a disabled action is not advertised', !promptNoBan.includes('set_group_ban (禁言群成员)') && promptNoBan.includes('send_group_msg (发送群消息)'))
+t('the prompt advertises the media tool', promptAll.includes('onebot_send_media'))
+t('the prompt omits the media tool when the tool is off', !promptOff.includes('onebot_send_media'))
 // an explicit provider::model in config wins over the deployment default
 const bridgeModel = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', agentModel: 'localhost::group/never-stuck' },
@@ -760,6 +762,31 @@ const postMethodRes = fakeRes()
 await routes.get('/onebot-mini/api/image')({ method: 'POST', url: '/onebot-mini/api/image?qq=1&url=x', headers: {} }, postMethodRes)
 t('the image route rejects POST', postMethodRes.statusCode === 405)
 disposeImg()
+
+// the send-media route validates its input and relays a real segment
+const mediaCalls = []
+const mediaConnection = { state: 'online', selfId: '1', call: async (action, params) => { mediaCalls.push({ action, params }); return { message_id: 42 } } }
+const disposeMedia = registerRoutes(routeCtx, {
+  store: { snapshot: () => ({ config: baseConfig }), read: () => baseConfig },
+  log, getConnection: () => mediaConnection, applyConfig: async () => {},
+})
+const postJson = async (path, body) => {
+  const res = fakeRes()
+  await routes.get(path.split('?')[0])({ method: 'POST', url: path, headers: {}, [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body)) } }, res)
+  return { status: res.statusCode, body: res.body === '' ? {} : JSON.parse(res.body) }
+}
+const sendOk = await postJson('/onebot-mini/api/send-media', { chatType: 'group', chatId: '2000003', kind: 'image', base64: 'AAA' })
+t('the send-media route relays a group image', sendOk.status === 200 && sendOk.body.ok === true && mediaCalls.some((c) => c.action === 'send_group_msg'))
+t('the media segment is base64', mediaCalls[0].params.message[0].type === 'image' && mediaCalls[0].params.message[0].data.file === 'base64://AAA')
+const sendPrivate = await postJson('/onebot-mini/api/send-media', { chatType: 'private', chatId: '123', kind: 'file', url: 'http://x/y.zip', name: 'y.zip' })
+t('a private file send uses send_private_msg', sendPrivate.body.ok === true && mediaCalls.some((c) => c.action === 'send_private_msg'))
+const badKind = await postJson('/onebot-mini/api/send-media', { chatType: 'group', chatId: '1', kind: 'sticker', base64: 'AAA' })
+t('an unknown media kind is refused', badKind.status === 400 && badKind.body.ok === false)
+const badChat = await postJson('/onebot-mini/api/send-media', { chatType: 'group', chatId: 'abc', kind: 'image', base64: 'AAA' })
+t('a non-numeric chat id is refused', badChat.status === 400)
+const noSource = await postJson('/onebot-mini/api/send-media', { chatType: 'group', chatId: '1', kind: 'image' })
+t('a missing source is refused', noSource.status === 400)
+disposeMedia()
 
 // an image over the cache cap is streamed through, not refused: the route serves
 // the bytes with a "not cached" marker, and nothing is written to disk

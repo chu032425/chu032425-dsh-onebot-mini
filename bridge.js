@@ -444,7 +444,7 @@ export class ChatBridge {
     }
 
     try {
-      handle = await this.ctx.agents.resume({ resumeSessionId: sessionId, setup: this.buildSetup(presetId) })
+      handle = await this.ctx.agents.resume({ resumeSessionId: sessionId, setup: this.buildSetup(presetId, chatId) })
       this.log.record('bridge', { note: 'session resumed', chatId, sessionId })
     } catch (resumeError) {
       this.log.record('bridge', {
@@ -454,7 +454,7 @@ export class ChatBridge {
         error: this.describeError(resumeError),
       })
       try {
-        handle = await this.ctx.agents.create({ sessionId, meta, agentOptions, setup: this.buildSetup(presetId) })
+        handle = await this.ctx.agents.create({ sessionId, meta, agentOptions, setup: this.buildSetup(presetId, chatId) })
         created = true
         this.log.record('bridge', { note: 'session created', chatId, sessionId })
       } catch (createError) {
@@ -466,7 +466,7 @@ export class ChatBridge {
           fallback: fresh,
           error: this.describeError(createError),
         })
-        handle = await this.ctx.agents.create({ sessionId: fresh, meta, agentOptions, setup: this.buildSetup(presetId) })
+        handle = await this.ctx.agents.create({ sessionId: fresh, meta, agentOptions, setup: this.buildSetup(presetId, chatId) })
         created = true
         this.log.record('bridge', { note: 'session created with a fallback id', chatId, sessionId: fresh })
       }
@@ -676,7 +676,7 @@ export class ChatBridge {
    * @param presetId - resolved preset id, or undefined for the Host default.
    * @returns the setup callback.
    */
-  buildSetup(presetId) {
+  buildSetup(presetId, chatId) {
     return async (agentCtx) => {
       // The tool is registered only when at least one action is enabled, so a
       // chat never sees a `onebot_call` that can do nothing. Evaluated per agent
@@ -684,7 +684,7 @@ export class ChatBridge {
       const allow = computeAllowlist(this.config)
       if (allow !== null) {
         const { registerTools } = await import('./tools.js')
-        registerTools(agentCtx, { connection: this.connection, allow })
+        registerTools(agentCtx, { connection: this.connection, allow, chatId })
       }
       agentCtx.systemPrompt.section({
         name: 'channel:dsh-onebot-mini',
@@ -828,6 +828,8 @@ export function buildPlatformPrompt(config) {
   } else {
     text += '- To do anything other than reply in plain text, call the onebot_call tool with the OneBot action name and its params. '
       + 'Only the actions listed below are accepted; anything else is refused.\n'
+    text += '- To send an image, voice clip, video or file, prefer the onebot_send_media tool: it accepts a local path '
+      + '(the bytes are inlined), a URL, or base64, and defaults to the current chat. Only send media when the user asks for it.\n'
     // Advertise exactly what the operator left enabled, so the model never
     // wastes a turn on an action that would be refused.
     for (const group of enabledGroups(allow)) {
