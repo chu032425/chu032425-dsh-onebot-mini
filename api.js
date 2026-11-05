@@ -65,7 +65,7 @@ async function readJsonBody(req) {
  *   providers for the pickers.
  * @returns the disposer.
  */
-export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels }) {
+export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels, getSessionIdForChat }) {
   const disposeState = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/state',
@@ -817,6 +817,55 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     },
   })
 
+  /**
+   * Diagnostic: which tools this chat's agent actually sees.
+   *
+   * Tool visibility is the difference between "the model refuses to send media"
+   * and "the tool was never registered for this agent", and only the tools
+   * service can answer it. `?chatId=group:123` or `?chatId=private:456`.
+   */
+  const disposeToolProbe = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/tool-probe',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      const url = new URL(String(req.url ?? '/'), 'http://localhost')
+      const chatId = String(url.searchParams.get('chatId') ?? '').trim()
+      const tools = ctx.get('tools')
+      if (tools === undefined) {
+        sendJson(res, 200, { available: false, error: 'no tools service' })
+        return
+      }
+      let scope
+      try {
+        const agents = ctx.get('agents')
+        const sessionId = typeof getSessionIdForChat === 'function' ? getSessionIdForChat(chatId) : undefined
+        scope = sessionId === undefined ? undefined : agents?.get?.(sessionId)
+      } catch {
+        scope = undefined
+      }
+      try {
+        const schemas = tools.schemas(scope)
+        const names = schemas.map((schema) => String(schema.name ?? '')).filter((name) => name !== '')
+        sendJson(res, 200, {
+          available: true,
+          chatId,
+          scopeFound: scope !== undefined,
+          total: names.length,
+          onebot: names.filter((name) => name.startsWith('onebot')),
+          names,
+        })
+      } catch (error) {
+        sendJson(res, 200, { available: false, error: String(error?.message ?? error) })
+      }
+    },
+  })
+
   const disposeClear = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/logs/clear',
@@ -845,6 +894,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     disposeQzone()
     disposeProfile()
     disposeImage()
+    disposeToolProbe()
     disposeSendMedia()
     disposeMediaKinds()
     disposeCache()
