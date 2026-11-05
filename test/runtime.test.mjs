@@ -706,6 +706,23 @@ t('the profile route degrades when offline', JSON.parse(offlineProfileRes.body).
 disposeOfflineProfile()
 disposeProfileRoutes()
 
+// the image route refuses anything that is not a known image host, and always
+// requires a url
+const disposeImg = registerRoutes(routeCtx, {
+  store: { snapshot: () => ({ config: baseConfig }), read: () => ({ ...baseConfig, imageCacheMaxKb: 1024, imageCacheTotalMb: 100 }) },
+  log, getConnection: () => ({ state: 'online', selfId: '1', call: async () => ({}) }), applyConfig: async () => {},
+})
+const badHostRes = fakeRes()
+await routes.get('/onebot-mini/api/image')({ method: 'GET', url: '/onebot-mini/api/image?qq=1&url=' + encodeURIComponent('https://evil.example.com/x.jpg'), headers: {} }, badHostRes)
+t('the image route refuses an unknown host', badHostRes.statusCode === 400)
+const noUrlRes = fakeRes()
+await routes.get('/onebot-mini/api/image')({ method: 'GET', url: '/onebot-mini/api/image?qq=1', headers: {} }, noUrlRes)
+t('the image route requires a url', noUrlRes.statusCode === 400)
+const postMethodRes = fakeRes()
+await routes.get('/onebot-mini/api/image')({ method: 'POST', url: '/onebot-mini/api/image?qq=1&url=x', headers: {} }, postMethodRes)
+t('the image route rejects POST', postMethodRes.statusCode === 405)
+disposeImg()
+
 disposeQzone()
 
 disposeExtra()

@@ -148,5 +148,18 @@ const filteredDisabled = normalizeConfig({ onebotToolDisabled: ['set_group_ban',
 t('unknown and duplicate disabled actions are dropped', JSON.stringify(filteredDisabled) === '["set_group_ban"]', JSON.stringify(filteredDisabled))
 t('snapshot ships the tool catalog', Array.isArray(snap.toolCatalog) && snap.toolCatalog.length === TOOL_GROUPS.length)
 
+// --- image cache: url allow-list and account folders
+import { isAllowedImageUrl, accountDir, cacheRoot } from '../imagecache.js'
+t('a qzone image host is allowed', isAllowedImageUrl('http://photomaz.photo.store.qq.com/psc?/abc/b&bo=x'))
+t('a qpic host is allowed', isAllowedImageUrl('https://gchat.qpic.cn/gchatpic_new/1/2-3-4/0'))
+t('a random host is refused', !isAllowedImageUrl('https://evil.example.com/a.jpg'))
+t('a host that merely ends with the suffix text is refused', !isAllowedImageUrl('https://notqq.com/a.jpg'))
+t('a lookalike suffix is refused', !isAllowedImageUrl('https://qq.com.evil.io/a.jpg'))
+t('a non-http scheme is refused', !isAllowedImageUrl('file:///etc/passwd'))
+t('a malformed url is refused', !isAllowedImageUrl('not a url'))
+t('the cache root sits beside the config', cacheRoot().endsWith('onebot-mini-cache'))
+t('an account folder keeps only digits', accountDir('2000002').endsWith('/2000002'))
+t('a hostile account id cannot escape the cache root', !accountDir('../etc').includes('..'))
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

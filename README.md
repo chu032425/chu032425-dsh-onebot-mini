@@ -241,6 +241,22 @@ QQ 空间、群相册。
 一次只取 **10 条**（`num` 上限 20），因为每条说说可能带图，取太多会让面板卡顿；
 要翻更多内容用 `onebot_call` 的 `get_qzone_msg_list` 配合 `pos` 分页。
 
+### 图片与本地缓存
+
+说说里的图片会显示成缩略图，点开看原图。图片**下载一次就缓存在本地**，之后不再重复请求。
+
+- 缓存位置：`<DSH_HOME>/profiles/<profile>/onebot-mini-cache/<QQ号>/<hash>.<ext>`
+  —— 用 QQ 号分文件夹，不同账号互不影响；
+- **下载前先判大小**：先发 `HEAD` 看 `Content-Length`，超过 `imageCacheMaxKb`（默认 1024 KB）
+  就直接放弃，不读正文；没有 `Content-Length` 时边读边计数，超了立即中断；
+- **总量有上限**：`imageCacheTotalMb`（默认 100 MB），每次写入后按最旧优先清理，直到不超预算；
+- 同一张图并发请求只会下载一次（in-flight 去重）；
+- 只允许 `*.qq.com` / `*.qpic.cn` / `*.qlogo.cn` / `*.gtimg.com` / `*.myqcloud.com` 的图片地址，
+  防止帖子里的恶意 URL 被用来探测内网（SSRF）；
+- 图片经 `/onebot-mini/api/image?qq=<号>&url=<地址>` 代理返回，所以浏览器不需要带 QQ 的登录态。
+
+两个上限都在设置页「诊断」组里可调。
+
 发表说说、评论、点赞这类**写操作**不放在这个页面上，避免误点发出去；
 模型可以通过 `onebot_call` 调用（「QQ 空间」分组的 14 个动作）。
 

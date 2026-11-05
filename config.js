@@ -71,6 +71,8 @@ export const DEFAULTS = Object.freeze({
   logMessagePreview: true,
   logToFile: true,
   sendTimeoutMs: 30000,
+  imageCacheMaxKb: 1024,
+  imageCacheTotalMb: 100,
 })
 
 /** Field kinds the config page renders. */
@@ -99,6 +101,8 @@ export const FIELD_KINDS = Object.freeze({
   logMessagePreview: 'boolean',
   logToFile: 'boolean',
   sendTimeoutMs: 'number',
+  imageCacheMaxKb: 'number',
+  imageCacheTotalMb: 'number',
 })
 
 /** Field order and grouping for the config page. */
@@ -106,7 +110,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
-  { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
+  { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
 ])
 
 /**
@@ -172,6 +176,16 @@ export function normalizeConfig(raw) {
   if (value.sendTimeoutMs < 1000 || value.sendTimeoutMs > 600000) {
     problems.push('sendTimeoutMs must be 1000-600000')
     value.sendTimeoutMs = DEFAULTS.sendTimeoutMs
+  }
+  value.imageCacheMaxKb = Math.trunc(value.imageCacheMaxKb)
+  if (value.imageCacheMaxKb < 64 || value.imageCacheMaxKb > 20480) {
+    problems.push('imageCacheMaxKb must be 64-20480')
+    value.imageCacheMaxKb = DEFAULTS.imageCacheMaxKb
+  }
+  value.imageCacheTotalMb = Math.trunc(value.imageCacheTotalMb)
+  if (value.imageCacheTotalMb < 8 || value.imageCacheTotalMb > 4096) {
+    problems.push('imageCacheTotalMb must be 8-4096')
+    value.imageCacheTotalMb = DEFAULTS.imageCacheTotalMb
   }
   value.logCapacity = Math.trunc(value.logCapacity)
   if (value.logCapacity < 50 || value.logCapacity > 5000) {

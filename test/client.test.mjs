@@ -128,6 +128,9 @@ t('the tools page renders every catalog group', TOOL_GROUPS.length === 9)
 t('the friend row labels its hint as the nickname', zh.contactsNickname === '昵称' && en.contactsNickname === 'Nickname')
 t('the swapped remark label is gone', !('contactsRemark' in zh) && !('contactsRemark' in en))
 t('sex is localized in the friend detail', typeof zh.profileSexUnknown === 'string' && zh.profileSexUnknown === '未知')
+for (const key of ['qzoneImageAlt', 'qzoneImageFailed', 'qzoneImageTooLarge']) {
+  t('image copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
 t('tools menu label present', zh.tabTools === '工具' && en.tabTools === 'Tools')
 t('contacts menu label present', zh.tabContacts === '好友与群组' && en.tabContacts === 'Contacts')
 t('access menu label present', zh.tabAccess === '访问控制' && en.tabAccess === 'Access')

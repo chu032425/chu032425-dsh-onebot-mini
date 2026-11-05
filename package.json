@@ -27,6 +27,7 @@
     "message.js",
     "tools.js",
     "toolcatalog.js",
+    "imagecache.js",
     "api.js",
     "lib/client.js",
     "cordis.patch.yml",

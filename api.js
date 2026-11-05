@@ -15,6 +15,7 @@
 
 import { DEFAULTS, FIELD_GROUPS, FIELD_KINDS, MODE_FIELDS } from './config.js'
 import { TOOL_GROUPS } from './toolcatalog.js'
+import { fetchIntoCache, isAllowedImageUrl, readCached } from './imagecache.js'
 
 /** Route path prefix. */
 export const API_PREFIX = '/onebot-mini/api'
@@ -451,8 +452,12 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
        * unknown values left null rather than invented.
        * @param item - one raw post.
        */
+      // Own posts carry no author id, so the account being read is remembered as
+      // `ownerUin`; the image proxy needs it to pick a cache folder.
+      const selfUin = targetUin !== '' ? targetUin : String(connection.selfId ?? '')
       const post = (item) => ({
         tid: item?.tid === undefined || item?.tid === null ? '' : String(item.tid),
+        ownerUin: selfUin,
         content: String(item?.content ?? '').replace(/\s+/g, ' ').trim(),
         time: Number(item?.time ?? 0) || 0,
         commentCount: Number(item?.comment_num ?? item?.commentCount ?? 0) || 0,
@@ -586,6 +591,60 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     },
   })
 
+  /**
+   * Cached Qzone image bytes, proxied to the page as `<img src>`.
+   *
+   * The browser cannot load a Qzone image itself: the URL is signed and refers
+   * the request to qzone.qq.com, which a plain `<img>` cannot set. Proxying it
+   * here also means the image is fetched once and served from disk afterwards.
+   *
+   * `qq` selects the cache folder, `url` is the image source. Both are checked:
+   * `qq` is reduced to digits by the cache module, and `url` must be on a known
+   * image host, so a crafted post cannot probe the local network through us.
+   */
+  const disposeImage = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/image',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      const url = new URL(String(req.url ?? '/'), 'http://localhost')
+      const qq = String(url.searchParams.get('qq') ?? '').trim()
+      const source = String(url.searchParams.get('url') ?? '')
+      if (source === '' || !isAllowedImageUrl(source)) {
+        sendJson(res, 400, { error: 'url is missing or not an allowed image host' })
+        return
+      }
+      const config = store.read()
+      const cached = await fetchIntoCache(qq, source, {
+        maxKb: config.imageCacheMaxKb,
+        totalMb: config.imageCacheTotalMb,
+      })
+      if (cached.ok !== true) {
+        sendJson(res, 502, { error: cached.reason ?? 'could not fetch the image' })
+        return
+      }
+      const bytes = await readCached(cached.path)
+      if (bytes === undefined) {
+        sendJson(res, 502, { error: 'the cached image disappeared' })
+        return
+      }
+      res.statusCode = 200
+      res.setHeader('content-type', cached.contentType !== '' ? cached.contentType : 'image/jpeg')
+      res.setHeader('cache-control', 'private, max-age=86400')
+      res.setHeader('content-length', String(bytes.length))
+      res.end(bytes)
+    },
+  })
+
   const disposeClear = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/logs/clear',
@@ -613,6 +672,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     disposeFriend()
     disposeQzone()
     disposeProfile()
+    disposeImage()
     disposeClear()
   }
 }
