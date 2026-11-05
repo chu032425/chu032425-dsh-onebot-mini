@@ -42,6 +42,16 @@ const ALLOWED_HOST_SUFFIXES = Object.freeze([
 /** A download that takes longer than this is abandoned. */
 const FETCH_TIMEOUT_MS = 15000
 
+/**
+ * The largest image that may be shown without being cached.
+ *
+ * An image over the cache cap is streamed straight to the browser instead of
+ * being refused outright — the panel still shows it, it just costs a repeat
+ * download. This bounds that path so a hostile or absurd URL cannot exhaust
+ * memory or bandwidth.
+ */
+export const STREAM_ONLY_MAX_BYTES = 32 * 1024 * 1024
+
 /** Extension for a normalized image content type. */
 function extensionFor(contentType) {
   const type = String(contentType ?? '').toLowerCase()
@@ -174,24 +184,36 @@ async function download(url, maxBytes) {
     }
     if (head !== undefined && head.ok) {
       const length = Number(head.headers.get('content-length') ?? 0)
-      if (length > maxBytes) return { ok: false, reason: 'too large: ' + length + ' bytes' }
+      // Only refuse outright when it is too big even to stream; a file merely
+      // over the cache cap falls through so the body can be read and handed back
+      // for a one-off display.
+      if (length > STREAM_ONLY_MAX_BYTES) return { ok: false, reason: 'too large: ' + length + ' bytes' }
     }
     const response = await fetch(url, { signal: controller.signal, headers: { 'user-agent': 'Mozilla/5.0', referer: 'https://qzone.qq.com/' } })
     if (!response.ok) return { ok: false, reason: 'HTTP ' + response.status }
     const declared = Number(response.headers.get('content-length') ?? 0)
-    if (declared > maxBytes) return { ok: false, reason: 'too large: ' + declared + ' bytes' }
+    if (declared > STREAM_ONLY_MAX_BYTES) {
+      return { ok: false, reason: 'too large: ' + declared + ' bytes' }
+    }
     const contentType = response.headers.get('content-type') ?? 'image/jpeg'
-    // Stream with a running cap so a missing Content-Length cannot fill memory.
+    // Read with a hard ceiling: a response without Content-Length must not be
+    // able to fill memory. The cache cap and the stream-only cap differ, so the
+    // buffer is kept up to the larger "stream only" bound and handed back when
+    // it turns out to exceed the cache cap.
     const chunks = []
     let total = 0
     if (response.body !== null) {
       for await (const chunk of response.body) {
         total += chunk.length
-        if (total > maxBytes) return { ok: false, reason: 'too large while reading' }
+        if (total > STREAM_ONLY_MAX_BYTES) return { ok: false, reason: 'too large while reading' }
         chunks.push(chunk)
       }
     }
-    return { ok: true, buffer: Buffer.concat(chunks), contentType }
+    const buffer = Buffer.concat(chunks)
+    if (buffer.length > maxBytes) {
+      return { ok: false, reason: 'too large: ' + buffer.length + ' bytes', overflow: true, buffer, contentType }
+    }
+    return { ok: true, buffer, contentType }
   } finally {
     clearTimeout(timer)
   }
@@ -231,7 +253,14 @@ export async function fetchIntoCache(qq, url, options = {}) {
     }
 
     const downloaded = await download(url, maxBytes)
-    if (!downloaded.ok) return downloaded
+    if (!downloaded.ok) {
+      // A file over the cache cap is still worth showing once: hand the bytes
+      // back as `overflow` so the route can stream them without writing them.
+      if (downloaded.overflow === true) {
+        return { ok: false, reason: downloaded.reason, overflow: true, buffer: downloaded.buffer, contentType: downloaded.contentType }
+      }
+      return downloaded
+    }
     await mkdir(dir, { recursive: true })
     const path = join(dir, fileNameFor(url, downloaded.contentType))
     await writeFile(path, downloaded.buffer)

@@ -5,6 +5,8 @@
  * Run with `node test/runtime.test.mjs`.
  */
 import { createServer } from 'node:http'
+import { existsSync } from 'node:fs'
+import { cacheRoot } from '../imagecache.js'
 import { OneBotConnection } from '../connection.js'
 import { LogBus } from '../logbus.js'
 import { ChatBridge } from '../bridge.js'
@@ -758,6 +760,16 @@ const postMethodRes = fakeRes()
 await routes.get('/onebot-mini/api/image')({ method: 'POST', url: '/onebot-mini/api/image?qq=1&url=x', headers: {} }, postMethodRes)
 t('the image route rejects POST', postMethodRes.statusCode === 405)
 disposeImg()
+
+// an image over the cache cap is streamed through, not refused: the route serves
+// the bytes with a "not cached" marker, and nothing is written to disk
+const { fetchIntoCache } = await import('../imagecache.js')
+const overflowDir = cacheRoot()
+const pathExists = (p) => existsSync(p)
+const overUrl = 'http://photonjmaz.photo.store.qq.com/psc?/V54JTqSk2zBNux1ERE9s2QDEH83fi638/TmEUgtj9EK6.7V8ajmQrED8MbnFmwsbc*6gEXsTsIPJg8Di0zJYeXtquAxNEsuSqxBrZ*bxHGNMiY27B4GLq4irnaWy8o3igYDoueOCuStc!/b&bo=XgZABl4GQAYWECA!'
+const overflow = await fetchIntoCache('987654', overUrl, { maxKb: 64, totalMb: 100 })
+t('an oversized image comes back as overflow bytes', overflow.ok === false && overflow.overflow === true && overflow.buffer.length > 64 * 1024)
+t('the oversized image is not written to disk', !(await pathExists(overflowDir + '/987654')))
 
 disposeQzone()
 

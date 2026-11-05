@@ -653,6 +653,18 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         totalMb: config.imageCacheTotalMb,
       })
       if (cached.ok !== true) {
+        // An image over the cache cap is still shown once by streaming the bytes
+        // held in `overflow`; only a genuinely oversized or failed fetch is an
+        // error. `no-store` keeps the browser from re-fetching it from us.
+        if (cached.overflow === true && cached.buffer !== undefined) {
+          res.statusCode = 200
+          res.setHeader('content-type', cached.contentType !== '' ? cached.contentType : 'image/jpeg')
+          res.setHeader('cache-control', 'private, max-age=86400')
+          res.setHeader('x-onebot-mini-cached', 'no')
+          res.setHeader('content-length', String(cached.buffer.length))
+          res.end(cached.buffer)
+          return
+        }
         sendJson(res, 502, { error: cached.reason ?? 'could not fetch the image' })
         return
       }
@@ -664,6 +676,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
       res.statusCode = 200
       res.setHeader('content-type', cached.contentType !== '' ? cached.contentType : 'image/jpeg')
       res.setHeader('cache-control', 'private, max-age=86400')
+      res.setHeader('x-onebot-mini-cached', 'yes')
       res.setHeader('content-length', String(bytes.length))
       res.end(bytes)
     },
