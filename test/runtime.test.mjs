@@ -890,11 +890,11 @@ t('the missing media is reported inline without paths', degradeMsg.some((seg) =>
   && !degradeMsg.some((seg) => String(seg.data.text).includes('ENOENT')))
 await bridgeDegrade.stop()
 
-// an incoming image is downloaded to the workspace and the turn carries its path
+// an incoming image is downloaded to the plugin cache dir and the turn carries its path
 const fsInbound = await import('node:fs')
 const inboundWs = '/tmp/onebot-inbound-ws-' + process.pid
 const inboundTransport = { selfId: '1', state: 'online', sendText: async () => ({ message_id: 1 }), sendMessage: async () => ({ message_id: 1 }), call: async () => ({}) }
-const bridgeInbound = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: inboundWs, inboundMedia: true, inboundMediaMaxMb: 5 }, connection: inboundTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+const bridgeInbound = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', inboundDir: inboundWs, inboundMedia: true, inboundMediaMaxMb: 5 }, connection: inboundTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
 bridgeInbound.start()
 await bridgeInbound.handleInbound(inbound({
   user_id: 31003,
@@ -903,7 +903,7 @@ await bridgeInbound.handleInbound(inbound({
 }))
 const chatInbound = bridgeInbound.chats.get('private:31003')
 const inboundText = (chatInbound.agent.followups[0].content ?? []).filter((block) => block.type === 'text').map((block) => block.text).join('')
-t('an inbound image turn carries a local path', /\[图片: \/tmp\/onebot-inbound-ws-\d+\/qq-inbox\/private-31003\/.+\.png\]/.test(inboundText), inboundText)
+t('an inbound image turn carries a local path', /\[图片: \/tmp\/onebot-inbound-ws-\d+\/private-31003\/.+\.png\]/.test(inboundText), inboundText)
 await bridgeInbound.stop()
 fsInbound.rmSync(inboundWs, { recursive: true, force: true })
 

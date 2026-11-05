@@ -8,8 +8,8 @@
 - 模型回复 → 通过 OneBot 接口发回原聊天；
 - `onebot_call` 工具：模型可直接调 OneBot 动作（发图、发文件、群管理、戳一戳、撤回、QQ 空间…），
   按 [NapCat 接口文档](https://napcat.apifox.cn/) 收录 **118 个动作 / 9 个分组**，可在左侧「工具」菜单按分组/动作开关；
-- **收到的媒体可读取**：用户发来的图片/语音/视频/文件自动下载到工作区 `qq-inbox/`，
-  消息里给出本机路径（图片用 `read_image` 看，文件用 `read`/`bash` 读，语音在识别器就绪时自动转写）；
+- **收到的媒体可读取**：用户发来的图片/语音/视频/文件自动下载到插件缓存目录 `onebot-mini-cache/inbound/`
+  （与 QQ 空间图片缓存同一个根目录，统一在「缓存」页可查、可清理），消息里给出本机路径（图片用 `read_image` 看，文件用 `read`/`bash` 读，语音在识别器就绪时自动转写）；
 - **配置页**：改连接参数并立即重连；
 - **好友与群组页**：好友可展开看在线状态，群可展开看成员列表；
 - **访问控制页**：私聊/群聊的白名单与黑名单，用下拉菜单挑选；
@@ -107,8 +107,9 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 用户发来的图片、语音、视频、文件不再只是 `[图片]` 这样的占位符：
 
 - 图片、语音、视频会从网关给的 URL（或经 `get_file` 拿到的下载地址）下载到
-  `<workspacePath>/qq-inbox/<chat>/`，消息文本里给出本机绝对路径：
-  `[图片: /workspace/QQ/qq-inbox/private-2000001/…-image.png]`；
+  `<profile>/onebot-mini-cache/inbound/<chat>/`（与 QQ 空间图片缓存同一个根目录，
+  统一在「缓存」页展示与清理），消息文本里给出本机绝对路径：
+  `[图片: /home/node/.dsh/profiles/web/onebot-mini-cache/inbound/private-2000001/…-image.png]`；
 - 模型据此用自带工具读取：图片走 `read_image`，文本/表格/压缩包走 `read` 或 `bash`；
 - 语音在宿主 `speechToText` 服务已有**就绪**识别器时自动转写，附在
   `[语音: …]（转写：…）` 后面；没有就绪识别器则只给路径，不强行下载模型；
@@ -116,7 +117,7 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 - 下载失败、超过 `inboundMediaMaxMb`、或关闭了 `inboundMedia` 时，退回不带路径的占位符，
   模型会如实说明没收到，而不是编造内容；
 - 图片扩展名按**魔数**判定（PNG/JPEG/GIF/WebP），避免「PNG 存成 .jpg 导致 read_image 类型不符」；
-- 这些文件不会被自动清理（与「缓存页」一致：手动清理，无定时任务）。
+- 这些文件不会被自动清理（与「缓存页」一致：手动清理，无定时任务；在「缓存」页按 `inbound` 这一项清空即可）。
 
 ## 会话工作区
 

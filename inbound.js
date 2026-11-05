@@ -42,15 +42,19 @@ let sequence = 0
 /**
  * The inbox root for a chat.
  *
- * Under the chat's workspace when one is configured (so the same `read`/`bash`
- * tools the agent already uses can open the files); otherwise under the plugin
- * cache directory, which always exists regardless of workspace settings.
+ * Kept beside the Qzone image cache, under the plugin's `onebot-mini-cache/`
+ * directory, so all plugin-produced files live in one place and show up on the
+ * 「缓存」page. Files are read-only to the agent (the session sandbox allows
+ * reads anywhere), so storing them outside the workspace is fine.
+ *
+ * `config.inboundDir` is an internal override (tests / advanced setups); it is
+ * not a documented setting, so a normal config object has no such key.
  * @param config - the effective config.
  * @returns the absolute inbox root.
  */
 export function inboxRoot(config) {
-  const workspace = String(config?.workspacePath ?? '').trim()
-  if (workspace !== '') return join(workspace, 'qq-inbox')
+  const override = String(config?.inboundDir ?? '').trim()
+  if (override !== '') return override
   return join(cacheRoot(), 'inbound')
 }
 

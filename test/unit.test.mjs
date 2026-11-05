@@ -304,8 +304,8 @@ import {
   inboxRoot, chatFolder, safeFileName, extensionFor, sourceFromData, sourceFromResponse,
   mediaPlaceholder, buildInboundText, unescapeCqLite, sniffImageExtension,
 } from '../inbound.js'
-t('inbox root sits under the workspace', inboxRoot({ workspacePath: '/workspace/QQ' }) === '/workspace/QQ/qq-inbox')
-t('inbox root falls back to the cache dir', inboxRoot({}).endsWith('inbound'))
+t('inbox root defaults to the plugin cache dir (same place as Qzone)', inboxRoot({ workspacePath: '/workspace/QQ' }).endsWith('onebot-mini-cache/inbound'))
+t('an explicit inboundDir overrides the default', inboxRoot({ inboundDir: '/tmp/x' }) === '/tmp/x')
 t('chat folder is filesystem safe', chatFolder('private:2000001') === 'private-2000001')
 t('a file name drops path separators', !safeFileName('../../etc/passwd').includes('/') && !safeFileName('a/b').includes('/'))
 t('extension follows the content type', extensionFor('image', 'image/png', '') === 'png' && extensionFor('video', 'video/mp4', '') === 'mp4')
@@ -324,7 +324,7 @@ t('image magic bytes pick the extension', sniffImageExtension(Buffer.from('89504
 // buildInboundText downloads a base64 image and rewrites the placeholder to a
 // readable path (no network: the source is inline base64).
 const tmpInboxBase = '/tmp/onebot-inbound-test-' + process.pid
-const inboundConfig = { workspacePath: tmpInboxBase, inboundMediaMaxMb: 5 }
+const inboundConfig = { inboundDir: tmpInboxBase, inboundMediaMaxMb: 5 }
 const fakeConnection = { call: async () => ({}) }
 const built = await buildInboundText({
   segments: [
@@ -336,7 +336,7 @@ const built = await buildInboundText({
   connection: fakeConnection,
   config: inboundConfig,
 })
-t('an inbound image is saved and referenced by path', /\[图片: \/tmp\/onebot-inbound-test-\d+\/qq-inbox\/private-42\/.+\.png\]/.test(built.text), built.text)
+t('an inbound image is saved and referenced by path', /\[图片: \/tmp\/onebot-inbound-test-\d+\/private-42\/.+\.png\]/.test(built.text), built.text)
 t('the saved image file exists', built.saved.length === 1 && existsSync(built.saved[0].path))
 rmSync(tmpInboxBase, { recursive: true, force: true })
 
