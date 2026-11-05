@@ -220,8 +220,6 @@ export class ChatBridge {
     this.pendingCreates = new Map()
     /** chatId → accumulated assistant text for the open turn. */
     this.buffers = new Map()
-    /** chatId → buffered inbound messages waiting out the debounce window. */
-    this.inboundQueue = new Map()
     /** chatId → message ids already handled (reconnect replay guard). */
     this.seen = new Map()
     this.dedupWindowMs = 300000
@@ -258,10 +256,6 @@ export class ChatBridge {
    */
   async stop() {
     this.stopping = true
-    for (const entry of this.inboundQueue.values()) {
-      if (entry.timer !== undefined) clearTimeout(entry.timer)
-    }
-    this.inboundQueue.clear()
     const chats = [...this.chats.values()]
     this.chats.clear()
     this.bySession.clear()
@@ -323,77 +317,7 @@ export class ChatBridge {
     if (body === '') return
 
     const text = speakerPrefix(frame, chat.kind, this.config.senderPrefix) + body
-    await this.enqueue(chatId, chat, text, frame)
-  }
-
-  /**
-   * Buffer one inbound message for the debounce window.
-   *
-   * Consecutive messages from the same chat are merged into one so a user firing
-   * off several lines gets one considered reply instead of several turns. A new
-   * message restarts the timer. With `debounceMs` at 0 the buffer flushes at once.
-   * @param chatId - canonical chat id.
-   * @param chat - split chat id.
-   * @param text - the flattened message text.
-   * @param frame - the raw event, kept for logging and dedup context.
-   */
-  async enqueue(chatId, chat, text, frame) {
-    if (this.stopping) return
-    // Groups do not debounce at all: every message is delivered on arrival, so a
-    // second person is never held back behind the first. Only private chats
-    // merge consecutive lines, because there is only one speaker to merge.
-    const isGroup = chat.kind === 'group'
-    const delay = isGroup ? 0 : Math.max(0, Number(this.config.privateDebounceMs) || 0)
-    const cap = isGroup ? 0 : Math.max(0, Number(this.config.privateDebounceMaxMs) || 0)
-    // Only one person's consecutive messages merge. A different speaker ends the
-    // current window immediately: merging two people's lines would make the model
-    // treat unrelated requests as one, which the speaker prefix cannot fix.
-    const speaker = speakerKey(frame, chat.kind)
-    const current = this.inboundQueue.get(chatId)
-    if (current !== undefined && current.speaker !== speaker) {
-      await this.flush(chatId)
-    }
-    let entry = this.inboundQueue.get(chatId)
-    if (entry === undefined) {
-      entry = { texts: [], chat, frame, speaker, timer: undefined, deadline: 0 }
-      this.inboundQueue.set(chatId, entry)
-    }
-    entry.texts.push(text)
-    entry.frame = frame
-    if (entry.timer !== undefined) clearTimeout(entry.timer)
-    if (delay === 0) {
-      // No debounce: deliver inline so the caller sees the chat created when it
-      // awaits handleInbound, as it did before buffering existed.
-      await this.flush(chatId)
-      return
-    }
-    // The window slides while the same speaker keeps talking, but it must never
-    // grow without bound: a flood would otherwise never flush. `deadline` is the
-    // moment this window can last at most, reset only when the speaker changes
-    // (via flush) — so a continuing speaker is served promptly.
-    const now = Date.now()
-    if (entry.deadline === 0 || now >= entry.deadline) {
-      // First message of the window, or the cap already passed: start a fresh
-      // deadline. If the cap is 0 there is no cap and the window slides freely.
-      entry.deadline = cap > 0 ? now + cap : 0
-    }
-    const settleIn = entry.deadline > 0 ? Math.min(delay, entry.deadline - now) : delay
-    entry.timer = setTimeout(() => { void this.flush(chatId) }, Math.max(0, settleIn))
-    if (entry.timer.unref === 'function') entry.timer.unref()
-  }
-
-  /**
-   * Send the buffered messages for one chat as a single turn.
-   * @param chatId - canonical chat id.
-   */
-  async flush(chatId) {
-    const entry = this.inboundQueue.get(chatId)
-    if (entry === undefined) return
-    this.inboundQueue.delete(chatId)
-    if (entry.timer !== undefined) clearTimeout(entry.timer)
-    const text = entry.texts.join('\n').trim()
-    if (text === '') return
-    await this.dispatch(chatId, entry.chat, text, entry.frame)
+    await this.dispatch(chatId, chat, text, frame)
   }
 
   /**
@@ -446,21 +370,18 @@ export class ChatBridge {
       length: text.length,
       messageId: String(frame.message_id ?? ''),
     })
-    // Only a private chat may steer a running answer. In a group the message
-    // simply queues as the next turn: several people share one conversation, so
-    // inserting into someone else's answer would mix up speakers.
+    // A private chat steers straight into a running answer: the same person is
+    // correcting or adding to what is still being written, so waiting for a
+    // separate turn would answer twice. No model judgement is involved.
     const interjectOn = chat.kind === 'private' && this.config.privateAutoInterject !== false
     if (interjectOn && record.agent?.status === 'running' && typeof record.agent?.steer === 'function') {
-      const mode = await this.judgeInterject(chatId, text)
-      if (mode === 'steer') {
-        try {
-          const message = await createPluginUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE })
-          record.agent.steer(message)
-          this.log.record('bridge', { note: 'steered into the running turn', chatId, length: text.length })
-          return
-        } catch (error) {
-          this.log.record('warn', { note: 'steer failed; falling back to a follow-up', chatId, error: this.describeError(error) })
-        }
+      try {
+        const message = await createPluginUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE })
+        record.agent.steer(message)
+        this.log.record('bridge', { note: 'steered into the running turn', chatId, length: text.length })
+        return
+      } catch (error) {
+        this.log.record('warn', { note: 'steer failed; falling back to a follow-up', chatId, error: this.describeError(error) })
       }
     }
 

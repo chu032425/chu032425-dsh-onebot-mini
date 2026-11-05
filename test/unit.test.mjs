@@ -53,12 +53,9 @@ t('unknown enum falls back', normalizeConfig({ mode: 'weird' }).value.mode === '
 t('non-boolean boolean falls back', normalizeConfig({ senderPrefix: 'yes' }).value.senderPrefix === true)
 
 t('the default keeps steering on and the prefix on', DEFAULTS.autoInterject === true && DEFAULTS.senderPrefix === true)
-t('private debounce defaults to 3000', DEFAULTS.privateDebounceMs === 3000)
-t('the private merge cap defaults to its window', DEFAULTS.privateDebounceMaxMs === 3000)
-t('a private cap never falls below its window', normalizeConfig({ privateDebounceMaxMs: 200, privateDebounceMs: 1200 }).value.privateDebounceMaxMs === 1200)
-t('an out-of-range private cap falls back', normalizeConfig({ privateDebounceMaxMs: 999999 }).value.privateDebounceMaxMs === 3000)
-t('a legacy single debounceMs maps to the private field', normalizeConfig({ debounceMs: 1500 }).value.privateDebounceMs === 1500)
-t('no group debounce config remains', !('groupDebounceMs' in DEFAULTS) && !('groupAutoInterject' in DEFAULTS))
+t('debounce config is gone; only the interject switch remains', !('privateDebounceMs' in DEFAULTS) && !('privateDebounceMaxMs' in DEFAULTS) && DEFAULTS.privateAutoInterject === true)
+t('no group reply config remains', !('groupDebounceMs' in DEFAULTS) && !('groupAutoInterject' in DEFAULTS))
+t('the reply group holds only the interject switch', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'reply').fields) === '["privateAutoInterject"]')
 
 // session prefix: lowercase-letter start, safe alphabet, default on rejection
 t('session prefix default', DEFAULTS.sessionPrefix === 'onebot')

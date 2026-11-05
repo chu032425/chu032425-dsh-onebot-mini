@@ -72,16 +72,12 @@ export const DEFAULTS = Object.freeze({
   logMessagePreview: true,
   logToFile: true,
   sendTimeoutMs: 30000,
-  // Private and group chats behave differently: a private chat is one person, so
-  // waiting longer is safe, while a group must answer promptly or a second person
-  // would be kept waiting.
-  privateDebounceMs: 3000,
-  privateDebounceMs: 3000,
-  privateDebounceMaxMs: 3000,
+  // One reply-behaviour switch: may a message interrupt a running answer?
+  // Messages never wait for a quiet window any more.
   privateAutoInterject: true,
-  // Legacy single-kind fields kept so older configs still load.
-  debounceMs: 3000,
-  debounceMaxMs: 3000,
+  // Legacy keys kept only so an older config file still loads.
+  debounceMs: 0,
+  debounceMaxMs: 0,
   autoInterject: true,
   deleteSentMedia: true,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
@@ -124,8 +120,6 @@ export const FIELD_KINDS = Object.freeze({
   toolCallPrompt: 'text',
   toolMediaPrompt: 'text',
   interjectPrompt: 'text',
-  privateDebounceMs: 'number',
-  privateDebounceMaxMs: 'number',
   privateAutoInterject: 'boolean',
   debounceMs: 'number',
   debounceMaxMs: 'number',
@@ -141,7 +135,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
   { id: 'media', fields: ['deleteSentMedia'] },
-  { id: 'reply', fields: ['privateDebounceMs', 'privateDebounceMaxMs', 'privateAutoInterject'] },
+  { id: 'reply', fields: ['privateAutoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
@@ -205,35 +199,6 @@ export function normalizeConfig(raw) {
     problems.push('port must be 1-65535')
     value.port = DEFAULTS.port
   }
-  // Legacy single-kind settings (debounceMs/debounceMaxMs/autoInterject) still
-  // work: when a per-kind field was never written, it inherits the legacy value.
-  // An existing profile therefore keeps its behaviour after the split.
-  const legacyDebounce = Math.trunc(value.debounceMs)
-  const legacyMax = Math.trunc(value.debounceMaxMs)
-  const legacyInterject = value.autoInterject !== false
-  const clampWindow = (raw, field) => {
-    const num = Math.trunc(raw)
-    if (!Number.isFinite(num) || num < 0 || num > 10000) {
-      problems.push(field + ' must be 0-10000')
-      return DEFAULTS[field]
-    }
-    return num
-  }
-  const clampCap = (raw, field) => {
-    const num = Math.trunc(raw)
-    if (!Number.isFinite(num) || num < 0 || num > 60000) {
-      problems.push(field + ' must be 0-60000')
-      return DEFAULTS[field]
-    }
-    return num
-  }
-  value.debounceMs = clampWindow(legacyDebounce, 'debounceMs')
-  value.debounceMaxMs = clampCap(legacyMax, 'debounceMaxMs')
-  value.privateDebounceMs = clampWindow(source.privateDebounceMs === undefined ? value.debounceMs : value.privateDebounceMs, 'privateDebounceMs')
-  value.privateDebounceMaxMs = clampCap(source.privateDebounceMaxMs === undefined ? value.debounceMaxMs : value.privateDebounceMaxMs, 'privateDebounceMaxMs')
-  if (typeof source.privateAutoInterject !== 'boolean') value.privateAutoInterject = legacyInterject
-  // A cap below the window would flush before the window settles.
-  if (value.privateDebounceMaxMs > 0 && value.privateDebounceMaxMs < value.privateDebounceMs) value.privateDebounceMaxMs = value.privateDebounceMs
   value.sendTimeoutMs = Math.trunc(value.sendTimeoutMs)
   if (value.sendTimeoutMs < 1000 || value.sendTimeoutMs > 600000) {
     problems.push('sendTimeoutMs must be 1000-600000')

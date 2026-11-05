@@ -930,16 +930,14 @@ const debounceAgents = {
   async resume() { throw new Error('no persisted session') },
 }
 const debounceCtx = { on: () => () => {}, agents: debounceAgents, get: (n) => (n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'p', model: 'm' }) } : undefined) }
-const bridgeDebounce = new ChatBridge({ ctx: debounceCtx, config: { ...baseConfig, workspacePath: "/workspace/QQ", privateDebounceMs: 80, privateDebounceMaxMs: 240, privateAutoInterject: false }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+const bridgeDebounce = new ChatBridge({ ctx: debounceCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', privateAutoInterject: false }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
 bridgeDebounce.start()
 await bridgeDebounce.handleInbound(inbound({ user_id: 41001, message_id: 410 }))
 await bridgeDebounce.handleInbound(inbound({ user_id: 41001, message_id: 411, message: [{ type: 'text', data: { text: '第二句' } }] }))
-t('debounce holds the messages before flushing', bridgeDebounce.chats.get('private:41001') === undefined)
-await wait(200)
 const debounceChat = bridgeDebounce.chats.get('private:41001')
-t('debounce merges two messages into one turn', debounceChat !== undefined && debounceChat.agent.followups.length === 1)
-t('the merged turn contains both lines', String(debounceChat.agent.followups[0].content[0].text).includes('你好')
-  && String(debounceChat.agent.followups[0].content[0].text).includes('第二句'))
+t('each private message is delivered immediately', debounceChat !== undefined && debounceChat.agent.followups.length === 2)
+t('no debounce means the first message is its own turn', String(debounceChat.agent.followups[0].content[0].text).includes('你好'))
+t('the second message is a separate turn', String(debounceChat.agent.followups[1].content[0].text).includes('第二句'))
 await bridgeDebounce.stop()
 
 // while running, a STEER verdict steers instead of queueing
