@@ -30,6 +30,85 @@ import { accountDir } from './cachepaths.js'
 /** Segment kinds handled here. */
 export const INBOUND_KINDS = Object.freeze(['image', 'record', 'video', 'file'])
 
+/**
+ * Pull a human label out of a rich-card segment (`json` / `xml`).
+ *
+ * A QQ mini-program / share card arrives as a segment whose payload is a JSON
+ * string with a `prompt` like "[QQ小程序]" plus `desc` and `meta.detail_*.title`.
+ * Parsing is best effort: anything unusable yields an empty string and the
+ * caller falls back to a bare "卡片" placeholder. Never throws.
+ * @param data - the segment's `data` object.
+ * @returns a short label, or ''.
+ */
+export function cardLabel(data) {
+  if (data === null || typeof data !== 'object') return ''
+  let parsed = data.data ?? data.content ?? data
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      parsed = undefined
+    }
+  }
+  const candidates = []
+  if (parsed !== null && typeof parsed === 'object') {
+    if (typeof parsed.prompt === 'string') candidates.push(parsed.prompt)
+    if (typeof parsed.desc === 'string') candidates.push(parsed.desc)
+    if (typeof parsed.title === 'string') candidates.push(parsed.title)
+    const meta = parsed.meta
+    if (meta !== null && typeof meta === 'object') {
+      for (const key of ['detail_1', 'detail', 'news', 'music']) {
+        const block = meta[key]
+        if (block === null || typeof block !== 'object') continue
+        if (typeof block.title === 'string') candidates.push(block.title)
+        if (typeof block.desc === 'string') candidates.push(block.desc)
+      }
+    }
+  }
+  for (const candidate of candidates) {
+    const clean = String(candidate)
+      .replace(/^[\[【\s]+/, '')
+      .replace(/[\]】\s]+$/, '')
+      .trim()
+    if (clean !== '') return clean.slice(0, 40)
+  }
+  return ''
+}
+
+/**
+ * A model-facing placeholder for any segment kind that is not plain text.
+ *
+ * Keeps an otherwise-unhandled message from flattening to an empty string (the
+ * bridge drops empty messages), so a QQ mini-program card, share, location or
+ * any future segment still reaches the agent as *something* instead of nothing.
+ * @param type - the segment type.
+ * @param data - the segment's `data`.
+ * @returns a bracketed placeholder, or '' for an empty type.
+ */
+export function segmentPlaceholder(type, data) {
+  const kind = String(type ?? '')
+  if (kind === '') return ''
+  if (kind === 'json') {
+    const label = cardLabel(data)
+    return '[卡片: ' + (label !== '' ? label : '小程序') + ']'
+  }
+  if (kind === 'xml') {
+    const label = cardLabel(data)
+    return '[' + (label !== '' ? '卡片: ' + label : '卡片') + ']'
+  }
+  if (kind === 'forward' || kind === 'node') return '[合并转发]'
+  if (kind === 'music') return '[音乐分享]'
+  if (kind === 'location') return '[位置]'
+  if (kind === 'contact') return '[名片]'
+  if (kind === 'mface' || kind === 'face') return '[表情]'
+  if (kind === 'dice') return '[骰子]'
+  if (kind === 'rps') return '[猜拳]'
+  if (kind === 'shake') return '[窗口抖动]'
+  if (kind === 'poke') return '[戳一戳]'
+  // Unknown future segment: keep a plain marker rather than dropping the message.
+  return '[' + kind + ']'
+}
+
 /** A download longer than this is abandoned. */
 const FETCH_TIMEOUT_MS = 20000
 
@@ -439,6 +518,12 @@ export async function buildInboundText({ segments, chatId, chat, connection, con
       parts.push(outcome.placeholder)
       continue
     }
+    // Any other segment (json/xml card, music, location, contact, …) still gets a
+    // placeholder so the message is not flattened to '' and silently dropped.
+    if (type !== '') {
+      const placeholder = segmentPlaceholder(type, data)
+      if (placeholder !== '') parts.push(placeholder)
+    }
   }
   return { text: parts.join('').trim(), saved, warnings }
 }
@@ -450,6 +535,11 @@ export async function buildInboundText({ segments, chatId, chat, connection, con
  */
 export function unescapeCqLite(raw) {
   return String(raw)
+    // Card / rich segments are matched before entities are decoded, while any
+    // brackets inside their payload are still `&#91;`/`&#93;`.
+    .replace(/\[CQ:json,[^\]]*\]/gi, '[卡片]')
+    .replace(/\[CQ:xml,[^\]]*\]/gi, '[卡片]')
+    .replace(/\[CQ:forward,[^\]]*\]/gi, '[合并转发]')
     .replace(/&#91;/g, '[')
     .replace(/&#93;/g, ']')
     .replace(/&#44;/g, ',')

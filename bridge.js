@@ -16,7 +16,7 @@
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, actionLabel } from './toolcatalog.js'
 import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
-import { buildInboundText, removeInbound } from './inbound.js'
+import { buildInboundText, removeInbound, segmentPlaceholder } from './inbound.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -104,6 +104,13 @@ export function flattenMessage(segments) {
       parts.push('[表情]')
       continue
     }
+    // Any other non-text segment (json/xml card, forward, music, location, …)
+    // gets a placeholder so a card-only message is not flattened to '' and
+    // silently dropped before it can reach the model.
+    if (type !== '') {
+      const placeholder = segmentPlaceholder(type, data)
+      if (placeholder !== '') parts.push(placeholder)
+    }
   }
   return parts.join('').trim()
 }
@@ -116,6 +123,10 @@ export function flattenMessage(segments) {
  */
 export function unescapeCq(raw) {
   return String(raw)
+    // Match rich/card segments before entities are decoded.
+    .replace(/\[CQ:json,[^\]]*\]/gi, '[卡片]')
+    .replace(/\[CQ:xml,[^\]]*\]/gi, '[卡片]')
+    .replace(/\[CQ:forward,[^\]]*\]/gi, '[合并转发]')
     .replace(/&#91;/g, '[')
     .replace(/&#93;/g, ']')
     .replace(/&#44;/g, ',')

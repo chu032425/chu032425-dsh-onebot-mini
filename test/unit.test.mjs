@@ -131,6 +131,10 @@ t('session id honors a custom prefix', sessionIdOf('private:123', 'qq') === 'qq-
 t('flatten keeps media placeholders', flattenMessage([{ type: 'text', data: { text: 'hi ' } }, { type: 'image', data: {} }]) === 'hi [图片]')
 t('flatten drops self mention', flattenMessage([{ type: 'at', data: { qq: '10001' } }, { type: 'text', data: { text: 'hello' } }]) === 'hello')
 t('flatten keeps at-all', flattenMessage([{ type: 'at', data: { qq: 'all' } }]) === '@全体成员')
+t('a json mini-program card becomes a labelled placeholder', flattenMessage([{ type: 'json', data: { data: JSON.stringify({ prompt: '[QQ小程序]', desc: '某小程序' }) } }]) === '[卡片: QQ小程序]')
+t('a card-only message is not flattened to empty', flattenMessage([{ type: 'json', data: {} }]).startsWith('[卡片'))
+t('an unknown segment still yields a placeholder', flattenMessage([{ type: 'markdown', data: {} }]) === '[markdown]')
+t('a cq json string becomes a card placeholder', unescapeCq('[CQ:json,data={"prompt":"&#91;QQ小程序&#93;"}]') === '[卡片]')
 t('cq fallback unescapes and strips', unescapeCq('a&#91;b&#93; &amp; [CQ:image,file=x]') === 'a[b] & [图片]')
 t('mention via segment', isAddressed({ message: [{ type: 'at', data: { qq: '10001' } }] }, '10001') === true)
 t('mention for another user', isAddressed({ message: [{ type: 'at', data: { qq: '999' } }] }, '10001') === false)
@@ -351,6 +355,7 @@ t('the voice placeholder appends a transcript', mediaPlaceholder('record', '/tmp
 t('the file placeholder names the file', mediaPlaceholder('file', '/tmp/a.pdf', 'a.pdf') === '[文件: a.pdf, /tmp/a.pdf]')
 t('a failed download keeps the bare placeholder', mediaPlaceholder('image') === '[图片]')
 t('the CQ fallback strips media tags', unescapeCqLite('[CQ:image,file=x] hi') === '[图片] hi')
+t('the CQ fallback turns a json card into a placeholder', unescapeCqLite('[CQ:json,data={"prompt":"&#91;QQ小程序&#93;"}]') === '[卡片]')
 t('image magic bytes pick the extension', sniffImageExtension(Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')) === 'png'
   && sniffImageExtension(Buffer.from('ffd8ffe0', 'hex')) === 'jpg')
 
@@ -359,6 +364,11 @@ t('image magic bytes pick the extension', sniffImageExtension(Buffer.from('89504
 const tmpInboxBase = '/tmp/onebot-inbound-test-' + process.pid
 const inboundConfig = { inboundDir: tmpInboxBase, inboundMediaMaxMb: 5 }
 const fakeConnection = { call: async () => ({}) }
+const cardBuilt = await buildInboundText({
+  segments: [{ type: 'json', data: { data: JSON.stringify({ prompt: '[QQ小程序]' }) } }],
+  chatId: 'private:42', chat: { kind: 'private', id: '42' }, connection: fakeConnection, config: inboundConfig,
+})
+t('buildInboundText keeps a card segment', cardBuilt.text === '[卡片: QQ小程序]', cardBuilt.text)
 const built = await buildInboundText({
   segments: [
     { type: 'text', data: { text: '看看 ' } },

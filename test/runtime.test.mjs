@@ -906,6 +906,16 @@ await bridgeInbound.handleInbound(inbound({
 const chatInbound = bridgeInbound.chats.get('private:31003')
 const inboundText = (chatInbound.agent.followups[0].content ?? []).filter((block) => block.type === 'text').map((block) => block.text).join('')
 t('an inbound image turn carries a local path', /\[图片: \/tmp\/onebot-inbound-ws-\d+\/private-31003\/.+\.png\]/.test(inboundText), inboundText)
+// A card-only message (QQ mini-program json segment) must still reach the agent
+// instead of being flattened to '' and dropped.
+await bridgeInbound.handleInbound(inbound({
+  user_id: 31006,
+  message_id: 315,
+  message: [{ type: 'json', data: { data: JSON.stringify({ prompt: '[QQ小程序]', desc: '测试卡片' }) } }],
+}))
+const chatCard = bridgeInbound.chats.get('private:31006')
+const cardText = (chatCard?.agent.followups[0]?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text).join('')
+t('a json card message reaches the agent', cardText.includes('[卡片'), cardText)
 await bridgeInbound.stop()
 fsInbound.rmSync(inboundWs, { recursive: true, force: true })
 
