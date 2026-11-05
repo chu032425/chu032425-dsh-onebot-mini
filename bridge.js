@@ -750,12 +750,22 @@ export class ChatBridge {
    */
   async deliver(chatId, chat, text) {
     try {
-      const data = await this.connection.sendText(chat, text.trim())
+      // A reply may carry `[[image:…]]`-style markers; those become real message
+      // segments so a caption and its picture go out as one message.
+      const { buildReplySegments } = await import('./media.js')
+      const { segments, warnings } = await buildReplySegments(text)
+      if (segments.length === 0) return
+      for (const warning of warnings) {
+        this.log.record('warn', { note: 'reply media skipped: ' + warning, chatId })
+      }
+      const data = await this.connection.sendMessage(chat, segments)
       this.log.record('bridge', {
         note: 'reply sent',
         chatId,
         messageId: String(data?.message_id ?? ''),
         length: text.length,
+        segments: segments.length,
+        media: segments.filter((segment) => segment.type !== 'text').length,
       })
     } catch (error) {
       this.log.record('error', { note: 'reply send failed for ' + chatId, error: this.describeError(error) })
@@ -828,8 +838,10 @@ export function buildPlatformPrompt(config) {
   } else {
     text += '- To do anything other than reply in plain text, call the onebot_call tool with the OneBot action name and its params. '
       + 'Only the actions listed below are accepted; anything else is refused.\n'
-    text += '- To send an image, voice clip, video or file, prefer the onebot_send_media tool: it accepts a local path '
-      + '(the bytes are inlined), a URL, or base64, and defaults to the current chat. Only send media when the user asks for it.\n'
+    text += '- To send an image, voice clip, video or file as its own message, call the onebot_send_media tool. '
+      + 'To attach media to a reply message (so text and attachment arrive together), write a marker in your reply: '
+      + '[[image:/abs/path.png]], [[record:/abs/a.wav]], [[video:/abs/a.mp4]] or [[file:/abs/a.zip]] — the path may also be an http(s) URL. '
+      + 'The plugin replaces each marker with a real attachment. Only send media when the user asks for it.\n'
     // Advertise exactly what the operator left enabled, so the model never
     // wastes a turn on an action that would be refused.
     for (const group of enabledGroups(allow)) {

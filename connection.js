@@ -457,11 +457,25 @@ export class OneBotConnection {
    * @returns the gateway's response data.
    */
   sendText(chat, text) {
-    const message = [{ type: 'text', data: { text } }]
+    return this.sendMessage(chat, [{ type: 'text', data: { text } }])
+  }
+
+  /**
+   * Send a full message: an ordered list of OneBot segments.
+   *
+   * A reply that mixes text and media becomes one message with several
+   * segments, so a caption and its picture arrive together instead of as
+   * separate sends.
+   * @param chat - `{ kind: 'private'|'group', id: string }`.
+   * @param message - the segment array.
+   * @returns the gateway's response data.
+   */
+  sendMessage(chat, message) {
+    const segments = Array.isArray(message) ? message : []
     if (chat.kind === 'group') {
-      return this.call('send_group_msg', { group_id: Number(chat.id), message })
+      return this.call('send_group_msg', { group_id: Number(chat.id), message: segments })
     }
-    return this.call('send_private_msg', { user_id: Number(chat.id), message })
+    return this.call('send_private_msg', { user_id: Number(chat.id), message: segments })
   }
 
   /**

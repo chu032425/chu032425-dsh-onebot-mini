@@ -106,3 +106,67 @@ export async function sendMedia(connection, options) {
     return { ok: false, error: String(error?.message ?? error) }
   }
 }
+
+
+/**
+ * The marker a reply can carry to attach media, e.g. `[[image:/tmp/a.png]]`.
+ *
+ * The assistant only produces text, so a reply that should carry media needs a
+ * convention the bridge can parse. Doubled brackets keep it from colliding with
+ * ordinary prose, and the four kind names match the tool's `kind` values.
+ */
+export const MEDIA_MARKER_PATTERN = /\[\[(image|record|video|file):([^\[\]]+)\]\]/g
+
+/**
+ * Turn a reply's text into an ordered segment list.
+ *
+ * Text around a marker is kept in order, so a caption can sit before or after
+ * its picture. A marker whose file is missing or too large is replaced by a
+ * short text note instead of failing the whole reply — losing one attachment
+ * must not lose the message.
+ * @param text - the buffered reply text.
+ * @param options - `{ maxBytes? }`.
+ * @returns `{ segments, warnings }`.
+ */
+export async function buildReplySegments(text, options = {}) {
+  const input = String(text ?? '')
+  const segments = []
+  const warnings = []
+  const pushText = (value) => {
+    const trimmed = String(value ?? '').trim()
+    if (trimmed !== '') segments.push({ type: 'text', data: { text: trimmed } })
+  }
+
+  let lastIndex = 0
+  const pattern = new RegExp(MEDIA_MARKER_PATTERN.source, 'g')
+  let match
+  while ((match = pattern.exec(input)) !== null) {
+    pushText(input.slice(lastIndex, match.index))
+    lastIndex = match.index + match[0].length
+    const kind = match[1]
+    const source = match[2].trim()
+    const isUrl = /^https?:\/\//i.test(source)
+    let built
+    if (isUrl) {
+      built = buildSegment(kind, { url: source })
+    } else {
+      const read = await readFileAsBase64(source)
+      if (read.ok !== true) {
+        warnings.push(kind + ': ' + read.reason)
+        pushText('[' + kind + ' failed: ' + read.reason + ']')
+        continue
+      }
+      built = buildSegment(kind, { base64: read.base64 }, kind === 'file' ? basenameOf(source) : undefined)
+    }
+    segments.push(built)
+  }
+  pushText(input.slice(lastIndex))
+
+  return { segments, warnings }
+}
+
+/** The last path component, without pulling in node:path for one call. */
+function basenameOf(path) {
+  const parts = String(path).split(/[\\/]/)
+  return parts[parts.length - 1] ?? ''
+}

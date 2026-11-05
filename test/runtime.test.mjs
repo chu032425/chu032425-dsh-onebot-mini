@@ -139,6 +139,11 @@ const transport = {
   selfId: '10001',
   state: 'online',
   sendText: async (chat, text) => { sent.push(text); return { message_id: sent.length } },
+  sendMessage: async (chat, message) => {
+    const text = message.filter((seg) => seg.type === 'text').map((seg) => seg.data.text).join('\n')
+    sent.push(text)
+    return { message_id: sent.length }
+  },
   call: async () => ({}),
 }
 const created = []
@@ -229,6 +234,7 @@ t('the prompt says the tool is off', promptOff.includes('onebot_call tool is dis
 const promptNoBan = buildPlatformPrompt({ ...baseConfig, onebotToolDisabled: ['set_group_ban'] })
 t('a disabled action is not advertised', !promptNoBan.includes('set_group_ban (禁言群成员)') && promptNoBan.includes('send_group_msg (发送群消息)'))
 t('the prompt advertises the media tool', promptAll.includes('onebot_send_media'))
+t('the prompt teaches the reply media markers', promptAll.includes('[[image:/abs/path.png]]'))
 t('the prompt omits the media tool when the tool is off', !promptOff.includes('onebot_send_media'))
 // an explicit provider::model in config wins over the deployment default
 const bridgeModel = new ChatBridge({
@@ -802,6 +808,44 @@ disposeQzone()
 
 disposeExtra()
 disposeRoutes()
+
+// a reply carrying a media marker goes out as one message with a media segment
+const mediaSent = []
+const mediaTransport = {
+  selfId: '10001', state: 'online',
+  sendText: async (chat, text) => { mediaSent.push([{ type: 'text', data: { text } }]); return { message_id: 1 } },
+  sendMessage: async (chat, message) => { mediaSent.push(message); return { message_id: 1 } },
+  call: async () => ({}),
+}
+const bridgeMedia = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: mediaTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeMedia.start()
+await bridgeMedia.handleInbound(inbound({ user_id: 31001, message_id: 310 }))
+const chatMedia = bridgeMedia.chats.get('private:31001')
+sessionEvent({ id: chatMedia.sessionId }, { type: 'turn/start', data: { turn: 1 } })
+sessionEvent({ id: chatMedia.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '给你图 [[image:/tmp/onebot_test.png]] 收好' }] } } })
+sessionEvent({ id: chatMedia.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
+await wait(120)
+const sentSegments = mediaSent[mediaSent.length - 1] ?? []
+t('a media reply is one message with three segments', sentSegments.length === 3, JSON.stringify(sentSegments.map((seg) => seg.type)))
+t('the media reply keeps the text around the image', sentSegments[0]?.data.text === '给你图' && sentSegments[2]?.data.text === '收好')
+t('the image travel as base64', sentSegments[1]?.type === 'image' && String(sentSegments[1]?.data.file).startsWith('base64://'))
+await bridgeMedia.stop()
+
+// a marker with a missing file degrades to text, the reply still goes out
+const notes = []
+const degradeTransport = { selfId: '1', state: 'online', sendText: async () => ({ message_id: 1 }), sendMessage: async (chat, message) => { notes.push(message); return { message_id: 1 } }, call: async () => ({}) }
+const bridgeDegrade = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: degradeTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeDegrade.start()
+await bridgeDegrade.handleInbound(inbound({ user_id: 31002, message_id: 311 }))
+const chatDegrade = bridgeDegrade.chats.get('private:31002')
+sessionEvent({ id: chatDegrade.sessionId }, { type: 'turn/start', data: { turn: 1 } })
+sessionEvent({ id: chatDegrade.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '看 [[file:/tmp/definitely-missing-xyz]] 完' }] } } })
+sessionEvent({ id: chatDegrade.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
+await wait(120)
+const degradeMsg = notes[notes.length - 1] ?? []
+t('a missing media file still sends the text', degradeMsg.length >= 1 && degradeMsg.every((seg) => seg.type === 'text'))
+t('the missing media is reported inline', degradeMsg.some((seg) => String(seg.data.text).includes('failed')))
+await bridgeDegrade.stop()
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
