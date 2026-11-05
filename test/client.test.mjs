@@ -144,6 +144,7 @@ t('qzone menu label present', zh.tabQzone === '空间' && en.tabQzone === 'Qzone
 t('the qzone picker offers a dropdown and a manual box', typeof zh.qzoneTargetPlaceholder === 'string'
   && zh.qzoneTargetPlaceholder.includes('QQ') && typeof zh.qzoneTargetMine === 'string' && zh.qzoneTargetMine !== '')
 t('profile menu label present', zh.tabProfile === '个人资料' && en.tabProfile === 'Profile')
+t('qzone settings group label present', zh.groupQzone === '空间' && en.groupQzone === 'Qzone')
 for (const key of ['profileTitle', 'profileChoose', 'profileSelf', 'profileNickname', 'profileSignature',
   'profileLevel', 'profileVip', 'profileOnline', 'profileOnlineUnknown', 'profileUnavailable', 'profileEmpty']) {
   t('profile copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')

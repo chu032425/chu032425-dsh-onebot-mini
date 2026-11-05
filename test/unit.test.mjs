@@ -68,6 +68,9 @@ t('host and port belong to reverse', MODE_FIELDS.host === 'reverse' && MODE_FIEL
 t('url belongs to forward', MODE_FIELDS.url === 'forward')
 t('mode and token belong to both modes', MODE_FIELDS.mode === undefined && MODE_FIELDS.accessToken === undefined)
 const connectionFields = FIELD_GROUPS.find((group) => group.id === 'connection').fields
+const qzoneFields = FIELD_GROUPS.find((group) => group.id === 'qzone').fields
+t('the image settings live in their own qzone group', JSON.stringify(qzoneFields) === '["imageShowMaxMb","imageCacheMaxKb","imageCacheTotalMb"]')
+t('the diagnostics group no longer carries image settings', !FIELD_GROUPS.find((group) => group.id === 'diagnostics').fields.some((field) => field.startsWith('image')))
 t('connection group carries both mode inputs', connectionFields.includes('host') && connectionFields.includes('port') && connectionFields.includes('url'))
 const reverseVisible = connectionFields.filter((field) => MODE_FIELDS[field] === undefined || MODE_FIELDS[field] === 'reverse')
 const forwardVisible = connectionFields.filter((field) => MODE_FIELDS[field] === undefined || MODE_FIELDS[field] === 'forward')
