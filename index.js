@@ -273,6 +273,14 @@ export function apply(ctx) {
     } catch (error) {
       log.record('error', { note: 'initial transport start failed: ' + describeError(error) })
     }
+    // Register the tools once at the plugin scope before any agent exists: a
+    // scoped registration made inside a setup callback has to reach that agent's
+    // view, and a global one covers every agent created afterwards.
+    try {
+      await bridge.registerToolsFor(ctx, '')
+    } catch (error) {
+      log.record('warn', { note: 'early tool registration failed: ' + describeError(error) })
+    }
     log.record('bridge', { note: 'plugin mounted', mode: initial.mode, state: connection?.state ?? 'offline' })
     // Startup self-check: confirm the tools service is reachable from this ctx.
     // Without it every agent silently lacks the OneBot tools, which shows up as
