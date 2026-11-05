@@ -570,15 +570,15 @@ export class ChatBridge {
       // Register them at the plugin/global scope so every agent sees them. The
       // disposers live as long as the plugin does, which is fine: registration is
       // idempotent per name and the plugin does not unload per chat.
-      // Best-effort: a reused agent's tools must not block message delivery. If
-      // registration fails the message still goes out via followup. Register on
-      // the live agent's own ctx as well: a global registration is visible to
-      // agents created later, but an agent that already exists resolves its
-      // tools from its own scope.
+      // A reused agent keeps the tool view it was built with, so registering now
+      // may be a no-op for it. Re-running the whole setup against the live agent's
+      // ctx re-announces the tools and the channel prompt for this conversation.
       try {
-        await this.registerToolsFor(live.ctx, chatId)
+        const setup = this.buildSetup(await this.resolveAgentPreset(), chatId)
+        await setup(live.ctx)
+        this.log.record('bridge', { note: 'setup re-applied to the reused agent', chatId })
       } catch (e) {
-        this.log.record('warn', { note: 'tool registration for the reused agent failed', chatId, error: this.describeError(e) })
+        this.log.record('warn', { note: 'setup re-apply for the reused agent failed', chatId, error: this.describeError(e) })
       }
       if (this.config.titleEqualsId) this.pinTitle(live.session, sessionId)
       return record
