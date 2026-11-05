@@ -352,13 +352,6 @@ export class ChatBridge {
         connection: this.connection,
         config: this.config,
         messageId,
-        getSpeech: () => {
-          try {
-            return this.ctx.get?.('speechToText')
-          } catch {
-            return undefined
-          }
-        },
         log: (note) => this.log.record('bridge', { note, chatId }),
       })
       for (const warning of outcome.warnings) {

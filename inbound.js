@@ -14,9 +14,9 @@
  *   [文件: 报告.pdf, /workspace/QQ/qq-inbox/…/…-0-file.pdf]
  *
  * The agent then reaches the bytes with its normal tools — `read_image` for a
- * picture, `read`/`bash` for text and archives. Voice is additionally
- * transcribed through the Host `speechToText` service when a recognizer is
- * ready, so a spoken message becomes readable text too.
+ * picture, `read`/`bash` for text and archives. A voice clip is additionally
+ * transcribed by the gateway itself (`fetch_ptt_text`, QQ's own voice-to-text),
+ * so a spoken message becomes readable text too — no local model, no ffmpeg.
  *
  * Only http(s) URLs from the gateway frame are fetched. Nothing here trusts the
  * model, and a failed download degrades to the old placeholder instead of
@@ -26,7 +26,7 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { accountDir } from './cachepaths.js'
-import { transcodeToWav, transcribeViaGateway } from './stt.js'
+import { transcribeViaGateway } from './stt.js'
 
 /** Segment kinds handled here. */
 export const INBOUND_KINDS = Object.freeze(['image', 'record', 'video', 'file'])
@@ -140,9 +140,6 @@ export function segmentPlaceholder(type, data) {
 
 /** A download longer than this is abandoned. */
 const FETCH_TIMEOUT_MS = 20000
-
-/** A single voice clip may take a little longer to transcribe. */
-const TRANSCRIBE_TIMEOUT_MS = 30000
 
 /** A running counter so several media in the same millisecond never collide. */
 let sequence = 0
@@ -395,49 +392,6 @@ export async function readSourceBytes(source, maxBytes) {
 }
 
 /**
- * Transcribe one voice clip when a recognizer is already prepared.
- *
- * Readiness is checked first on purpose: an unprepared provider would otherwise
- * spend minutes downloading a model inside a chat turn. Anything short of a
- * ready provider simply yields no transcript.
- * @param speech - the `speechToText` service, or undefined.
- * @param bytes - the audio bytes.
- * @returns the transcript text, or an empty string.
- */
-export async function transcribeVoice(speech, bytes) {
-  try {
-    if (speech === undefined || speech === null) return ''
-    if (typeof speech.resolve !== 'function' || typeof speech.transcribe !== 'function') return ''
-    const snapshot = typeof speech.snapshot === 'function' ? speech.snapshot() : undefined
-    const providers = Array.isArray(snapshot?.providers) ? snapshot.providers : []
-    // `standby` means the model files are verified on disk but the worker has not
-    // been woken yet; `ready` means it is already warm. Both can transcribe (the
-    // provider wakes a standby worker on the first request). Any other phase —
-    // unprepared/failed/checking — must NOT download a model inside a chat turn.
-    const ready = providers.find((provider) => {
-      const phase = provider?.preparation?.phase
-      return phase === 'ready' || phase === 'standby'
-    })
-    if (ready === undefined) return ''
-    const selection = snapshot?.selection ?? {}
-    const providerId = selection.providerId ?? ready.id
-    const language = typeof selection.language === 'string' && selection.language !== 'auto' ? selection.language : undefined
-    const spec = speech.resolve({ audio: new Uint8Array(bytes), providerId, ...(language !== undefined ? { language } : {}) })
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS)
-    if (typeof timer.unref === 'function') timer.unref()
-    try {
-      const transcript = await speech.transcribe(spec, controller.signal)
-      return String(transcript?.text ?? '').trim()
-    } finally {
-      clearTimeout(timer)
-    }
-  } catch {
-    return ''
-  }
-}
-
-/**
  * The placeholder text for one saved (or failed) media segment.
  * @param kind - image / record / video / file.
  * @param path - the saved path, or undefined on failure.
@@ -463,10 +417,10 @@ export function mediaPlaceholder(kind, path, name, transcript) {
 
 /**
  * Download and save one media segment.
- * @param options - `{ segment, chatId, chat, connection, config, getSpeech, log }`.
+ * @param options - `{ segment, chatId, chat, connection, config, messageId, log }`.
  * @returns `{ placeholder, saved?, warning? }`.
  */
-async function ingestSegment({ segment, chatId, chat, connection, config, getSpeech, messageId, log }) {
+async function ingestSegment({ segment, chatId, chat, connection, config, messageId, log }) {
   const kind = segment.type
   const maxBytes = Math.max(1, Number(config?.inboundMediaMaxMb ?? 20)) * 1024 * 1024
   const resolved = await resolveSegmentSource(connection, segment, chat)
@@ -498,20 +452,11 @@ async function ingestSegment({ segment, chatId, chat, connection, config, getSpe
   }
 
   let transcript = ''
-  if (kind === 'record' && config?.sttEnabled !== false) {
-    // Preferred: let the gateway (NapCat) return QQ's own voice-to-text result
-    // for this message — no local model or ffmpeg involved.
-    if (typeof messageId === 'string' && messageId !== '') {
-      transcript = await transcribeViaGateway(connection, messageId, { log })
-    }
-    // Fallback: transcode locally to 16 kHz mono WAV and ask the Host recognizer.
-    if (transcript === '') {
-      const speech = typeof getSpeech === 'function' ? getSpeech() : undefined
-      if (speech !== undefined) {
-        const wav = await transcodeToWav(config, read.bytes, { log })
-        if (wav !== undefined) transcript = await transcribeVoice(speech, wav)
-      }
-    }
+  if (kind === 'record' && config?.sttEnabled !== false && typeof messageId === 'string' && messageId !== '') {
+    // Ask the gateway (NapCat) for QQ's own voice-to-text result of this message.
+    // Clean and portable: it is an action on the gateway we already talk to — no
+    // extra plugin, npm package, local model, or system ffmpeg.
+    transcript = await transcribeViaGateway(connection, messageId, { log })
   }
   return {
     placeholder: mediaPlaceholder(kind, path, suggested !== '' ? suggested : undefined, transcript),
@@ -524,10 +469,10 @@ async function ingestSegment({ segment, chatId, chat, connection, config, getSpe
  *
  * Mirrors `flattenMessage` for text/at/face/other segments, but each media
  * segment is downloaded and rewritten to a local path so the model can read it.
- * @param options - `{ segments, chatId, chat, connection, config, getSpeech, log }`.
+ * @param options - `{ segments, chatId, chat, connection, config, messageId, log }`.
  * @returns `{ text, saved, warnings }`.
  */
-export async function buildInboundText({ segments, chatId, chat, connection, config, getSpeech, messageId, log }) {
+export async function buildInboundText({ segments, chatId, chat, connection, config, messageId, log }) {
   const saved = []
   const warnings = []
   const record = (note) => {
@@ -559,7 +504,7 @@ export async function buildInboundText({ segments, chatId, chat, connection, con
       continue
     }
     if (INBOUND_KINDS.includes(type)) {
-      const outcome = await ingestSegment({ segment, chatId, chat, connection, config, getSpeech, messageId, log: record })
+      const outcome = await ingestSegment({ segment, chatId, chat, connection, config, messageId, log: record })
       if (outcome.warning !== undefined) warnings.push(outcome.warning)
       if (outcome.saved !== undefined) saved.push(outcome.saved)
       parts.push(outcome.placeholder)
