@@ -291,5 +291,13 @@ const sendSrc = (await import('../media.js')).sendMedia.toString()
 t('sendMedia returns only ok/data', !sendSrc.includes('source:') && sendSrc.includes('return { ok: true, data }'))
 t('sendMedia still reports cleanup through a hook', sendSrc.includes('onCleanup'))
 
+// --- media prompt forbids the permission hallucination
+import { mediaParagraph } from '../prompt.js'
+const mediaText = mediaParagraph()
+t('the media paragraph requires calling the tool', mediaText.includes('MUST call onebot_send_media'))
+t('the media paragraph forbids claiming no permission', mediaText.includes('Do not reply that you lack permission'))
+t('the media paragraph forbids the admin excuse', mediaText.includes('Never tell the user to make you an administrator'))
+t('the media paragraph requires listing first', mediaText.includes('call onebot_list_files'))
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

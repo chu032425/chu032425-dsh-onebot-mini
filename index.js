@@ -266,6 +266,7 @@ export function apply(ctx) {
       listPermissionPresets,
       listModels,
       getSessionIdForChat: (chatId) => bridge.sessionOf(chatId),
+      forgetChat: (chatId) => bridge.forgetChat(chatId),
     })
 
     try {

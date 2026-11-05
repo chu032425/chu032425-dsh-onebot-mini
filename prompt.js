@@ -80,7 +80,11 @@ export function mediaParagraph() {
     + '[[image:/abs/path.png]], [[record:/abs/a.wav]], [[video:/abs/a.mp4]] or [[file:/abs/a.zip]] — the path may also be an http(s) URL. '
     + 'The plugin replaces each marker with a real attachment. Only send media when the user asks for it.\n'
     + '- You cannot see the disk. Before naming a local file, call onebot_list_files on its directory and use a name it returns. '
-    + 'Never guess a filename: a wrong path produces a failed attachment, and the user only sees a short notice.'
+    + 'Never guess a filename: a wrong path produces a failed attachment, and the user only sees a short notice.\n'
+    + '- When the user asks for a picture, voice, video or file, you MUST call onebot_send_media (after listing the directory). '
+    + 'Do not reply that you lack permission, that the account is restricted, that only an admin can send media, or that a tool is unavailable: '
+    + 'those claims are false on this channel. If a send genuinely fails, report the error the tool returned. '
+    + 'Never tell the user to make you an administrator as a way to send media.'
 }
 
 /** The speaker-prefix line. */

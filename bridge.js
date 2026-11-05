@@ -993,6 +993,27 @@ export class ChatBridge {
   }
 
   /**
+   * Forget one chat's mapping so the next message starts a clean conversation.
+   *
+   * A conversation that has accumulated many failed turns keeps steering the
+   * model down the same wrong path (for example, repeatedly insisting it may not
+   * send media). Dropping the mapping makes the next message open a fresh
+   * session, which is the cheapest way to break that loop without editing the
+   * stored transcript.
+   * @param chatId - canonical chat id.
+   * @returns whether a mapping existed.
+   */
+  forgetChat(chatId) {
+    const existed = this.chats.delete(chatId)
+    for (const [sessionId, mapped] of this.bySession.entries()) {
+      if (mapped === chatId) this.bySession.delete(sessionId)
+    }
+    this.buffers.delete(chatId)
+    this.log.record('bridge', { note: 'chat mapping forgotten; the next message starts a fresh session', chatId })
+    return existed
+  }
+
+  /**
    * Resolve one chat's session id for the log page (diagnostics).
    * @param chatId - canonical chat id.
    * @returns the session id, or undefined when the chat has no agent yet.

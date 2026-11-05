@@ -65,7 +65,7 @@ async function readJsonBody(req) {
  *   providers for the pickers.
  * @returns the disposer.
  */
-export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels, getSessionIdForChat }) {
+export function registerRoutes(ctx, { store, log, getConnection, applyConfig, listWorkspaces, listAgentPresets, listPermissionPresets, listModels, getSessionIdForChat, forgetChat }) {
   const disposeState = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/state',
@@ -824,6 +824,49 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
    * and "the tool was never registered for this agent", and only the tools
    * service can answer it. `?chatId=group:123` or `?chatId=private:456`.
    */
+  /**
+   * Drop one chat's session mapping so the next message starts a clean
+   * conversation. Used when a chat's history has driven the model into a
+   * repeating wrong answer.
+   *
+   * Body: `{ chatId }`.
+   */
+  const disposeForget = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/forget-chat',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      let body
+      try {
+        body = await readJsonBody(req)
+      } catch (error) {
+        sendJson(res, 400, { error: String(error?.message ?? error) })
+        return
+      }
+      const chatId = String(body?.chatId ?? '').trim()
+      if (chatId === '') {
+        sendJson(res, 400, { error: 'chatId is required' })
+        return
+      }
+      if (typeof forgetChat !== 'function') {
+        sendJson(res, 200, { ok: false, error: 'not supported' })
+        return
+      }
+      const existed = forgetChat(chatId)
+      log.record('bridge', { note: 'chat mapping forgotten on request', chatId, existed })
+      sendJson(res, 200, { ok: true, existed })
+    },
+  })
+
   const disposeToolProbe = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/tool-probe',
@@ -894,6 +937,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     disposeQzone()
     disposeProfile()
     disposeImage()
+    disposeForget()
     disposeToolProbe()
     disposeSendMedia()
     disposeMediaKinds()
