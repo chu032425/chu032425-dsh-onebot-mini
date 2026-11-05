@@ -30,6 +30,7 @@
     "imagecache.js",
     "media.js",
     "cacheinfo.js",
+    "inbound.js",
     "prompt.js",
     "api.js",
     "lib/client.js",

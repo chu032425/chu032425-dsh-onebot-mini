@@ -15,7 +15,8 @@
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, actionLabel } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, senderPrefixParagraph, toolsParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { buildInboundText } from './inbound.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -313,7 +314,33 @@ export class ChatBridge {
       return
     }
 
-    const body = flattenMessage(frame.message)
+    // Incoming media is downloaded to a local inbox and rewritten to a readable
+    // path, so the model can open an image with read_image or a file with read.
+    // Turned off, it degrades to the bare placeholders that name nothing.
+    let body
+    if (this.config.inboundMedia !== false) {
+      const outcome = await buildInboundText({
+        segments: frame.message,
+        chatId,
+        chat,
+        connection: this.connection,
+        config: this.config,
+        getSpeech: () => {
+          try {
+            return this.ctx.get?.('speechToText')
+          } catch {
+            return undefined
+          }
+        },
+        log: (note) => this.log.record('bridge', { note, chatId }),
+      })
+      for (const warning of outcome.warnings) {
+        this.log.record('warn', { note: 'inbound media skipped: ' + warning, chatId })
+      }
+      body = outcome.text
+    } else {
+      body = flattenMessage(frame.message)
+    }
     if (body === '') return
 
     const text = speakerPrefix(frame, chat.kind, this.config.senderPrefix) + body
@@ -1066,6 +1093,9 @@ export function buildPlatformPrompt(config) {
   const allow = computeAllowlist(config)
 
   const senderPrefix = config?.senderPrefix ? senderPrefixParagraph() : ''
+  const inbound = config?.inboundMedia === false
+    ? ''
+    : (String(config?.inboundPrompt ?? '').trim() !== '' ? String(config.inboundPrompt) : inboundParagraph())
   let media = ''
   let tools = ''
   let actions = ''
@@ -1085,5 +1115,5 @@ export function buildPlatformPrompt(config) {
     actions = lines.join('\n')
   }
 
-  return renderPrompt(template, { senderPrefix, media, tools, actions })
+  return renderPrompt(template, { senderPrefix, media, tools, actions, inbound })
 }

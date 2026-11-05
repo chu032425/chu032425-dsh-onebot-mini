@@ -19,7 +19,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, PROMPT_DEFS } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** The DSH home, honoring `$DSH_HOME` then `~/.dsh`. */
 export function dshHome() {
@@ -80,7 +80,12 @@ export const DEFAULTS = Object.freeze({
   debounceMaxMs: 0,
   autoInterject: true,
   deleteSentMedia: true,
+  // Incoming media: download image/voice/video/file segments to a local inbox so
+  // the model can actually read them, and cap one file's size.
+  inboundMedia: true,
+  inboundMediaMaxMb: 20,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
+  inboundPrompt: DEFAULT_INBOUND_PROMPT,
   toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
   toolMediaPrompt: DEFAULT_TOOL_MEDIA_PROMPT,
   interjectPrompt: DEFAULT_INTERJECT_PROMPT,
@@ -116,7 +121,10 @@ export const FIELD_KINDS = Object.freeze({
   logToFile: 'boolean',
   sendTimeoutMs: 'number',
   deleteSentMedia: 'boolean',
+  inboundMedia: 'boolean',
+  inboundMediaMaxMb: 'number',
   channelPrompt: 'text',
+  inboundPrompt: 'text',
   toolCallPrompt: 'text',
   toolMediaPrompt: 'text',
   interjectPrompt: 'text',
@@ -134,7 +142,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
-  { id: 'media', fields: ['deleteSentMedia'] },
+  { id: 'media', fields: ['inboundMedia', 'inboundMediaMaxMb', 'deleteSentMedia'] },
   { id: 'reply', fields: ['privateAutoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
@@ -218,6 +226,11 @@ export function normalizeConfig(raw) {
   if (value.imageShowMaxMb < 1 || value.imageShowMaxMb > 512) {
     problems.push('imageShowMaxMb must be 1-512')
     value.imageShowMaxMb = DEFAULTS.imageShowMaxMb
+  }
+  value.inboundMediaMaxMb = Math.trunc(value.inboundMediaMaxMb)
+  if (value.inboundMediaMaxMb < 1 || value.inboundMediaMaxMb > 512) {
+    problems.push('inboundMediaMaxMb must be 1-512')
+    value.inboundMediaMaxMb = DEFAULTS.inboundMediaMaxMb
   }
   value.logCapacity = Math.trunc(value.logCapacity)
   if (value.logCapacity < 50 || value.logCapacity > 5000) {

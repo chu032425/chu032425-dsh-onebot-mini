@@ -214,7 +214,7 @@ t('renderPrompt drops an empty placeholder line', !renderPrompt('a\n{media}\nb',
 t('an unknown placeholder is left alone', renderPrompt('keep {unknown}', {}).includes('{unknown}'))
 t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
 t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
-t('the prompt registry covers channel, both tools and the interject judge', PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,toolCallPrompt,toolMediaPrompt,interjectPrompt')
+t('the prompt registry covers channel, inbound, both tools and the interject judge', PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,inboundPrompt,toolCallPrompt,toolMediaPrompt,interjectPrompt')
 t('every registered prompt has a config default', PROMPT_DEFS.every((d) => typeof DEFAULTS[d.field] === 'string' && DEFAULTS[d.field] !== ''))
 t('every registered prompt has a label key', PROMPT_DEFS.every((d) => typeof d.labelKey === 'string' && d.labelKey !== ''))
 const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', toolMediaPrompt: '' }).value
@@ -298,6 +298,55 @@ t('the media paragraph requires calling the tool', mediaText.includes('必须') 
 t('the media paragraph forbids claiming no permission', mediaText.includes('不要回复说你没有权限'))
 t('the media paragraph forbids the admin excuse', mediaText.includes('绝不要让用户把你设为管理员'))
 t('the media paragraph requires listing first', mediaText.includes('onebot_list_files'))
+
+// --- incoming media: placeholders become readable local paths
+import {
+  inboxRoot, chatFolder, safeFileName, extensionFor, sourceFromData, sourceFromResponse,
+  mediaPlaceholder, buildInboundText, unescapeCqLite, sniffImageExtension,
+} from '../inbound.js'
+t('inbox root sits under the workspace', inboxRoot({ workspacePath: '/workspace/QQ' }) === '/workspace/QQ/qq-inbox')
+t('inbox root falls back to the cache dir', inboxRoot({}).endsWith('inbound'))
+t('chat folder is filesystem safe', chatFolder('private:2000001') === 'private-2000001')
+t('a file name drops path separators', !safeFileName('../../etc/passwd').includes('/') && !safeFileName('a/b').includes('/'))
+t('extension follows the content type', extensionFor('image', 'image/png', '') === 'png' && extensionFor('video', 'video/mp4', '') === 'mp4')
+t('extension falls back per kind', extensionFor('image', '', '') === 'jpg' && extensionFor('record', '', '') === 'amr')
+t('a direct URL is picked from the segment', sourceFromData({ url: 'https://x/y.png' })?.url === 'https://x/y.png')
+t('a base64 file field is decoded to a source', sourceFromData({ file: 'base64://QUJD' })?.base64 === 'QUJD')
+t('a get_file response url is picked', sourceFromResponse({ url: 'https://x/y.amr' })?.url === 'https://x/y.amr')
+t('the image placeholder carries its path', mediaPlaceholder('image', '/tmp/a.png') === '[图片: /tmp/a.png]')
+t('the voice placeholder appends a transcript', mediaPlaceholder('record', '/tmp/a.amr', undefined, '你好').includes('转写：你好'))
+t('the file placeholder names the file', mediaPlaceholder('file', '/tmp/a.pdf', 'a.pdf') === '[文件: a.pdf, /tmp/a.pdf]')
+t('a failed download keeps the bare placeholder', mediaPlaceholder('image') === '[图片]')
+t('the CQ fallback strips media tags', unescapeCqLite('[CQ:image,file=x] hi') === '[图片] hi')
+t('image magic bytes pick the extension', sniffImageExtension(Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')) === 'png'
+  && sniffImageExtension(Buffer.from('ffd8ffe0', 'hex')) === 'jpg')
+
+// buildInboundText downloads a base64 image and rewrites the placeholder to a
+// readable path (no network: the source is inline base64).
+const tmpInboxBase = '/tmp/onebot-inbound-test-' + process.pid
+const inboundConfig = { workspacePath: tmpInboxBase, inboundMediaMaxMb: 5 }
+const fakeConnection = { call: async () => ({}) }
+const built = await buildInboundText({
+  segments: [
+    { type: 'text', data: { text: '看看 ' } },
+    { type: 'image', data: { file: 'base64://' + Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').toString('base64') } },
+  ],
+  chatId: 'private:42',
+  chat: { kind: 'private', id: '42' },
+  connection: fakeConnection,
+  config: inboundConfig,
+})
+t('an inbound image is saved and referenced by path', /\[图片: \/tmp\/onebot-inbound-test-\d+\/qq-inbox\/private-42\/.+\.png\]/.test(built.text), built.text)
+t('the saved image file exists', built.saved.length === 1 && existsSync(built.saved[0].path))
+rmSync(tmpInboxBase, { recursive: true, force: true })
+
+// a media segment with no usable source degrades to the bare placeholder
+const missing = await buildInboundText({
+  segments: [{ type: 'image', data: {} }],
+  chatId: 'private:43', chat: { kind: 'private', id: '43' },
+  connection: fakeConnection, config: inboundConfig,
+})
+t('a source-less media segment keeps the bare placeholder', missing.text === '[图片]' && missing.warnings.length === 1)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

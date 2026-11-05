@@ -9,7 +9,8 @@
  *  - `{media}` —— 媒体发送工具 + 标记段落，工具关闭时为空；
  *  - `{tools}` —— 本插件工具清单（onebot_call / onebot_send_media /
  *    onebot_list_files）以及「QQ 相关操作只能用这些工具」的硬规则；
- *  - `{actions}` —— 工具关闭时的说明，或当前启用的动作清单。
+ *  - `{actions}` —— 工具关闭时的说明，或当前启用的动作清单；
+ *  - `{inbound}` —— 收到的图片/语音/视频/文件已保存到本机、如何读取的说明。
  *
  * 其余文字都是运营者可以随意改写的普通文案。需要动态部分时保留占位符即可；
  * 渲染器遇到不认识的占位符会原样保留，而不是删掉整段文字。
@@ -21,16 +22,39 @@ export const DEFAULT_CHANNEL_PROMPT = [
   '你正在通过 OneBot 11 桥接的 QQ 聊天与用户对话。',
   '- QQ 不渲染 Markdown。请用纯文本回答，可用数字或短横线列表。',
   '- 一轮回复只产生一条对外消息：插件会缓存你的文本块，并在本轮结束时统一发送。不要试图把一条回复拆成多条消息。',
-  '- 收到的图片、语音、视频、文件会显示为 [图片] / [语音] / [视频] / [文件] 占位符；插件不会下载它们，你也看不到其内容，用户问起时如实说明。',
+  '- 用户发来的图片、语音、视频、文件会在消息文本里显示为 [图片] / [语音] / [视频] / [文件] 占位。',
   '{tools}',
   '{senderPrefix}',
   '{media}',
+  '{inbound}',
   '{actions}',
   '- 本通道没有 Web 端的审批卡片：不要调用 exit_plan_mode，需要计划时用纯文本写出。',
 ].join('\n')
 
 /** 频道模板声明的占位符。 */
-export const PROMPT_PLACEHOLDERS = Object.freeze(['{senderPrefix}', '{media}', '{tools}', '{actions}'])
+export const PROMPT_PLACEHOLDERS = Object.freeze(['{senderPrefix}', '{media}', '{tools}', '{actions}', '{inbound}'])
+
+/**
+ * 「收到的媒体」默认提示词：告诉模型占位符里带的是本机路径，并说明如何读取。
+ *
+ * 这一段可以在「提示词」页面编辑；`{inbound}` 占位符会展开成它的当前值（接收媒体
+ * 关闭时为空）。默认文案如下。
+ */
+export const DEFAULT_INBOUND_PROMPT = [
+  '## 收到的媒体',
+  '- 用户发来的图片会保存到本机，并给出形如 [图片: /绝对/路径.png] 的路径；回答前先用 read_image 工具查看这张图片，再据其内容作答。',
+  '- 语音会保存为音频文件并给出 [语音: /绝对/路径]；若插件已转写，会在后面附「（转写：…）」文本，优先按转写内容回复。没有转写时，说明你无法直接听取音频，可让用户重发文字。',
+  '- 视频会保存并给出 [视频: /绝对/路径]；文件会给出 [文件: 名称, /绝对/路径]。需要时用 read 或 bash 工具读取其中内容（如文本、表格、压缩包）。',
+  '- 若占位符不带路径（只有 [图片] 这种），说明下载失败或未开启接收媒体：如实告诉用户你没有收到内容，不要凭空编造。',
+].join('\n')
+
+/**
+ * 「收到的媒体」段落（默认文案的便捷读取）。
+ * @returns 该段落。
+ */
+export function inboundParagraph() {
+  return DEFAULT_INBOUND_PROMPT
+}
 
 /**
  * `onebot_call` 工具的默认描述。
@@ -63,6 +87,7 @@ export const DEFAULT_INTERJECT_PROMPT = '你负责为一位可能仍在作答的
  */
 export const PROMPT_DEFS = Object.freeze([
   Object.freeze({ id: 'channel', field: 'channelPrompt', labelKey: 'promptDefChannel', placeholders: PROMPT_PLACEHOLDERS, default: DEFAULT_CHANNEL_PROMPT }),
+  Object.freeze({ id: 'inbound', field: 'inboundPrompt', labelKey: 'promptDefInbound', placeholders: Object.freeze([]), default: DEFAULT_INBOUND_PROMPT }),
   Object.freeze({ id: 'toolCall', field: 'toolCallPrompt', labelKey: 'promptDefToolCall', placeholders: Object.freeze(['{enabledNote}']), default: DEFAULT_TOOL_CALL_PROMPT }),
   Object.freeze({ id: 'toolMedia', field: 'toolMediaPrompt', labelKey: 'promptDefToolMedia', placeholders: Object.freeze([]), default: DEFAULT_TOOL_MEDIA_PROMPT }),
   Object.freeze({ id: 'interject', field: 'interjectPrompt', labelKey: 'promptDefInterject', placeholders: Object.freeze([]), default: DEFAULT_INTERJECT_PROMPT }),
@@ -116,12 +141,12 @@ export function senderPrefixParagraph() {
  * 单独占一行的占位符若展开为空，会留下一行空白，所以空展开时整行删除；随后
  * 再把连续的多行空白折叠起来。
  * @param template - 提示词模板。
- * @param values - `{ senderPrefix, media, tools, actions }` 替换文本。
+ * @param values - `{ senderPrefix, media, tools, actions, inbound }` 替换文本。
  * @returns 渲染后的提示词。
  */
 export function renderPrompt(template, values) {
   let text = String(template ?? '')
-  for (const key of ['senderPrefix', 'media', 'tools', 'actions']) {
+  for (const key of ['senderPrefix', 'media', 'tools', 'actions', 'inbound']) {
     const value = String(values?.[key] ?? '')
     const pattern = new RegExp('^[ \\t]*\\{' + key + '\\}[ \\t]*$', 'm')
     if (value.trim() === '') {
