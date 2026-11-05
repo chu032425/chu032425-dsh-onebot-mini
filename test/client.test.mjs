@@ -122,6 +122,12 @@ for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
 // list never shows a bare action id without an explanation next to it.
 t('the catalog supplies action annotations', TOOL_GROUPS.every((group) => group.actions.every((action) => /[\u4e00-\u9fa5]/.test(action.zh)))),
 t('the tools page renders every catalog group', TOOL_GROUPS.length === 9)
+
+// The friend row shows the remark as its name, so the trailing hint must be the
+// nickname; labelling it "remark" would describe the wrong field.
+t('the friend row labels its hint as the nickname', zh.contactsNickname === '昵称' && en.contactsNickname === 'Nickname')
+t('the swapped remark label is gone', !('contactsRemark' in zh) && !('contactsRemark' in en))
+t('sex is localized in the friend detail', typeof zh.profileSexUnknown === 'string' && zh.profileSexUnknown === '未知')
 t('tools menu label present', zh.tabTools === '工具' && en.tabTools === 'Tools')
 t('contacts menu label present', zh.tabContacts === '好友与群组' && en.tabContacts === 'Contacts')
 t('access menu label present', zh.tabAccess === '访问控制' && en.tabAccess === 'Access')
