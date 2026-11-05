@@ -651,6 +651,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
       const cached = await fetchIntoCache(qq, source, {
         maxKb: config.imageCacheMaxKb,
         totalMb: config.imageCacheTotalMb,
+        maxStreamMb: config.imageShowMaxMb,
       })
       if (cached.ok !== true) {
         // An image over the cache cap is still shown once by streaming the bytes

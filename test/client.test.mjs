@@ -127,7 +127,7 @@ t('the tools page renders every catalog group', TOOL_GROUPS.length === 9)
 // nickname; labelling it "remark" would describe the wrong field.
 t('the friend row labels its hint as the nickname', zh.contactsNickname === '昵称' && en.contactsNickname === 'Nickname')
 t('the swapped remark label is gone', !('contactsRemark' in zh) && !('contactsRemark' in en))
-for (const key of ['fieldImageCacheMaxKb', 'fieldImageCacheTotalMb']) {
+for (const key of ['fieldImageCacheMaxKb', 'fieldImageCacheTotalMb', 'fieldImageShowMaxMb']) {
   t('image cache field label present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 t('sex is localized in the friend detail', typeof zh.profileSexUnknown === 'string' && zh.profileSexUnknown === '未知')
