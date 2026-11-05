@@ -19,7 +19,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, PROMPT_DEFS } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** The DSH home, honoring `$DSH_HOME` then `~/.dsh`. */
 export function dshHome() {
@@ -72,10 +72,13 @@ export const DEFAULTS = Object.freeze({
   logMessagePreview: true,
   logToFile: true,
   sendTimeoutMs: 30000,
+  debounceMs: 1200,
+  autoInterject: true,
   deleteSentMedia: true,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
   toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
   toolMediaPrompt: DEFAULT_TOOL_MEDIA_PROMPT,
+  interjectPrompt: DEFAULT_INTERJECT_PROMPT,
   imageCacheMaxKb: 1024,
   imageCacheTotalMb: 100,
   imageShowMaxMb: 32,
@@ -111,6 +114,9 @@ export const FIELD_KINDS = Object.freeze({
   channelPrompt: 'text',
   toolCallPrompt: 'text',
   toolMediaPrompt: 'text',
+  interjectPrompt: 'text',
+  debounceMs: 'number',
+  autoInterject: 'boolean',
   imageCacheMaxKb: 'number',
   imageCacheTotalMb: 'number',
   imageShowMaxMb: 'number',
@@ -122,6 +128,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
   { id: 'media', fields: ['deleteSentMedia'] },
+  { id: 'reply', fields: ['debounceMs', 'autoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
@@ -184,6 +191,11 @@ export function normalizeConfig(raw) {
   if (value.port < 1 || value.port > 65535) {
     problems.push('port must be 1-65535')
     value.port = DEFAULTS.port
+  }
+  value.debounceMs = Math.trunc(value.debounceMs)
+  if (!Number.isFinite(value.debounceMs) || value.debounceMs < 0 || value.debounceMs > 10000) {
+    problems.push('debounceMs must be 0-10000')
+    value.debounceMs = DEFAULTS.debounceMs
   }
   value.sendTimeoutMs = Math.trunc(value.sendTimeoutMs)
   if (value.sendTimeoutMs < 1000 || value.sendTimeoutMs > 600000) {

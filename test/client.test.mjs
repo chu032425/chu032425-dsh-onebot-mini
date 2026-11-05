@@ -148,7 +148,9 @@ t('cache menu label present', zh.tabCache === '缓存' && en.tabCache === 'Cache
 t('prompt menu label present', zh.tabPrompts === '提示词' && en.tabPrompts === 'Prompt')
 for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsReset', 'promptsSave', 'promptsSaved',
   'promptDefChannel', 'promptDefChannelHint', 'promptDefToolCall', 'promptDefToolCallHint',
-  'promptDefToolMedia', 'promptDefToolMediaHint', 'promptsPlaceholders', 'promptsNoPlaceholders']) {
+  'promptDefToolMedia', 'promptDefToolMediaHint', 'promptDefInterject', 'promptDefInterjectHint',
+  'groupReply', 'fieldDebounceMs', 'fieldAutoInterject',
+  'promptsPlaceholders', 'promptsNoPlaceholders']) {
   t('prompt copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 for (const key of ['cacheTitle', 'cacheTotal', 'cacheConfig', 'cacheLogs', 'cacheFiles', 'cacheKindImage', 'cacheKindAudio', 'cacheKindVideo', 'cacheKindFile', 'cacheClearLogs',

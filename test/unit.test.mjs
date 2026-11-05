@@ -202,7 +202,7 @@ t('renderPrompt drops an empty placeholder line', !renderPrompt('a\n{media}\nb',
 t('an unknown placeholder is left alone', renderPrompt('keep {unknown}', {}).includes('{unknown}'))
 t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
 t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
-t('the prompt registry covers channel and both tools', PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,toolCallPrompt,toolMediaPrompt')
+t('the prompt registry covers channel, both tools and the interject judge', PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,toolCallPrompt,toolMediaPrompt,interjectPrompt')
 t('every registered prompt has a config default', PROMPT_DEFS.every((d) => typeof DEFAULTS[d.field] === 'string' && DEFAULTS[d.field] !== ''))
 t('every registered prompt has a label key', PROMPT_DEFS.every((d) => typeof d.labelKey === 'string' && d.labelKey !== ''))
 const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', toolMediaPrompt: '' }).value

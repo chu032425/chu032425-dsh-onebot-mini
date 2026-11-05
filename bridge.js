@@ -15,7 +15,7 @@
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, actionLabel } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, mediaParagraph, senderPrefixParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, senderPrefixParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -206,6 +206,8 @@ export class ChatBridge {
     this.pendingCreates = new Map()
     /** chatId → accumulated assistant text for the open turn. */
     this.buffers = new Map()
+    /** chatId → buffered inbound messages waiting out the debounce window. */
+    this.inboundQueue = new Map()
     /** chatId → message ids already handled (reconnect replay guard). */
     this.seen = new Map()
     this.dedupWindowMs = 300000
@@ -242,6 +244,10 @@ export class ChatBridge {
    */
   async stop() {
     this.stopping = true
+    for (const entry of this.inboundQueue.values()) {
+      if (entry.timer !== undefined) clearTimeout(entry.timer)
+    }
+    this.inboundQueue.clear()
     const chats = [...this.chats.values()]
     this.chats.clear()
     this.bySession.clear()
@@ -303,7 +309,53 @@ export class ChatBridge {
     if (body === '') return
 
     const text = speakerPrefix(frame, chat.kind, this.config.senderPrefix) + body
-    await this.dispatch(chatId, chat, text, frame)
+    await this.enqueue(chatId, chat, text, frame)
+  }
+
+  /**
+   * Buffer one inbound message for the debounce window.
+   *
+   * Consecutive messages from the same chat are merged into one so a user firing
+   * off several lines gets one considered reply instead of several turns. A new
+   * message restarts the timer. With `debounceMs` at 0 the buffer flushes at once.
+   * @param chatId - canonical chat id.
+   * @param chat - split chat id.
+   * @param text - the flattened message text.
+   * @param frame - the raw event, kept for logging and dedup context.
+   */
+  async enqueue(chatId, chat, text, frame) {
+    if (this.stopping) return
+    const delay = Math.max(0, Number(this.config.debounceMs) || 0)
+    let entry = this.inboundQueue.get(chatId)
+    if (entry === undefined) {
+      entry = { texts: [], chat, frame, timer: undefined }
+      this.inboundQueue.set(chatId, entry)
+    }
+    entry.texts.push(text)
+    entry.frame = frame
+    if (entry.timer !== undefined) clearTimeout(entry.timer)
+    if (delay === 0) {
+      // No debounce: deliver inline so the caller sees the chat created when it
+      // awaits handleInbound, as it did before buffering existed.
+      await this.flush(chatId)
+      return
+    }
+    entry.timer = setTimeout(() => { void this.flush(chatId) }, delay)
+    if (typeof entry.timer.unref === 'function') entry.timer.unref()
+  }
+
+  /**
+   * Send the buffered messages for one chat as a single turn.
+   * @param chatId - canonical chat id.
+   */
+  async flush(chatId) {
+    const entry = this.inboundQueue.get(chatId)
+    if (entry === undefined) return
+    this.inboundQueue.delete(chatId)
+    if (entry.timer !== undefined) clearTimeout(entry.timer)
+    const text = entry.texts.join('\n').trim()
+    if (text === '') return
+    await this.dispatch(chatId, entry.chat, text, entry.frame)
   }
 
   /**
@@ -361,9 +413,101 @@ export class ChatBridge {
         content: [{ type: 'text', text }],
         source: PLUGIN_SOURCE,
       })
-      record.agent.followup(message)
+      // While the agent is busy, either queue a new turn or steer the running
+      // one at its next step. The judge decides; any failure falls back to the
+      // safe choice (queue), because mis-steering can derail a good answer.
+      const running = record.agent?.status === 'running'
+      let mode = 'followup'
+      if (running && this.config.autoInterject !== false && typeof record.agent?.steer === 'function') {
+        mode = await this.judgeInterject(chatId, text)
+      }
+      if (mode === 'steer') {
+        record.agent.steer(message)
+        this.log.record('bridge', { note: 'steered into the running turn', chatId, length: text.length })
+      } else {
+        record.agent.followup(message)
+      }
     } catch (error) {
-      this.log.record('error', { note: 'followup failed for ' + chatId, error: this.describeError(error) })
+      this.log.record('error', { note: 'delivery failed for ' + chatId, error: this.describeError(error) })
+    }
+  }
+
+  /**
+   * Resolve the provider/model used for the lightweight interject judge.
+   *
+   * Preference: the chat's configured model, then the deployment default, then
+   * the first advertised provider/model. Undefined means "no judge available".
+   * @param llm - the live `llm` service.
+   * @returns `{ provider, model }` or undefined.
+   */
+  async resolveJudgeModel(llm) {
+    const configured = String(this.config.agentModel ?? '').trim()
+    if (configured.includes('::')) {
+      const [provider, ...rest] = configured.split('::')
+      if (provider !== '' && rest.length > 0) return { provider, model: rest.join('::') }
+    }
+    try {
+      const selection = this.ctx.get('agentDefaultModel')?.currentSelection?.()
+      if (selection?.provider && selection?.model) {
+        return { provider: String(selection.provider), model: String(selection.model) }
+      }
+    } catch {
+      // fall through to the advertised catalog
+    }
+    try {
+      for (const provider of await llm.listProviders()) {
+        const models = await llm.listModels(provider.id)
+        if (models.length > 0) return { provider: String(provider.id), model: String(models[0].id) }
+      }
+    } catch {
+      // no catalog is a normal condition on a bare deployment
+    }
+    return undefined
+  }
+
+  /**
+   * Ask a small model whether a new message should steer the running turn.
+   *
+   * The call is capped in size and time; anything unusual (no service, no model,
+   * timeout, error) resolves to `followup`, which is always safe.
+   * @param chatId - canonical chat id, for logging.
+   * @param text - the new message text.
+   * @returns `'steer'` or `'followup'`.
+   */
+  async judgeInterject(chatId, text) {
+    let timer
+    try {
+      const llm = this.ctx.get('llm')
+      if (llm === undefined || typeof llm.stream !== 'function') return 'followup'
+      const target = await this.resolveJudgeModel(llm)
+      if (target === undefined) return 'followup'
+      const prompt = String(this.config.interjectPrompt ?? '').trim() !== ''
+        ? String(this.config.interjectPrompt)
+        : DEFAULT_INTERJECT_PROMPT
+      const controller = new AbortController()
+      timer = setTimeout(() => controller.abort(), 4000)
+      if (typeof timer.unref === 'function') timer.unref()
+      let out = ''
+      const stream = llm.stream({
+        provider: target.provider,
+        model: target.model,
+        system: prompt,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'New message: ' + text }] }],
+        temperature: 0,
+        maxTokens: 16,
+        signal: controller.signal,
+      })
+      for await (const chunk of stream) {
+        if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') out += chunk.text
+      }
+      const verdict = /steer/i.test(out) && !/followup/i.test(out) ? 'steer' : 'followup'
+      this.log.record('bridge', { note: 'interject judge', chatId, verdict, raw: out.trim().slice(0, 24) })
+      return verdict
+    } catch (error) {
+      this.log.record('warn', { note: 'interject judge failed; queueing instead', chatId, error: this.describeError(error) })
+      return 'followup'
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
     }
   }
 

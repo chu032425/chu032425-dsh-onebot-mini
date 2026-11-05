@@ -46,6 +46,13 @@ export const DEFAULT_TOOL_MEDIA_PROMPT = 'Send an image, voice clip, video or fi
   + 'Pass `path` for a local file (its bytes are sent inline), or `url`, or `base64`. '
   + 'Defaults to the chat this conversation is in; override with chatType and chatId.'
 
+/** The default instruction for the lightweight steer/follow-up judge. */
+export const DEFAULT_INTERJECT_PROMPT = 'You route a new QQ message for an assistant that may still be answering. '
+  + 'Answer with exactly one word: STEER or FOLLOWUP. '
+  + 'STEER means the message corrects, redirects, stops or urgently adds to the answer in progress, so it must reach the model at its next step. '
+  + 'FOLLOWUP means it is a separate next request that can wait until the current answer finishes. '
+  + 'When unsure, answer FOLLOWUP.'
+
 /**
  * Every model-facing prompt, in the order the Prompt page shows them.
  *
@@ -60,6 +67,7 @@ export const PROMPT_DEFS = Object.freeze([
   Object.freeze({ id: 'channel', field: 'channelPrompt', labelKey: 'promptDefChannel', placeholders: PROMPT_PLACEHOLDERS, default: DEFAULT_CHANNEL_PROMPT }),
   Object.freeze({ id: 'toolCall', field: 'toolCallPrompt', labelKey: 'promptDefToolCall', placeholders: Object.freeze(['{enabledNote}']), default: DEFAULT_TOOL_CALL_PROMPT }),
   Object.freeze({ id: 'toolMedia', field: 'toolMediaPrompt', labelKey: 'promptDefToolMedia', placeholders: Object.freeze([]), default: DEFAULT_TOOL_MEDIA_PROMPT }),
+  Object.freeze({ id: 'interject', field: 'interjectPrompt', labelKey: 'promptDefInterject', placeholders: Object.freeze([]), default: DEFAULT_INTERJECT_PROMPT }),
 ])
 
 /**

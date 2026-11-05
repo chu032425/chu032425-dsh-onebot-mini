@@ -911,10 +911,100 @@ const disposeState = registerRoutes(routeCtx, {
 const stateRes = fakeRes()
 await routes.get('/onebot-mini/api/state')({ method: 'GET', url: '/onebot-mini/api/state', headers: {} }, stateRes)
 const stateBody = JSON.parse(stateRes.body)
-t('the state route reports the prompt registry', Array.isArray(stateBody.promptDefs) && stateBody.promptDefs.length === 3)
+t('the state route reports the prompt registry', Array.isArray(stateBody.promptDefs) && stateBody.promptDefs.length === 4)
 t('each prompt def names its config field', stateBody.promptDefs.every((d) => typeof d.field === 'string'))
 t('each prompt def carries its default', stateBody.promptDefs.every((d) => typeof d.default === 'string' && d.default !== ''))
 disposeState()
+
+// ---------------------------------------------------------------- debounce + interject
+const flatTransport = { selfId: '1', state: 'online', sendText: async () => ({ message_id: 1 }), sendMessage: async () => ({ message_id: 1 }), call: async () => ({}) }
+
+// debounce merges consecutive messages into one turn
+const debounceAgents = {
+  get: () => undefined,
+  async create(options) {
+    const agent = { session: { id: options.sessionId }, status: 'idle', followups: [], followup(m) { this.followups.push(m) } }
+    if (typeof options.setup === 'function') await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: () => () => {} } })
+    return { agent, dispose: async () => {} }
+  },
+  async resume() { throw new Error('no persisted session') },
+}
+const debounceCtx = { on: () => () => {}, agents: debounceAgents, get: (n) => (n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'p', model: 'm' }) } : undefined) }
+const bridgeDebounce = new ChatBridge({ ctx: debounceCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 80 }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeDebounce.start()
+await bridgeDebounce.handleInbound(inbound({ user_id: 41001, message_id: 410 }))
+await bridgeDebounce.handleInbound(inbound({ user_id: 41001, message_id: 411, message: [{ type: 'text', data: { text: '第二句' } }] }))
+t('debounce holds the messages before flushing', bridgeDebounce.chats.get('private:41001') === undefined)
+await wait(200)
+const debounceChat = bridgeDebounce.chats.get('private:41001')
+t('debounce merges two messages into one turn', debounceChat !== undefined && debounceChat.agent.followups.length === 1)
+t('the merged turn contains both lines', String(debounceChat.agent.followups[0].content[0].text).includes('你好')
+  && String(debounceChat.agent.followups[0].content[0].text).includes('第二句'))
+await bridgeDebounce.stop()
+
+// while running, a STEER verdict steers instead of queueing
+const steerCalls = []
+const sessionFor = (userId) => 'onebot-private-' + userId
+const runningAgent = (id) => ({
+  session: { id }, status: 'running',
+  steer(m) { steerCalls.push(m) },
+  followup() { throw new Error('should have steered') },
+})
+const steerCtx = {
+  on: () => () => {},
+  agents: { get: (id) => (id === sessionFor(41002) ? runningAgent(id) : undefined) },
+  get: (n) => {
+    if (n === 'llm') {
+      return {
+        stream: () => (async function* () { yield { type: 'text-delta', text: 'STEER' } })(),
+        listProviders: async () => [{ id: 'p' }],
+        listModels: async () => [{ id: 'm' }],
+      }
+    }
+    if (n === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'p', model: 'm' }) }
+    return undefined
+  },
+}
+const bridgeSteer = new ChatBridge({ ctx: steerCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 0, autoInterject: true }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeSteer.start()
+await bridgeSteer.handleInbound(inbound({ user_id: 41002, message_id: 420, message: [{ type: 'text', data: { text: '不对，停一下' } }] }))
+await wait(150)
+t('a STEER verdict steers the running turn', steerCalls.length === 1)
+await bridgeSteer.stop()
+
+// a failing judge falls back to follow-up, never steer
+const fellBack = []
+const fallbackAgent = (id) => ({ session: { id }, status: 'running', steer() { throw new Error('no steer') }, followup(m) { fellBack.push(m) } })
+const fallbackCtx = {
+  on: () => () => {},
+  agents: { get: (id) => (id === sessionFor(41003) ? fallbackAgent(id) : undefined) },
+  get: (n) => {
+    if (n === 'llm') return { stream: () => { throw new Error('llm down') }, listProviders: async () => [], listModels: async () => [] }
+    if (n === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'p', model: 'm' }) }
+    return undefined
+  },
+}
+const bridgeFallback = new ChatBridge({ ctx: fallbackCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 0, autoInterject: true }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeFallback.start()
+await bridgeFallback.handleInbound(inbound({ user_id: 41003, message_id: 430 }))
+await wait(150)
+t('a broken judge queues a follow-up instead', fellBack.length === 1)
+await bridgeFallback.stop()
+
+// with autoInterject off, a running agent is never steered
+const offQueued = []
+const offAgent = (id) => ({ session: { id }, status: 'running', steer() { throw new Error('should not steer') }, followup(m) { offQueued.push(m) } })
+const offCtx = {
+  on: () => () => {},
+  agents: { get: (id) => (id === sessionFor(41004) ? offAgent(id) : undefined) },
+  get: () => undefined,
+}
+const bridgeNoSteer = new ChatBridge({ ctx: offCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 0, autoInterject: false }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeNoSteer.start()
+await bridgeNoSteer.handleInbound(inbound({ user_id: 41004, message_id: 440 }))
+await wait(100)
+t('autoInterject off queues instead of steering', offQueued.length === 1)
+await bridgeNoSteer.stop()
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
