@@ -37,7 +37,31 @@
  */
 
 /** Build one frozen action entry. */
-const a = (name, zh, en) => Object.freeze({ name, zh, en })
+const a = (name, zh, en) => Object.freeze({ name, zh, en, standard: STANDARD_ACTIONS.has(name) })
+
+/**
+ * The action names that belong to the OneBot 11 standard protocol
+ * (https://onebot.dev / OneBot-11). Everything else in the catalog is an
+ * implementation extension (go-cqhttp / NapCat), so the tools page can badge each
+ * row as 「标准」or 「扩展」. Kept here as the single source of truth.
+ */
+export const STANDARD_ACTIONS = Object.freeze(new Set([
+  // 消息
+  'send_private_msg', 'send_group_msg', 'send_msg', 'delete_msg', 'get_msg', 'get_forward_msg', 'send_like',
+  // 媒体 / 群文件
+  'get_image', 'get_record', 'upload_group_file', 'get_group_file_url', 'get_group_root_files',
+  'get_group_files_by_folder', 'get_group_file_system_info', 'create_group_file_folder',
+  'delete_group_folder', 'delete_group_file',
+  // 查询
+  'get_login_info', 'get_status', 'get_version_info', 'can_send_image', 'can_send_record',
+  'get_friend_list', 'get_group_info', 'get_group_list', 'get_group_member_info',
+  'get_group_member_list', 'get_group_honor_info', 'get_group_system_msg', 'get_stranger_info',
+  // 群管理
+  'set_group_ban', 'set_group_whole_ban', 'set_group_admin', 'set_group_card', 'set_group_name',
+  'set_group_leave', 'set_group_kick', 'set_group_special_title',
+  // 请求处理
+  'set_friend_add_request', 'set_group_add_request',
+]))
 
 /** The operator-facing grouping. Order is the order shown in the tools page. */
 export const TOOL_GROUPS = Object.freeze([

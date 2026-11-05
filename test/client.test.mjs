@@ -122,6 +122,10 @@ for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
 // list never shows a bare action id without an explanation next to it.
 t('the catalog supplies action annotations', TOOL_GROUPS.every((group) => group.actions.every((action) => /[\u4e00-\u9fa5]/.test(action.zh)))),
 t('the tools page renders every catalog group', TOOL_GROUPS.length === 9)
+for (const key of ['toolBadgeStandard', 'toolBadgeExtension']) {
+  t('tool kind badge copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
+t('every catalog action is classifiable for the badge', TOOL_GROUPS.every((group) => group.actions.every((action) => action.standard === true || action.standard === false)))
 
 // The friend row shows the remark as its name, so the trailing hint must be the
 // nickname; labelling it "remark" would describe the wrong field.

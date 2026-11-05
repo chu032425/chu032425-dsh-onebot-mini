@@ -7,7 +7,7 @@ import { join as pathJoin } from 'node:path'
 import { existsSync as readFileSyncExists } from 'node:fs'
 import { acceptKey, takeFrame, encodeText, encodeControl } from '../wire.js'
 import { normalizeConfig, ConfigStore, DEFAULTS, MODE_FIELDS, FIELD_GROUPS, FIELD_KINDS } from '../config.js'
-import { TOOL_GROUPS, ALL_ACTIONS, isKnownAction, computeAllowlist, actionLabel, enabledGroups } from '../toolcatalog.js'
+import { TOOL_GROUPS, ALL_ACTIONS, STANDARD_ACTIONS, isKnownAction, computeAllowlist, actionLabel, enabledGroups } from '../toolcatalog.js'
 import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
@@ -208,6 +208,12 @@ t('the capture cap is clamped low', normalizeConfig({ imageShowMaxMb: 0 }).value
 t('a valid image display cap is kept', normalizeConfig({ imageShowMaxMb: 8 }).value.imageShowMaxMb === 8)
 t('enabledGroups only lists groups with enabled actions', JSON.stringify(enabledGroups(new Set(['set_group_ban'])).map((g) => g.id)) === '["group"]')
 t('all actions flatten from the groups', ALL_ACTIONS.length === TOOL_GROUPS.reduce((sum, group) => sum + group.actions.length, 0))
+// standard vs extension classification (the tools page badges each row)
+t('every action carries a boolean standard flag', TOOL_GROUPS.every((group) => group.actions.every((action) => typeof action.standard === 'boolean')))
+t('the standard set has 40 OneBot 11 actions', STANDARD_ACTIONS.size === 40)
+t('the standard flag matches the STANDARD_ACTIONS set', TOOL_GROUPS.every((group) => group.actions.every((action) => action.standard === STANDARD_ACTIONS.has(action.name))))
+t('fetch_ptt_text is marked as an extension', TOOL_GROUPS.find((g) => g.id === 'interaction').actions.find((a) => a.name === 'fetch_ptt_text').standard === false)
+t('send_msg is marked standard', TOOL_GROUPS.find((g) => g.id === 'message').actions.find((a) => a.name === 'send_msg').standard === true)
 t('unknown action is not in the catalog', isKnownAction('definitely_not_real') === false)
 t('a missing config enables every action', computeAllowlist({})?.size === ALL_ACTIONS.length)
 t('the master switch off disables the tool entirely', computeAllowlist({ onebotToolEnabled: false }) === null)
