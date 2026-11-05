@@ -60,7 +60,14 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
   // that agent only, the plugin's own ctx registers globally. The latter is the
   // fallback for a reused live agent whose setup never ran.
   const tools = agentCtx?.tools ?? agentCtx?.get?.('tools')
-  if (tools === undefined || typeof tools.register !== 'function') return []
+  if (tools === undefined || typeof tools.register !== 'function') {
+    // Diagnosable failure: without this the model simply loses its tools and
+    // invents a reason ("no permission") that reads like a real limitation.
+    if (typeof recordLog === 'function') {
+      recordLog('registerTools: no tools service on the agent ctx (' + String(agentCtx?.constructor?.name ?? 'unknown') + ')')
+    }
+    return []
+  }
   const disposers = []
   const allowed = allow instanceof Set ? allow : undefined
   // The chat this agent serves, so a media send can default to it instead of
