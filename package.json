@@ -29,6 +29,7 @@
     "toolcatalog.js",
     "imagecache.js",
     "media.js",
+    "cacheinfo.js",
     "api.js",
     "lib/client.js",
     "cordis.patch.yml",

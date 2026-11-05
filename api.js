@@ -17,6 +17,7 @@ import { DEFAULTS, FIELD_GROUPS, FIELD_KINDS, MODE_FIELDS } from './config.js'
 import { TOOL_GROUPS } from './toolcatalog.js'
 import { fetchIntoCache, isAllowedImageUrl, readCached } from './imagecache.js'
 import { sendMedia, MEDIA_KINDS } from './media.js'
+import { inventory, clearCache } from './cacheinfo.js'
 
 /** Route path prefix. */
 export const API_PREFIX = '/onebot-mini/api'
@@ -753,6 +754,66 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     },
   })
 
+  /**
+   * The cache page's inventory: every file this plugin writes, with sizes.
+   */
+  const disposeCache = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/cache',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      try {
+        sendJson(res, 200, await inventory())
+      } catch (error) {
+        sendJson(res, 500, { error: String(error?.message ?? error) })
+      }
+    },
+  })
+
+  /**
+   * Clear one slice of storage at the operator's request.
+   *
+   * Body: `{ target: 'logs' | 'images' | 'account:<qq>' | 'all' }`. Nothing here
+   * runs on its own; this is the manual counterpart to the inventory.
+   */
+  const disposeCacheClear = ctx.webServer.register({
+    kind: 'exact',
+    path: API_PREFIX + '/cache/clear',
+    handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.statusCode = rejection
+        res.end()
+        return
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      let body
+      try {
+        body = await readJsonBody(req)
+      } catch (error) {
+        sendJson(res, 400, { error: String(error?.message ?? error) })
+        return
+      }
+      const result = await clearCache(body?.target)
+      if (result.ok === true) {
+        log.record('bridge', { note: 'cache cleared', target: String(body?.target ?? ''), freed: result.freed })
+      }
+      sendJson(res, result.ok === true ? 200 : 400, result)
+    },
+  })
+
   const disposeClear = ctx.webServer.register({
     kind: 'exact',
     path: API_PREFIX + '/logs/clear',
@@ -783,6 +844,8 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
     disposeImage()
     disposeSendMedia()
     disposeMediaKinds()
+    disposeCache()
+    disposeCacheClear()
     disposeClear()
   }
 }

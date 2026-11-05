@@ -93,7 +93,7 @@ t('panel root is a grid shell', tree.props.style.display === 'grid')
 const rail = tree.children.find((child) => child && child.type === 'nav')
 t('rail exists', rail !== undefined)
 const tabs = rail.children.flat(4).filter((child) => child && child.props && child.props.role === 'tab')
-t('seven tabs (logs, tools, contacts, access, qzone, profile, settings)', tabs.length === 7, String(tabs.length))
+t('eight tabs (logs, tools, contacts, access, qzone, profile, cache, settings)', tabs.length === 8, String(tabs.length))
 t('log tab is selected first', tabs[0].props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false))
 const pane = tree.children.find((child) => child && child.props && child.props.role === 'tabpanel')
 t('pane has a mounted page', pane.children.filter(Boolean).length >= 1)
@@ -144,6 +144,11 @@ t('qzone menu label present', zh.tabQzone === '空间' && en.tabQzone === 'Qzone
 t('the qzone picker offers a dropdown and a manual box', typeof zh.qzoneTargetPlaceholder === 'string'
   && zh.qzoneTargetPlaceholder.includes('QQ') && typeof zh.qzoneTargetMine === 'string' && zh.qzoneTargetMine !== '')
 t('profile menu label present', zh.tabProfile === '个人资料' && en.tabProfile === 'Profile')
+t('cache menu label present', zh.tabCache === '缓存' && en.tabCache === 'Cache')
+for (const key of ['cacheTitle', 'cacheTotal', 'cacheConfig', 'cacheLogs', 'cacheImages', 'cacheClearLogs',
+  'cacheClearImages', 'cacheCleared', 'cacheConfirm', 'cacheConfirmYes', 'cacheConfirmNo', 'cacheNoFiles']) {
+  t('cache copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
 t('qzone settings group label present', zh.groupQzone === '空间' && en.groupQzone === 'Qzone')
 t('media group label present', zh.groupMedia === '媒体' && en.groupMedia === 'Media')
 t('delete-source setting labelled', typeof zh.fieldDeleteSentMedia === 'string' && zh.fieldDeleteSentMedia !== '' && typeof en.fieldDeleteSentMedia === 'string')

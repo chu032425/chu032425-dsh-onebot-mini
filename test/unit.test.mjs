@@ -2,7 +2,8 @@
  * Self-contained checks: pure functions, config store, log ring, wire protocol.
  * Run with `node test/unit.test.mjs`. No test framework, no dependencies.
  */
-import { rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
+import { join as pathJoin } from 'node:path'
 import { existsSync as readFileSyncExists } from 'node:fs'
 import { acceptKey, takeFrame, encodeText, encodeControl } from '../wire.js'
 import { normalizeConfig, ConfigStore, DEFAULTS, MODE_FIELDS, FIELD_GROUPS } from '../config.js'
@@ -192,6 +193,41 @@ const rootDir = await safeUnlink('/workspace')
 t('a root directory is refused', rootDir.ok === false)
 const dirPath = await safeUnlink('/tmp')
 t('the tmp root itself is refused', dirPath.ok === false)
+
+// --- cache inventory and manual clearing (against a throwaway profile)
+import { inventory, clearCache } from '../cacheinfo.js'
+const prevHome = process.env.DSH_HOME
+const prevProfile = process.env.DSH_PROFILE
+process.env.DSH_HOME = '/tmp/onebot-cache-test-home'
+process.env.DSH_PROFILE = 'p'
+const profDir = '/tmp/onebot-cache-test-home/profiles/p'
+rmSync('/tmp/onebot-cache-test-home', { recursive: true, force: true })
+mkdirSync(profDir, { recursive: true })
+writeFileSync(pathJoin(profDir, 'onebot-mini.json'), '{"mode":"reverse"}', 'utf8')
+writeFileSync(pathJoin(profDir, 'onebot-mini.log.jsonl'), '{"a":1}\n{"a":2}\n', 'utf8')
+mkdirSync(pathJoin(profDir, 'onebot-mini-cache', '123'), { recursive: true })
+writeFileSync(pathJoin(profDir, 'onebot-mini-cache', '123', 'x.jpg'), Buffer.alloc(10))
+writeFileSync(pathJoin(profDir, 'onebot-mini-cache', '123', 'y.jpg'), Buffer.alloc(20))
+
+const inv = await inventory()
+t('inventory reports the config file', inv.config.exists === true && inv.config.size > 0)
+t('inventory counts the log lines', inv.logs.length === 1 && inv.logs[0].lines === 2)
+t('inventory groups the image cache by account', inv.images.accounts.length === 1 && inv.images.accounts[0].account === '123')
+t('inventory sums the account size', inv.images.accounts[0].size === 30 && inv.images.accounts[0].count === 2)
+t('inventory lists individual cache files', inv.images.files.length === 2)
+t('the total adds config, logs and images', inv.totalBytes === inv.config.size + inv.logs[0].size + 30)
+
+const clearLogs = await clearCache('logs')
+t('clearing logs empties the file', clearLogs.ok === true && readFileSync(pathJoin(profDir, 'onebot-mini.log.jsonl'), 'utf8') === '')
+const clearAccount = await clearCache('account:123')
+t('clearing one account removes only its folder', clearAccount.ok === true && !existsSync(pathJoin(profDir, 'onebot-mini-cache', '123')))
+const refusedClear = await clearCache('config')
+t('the settings file cannot be cleared', refusedClear.ok === false)
+const badTarget = await clearCache('nonsense')
+t('an unknown clear target is refused', badTarget.ok === false)
+rmSync('/tmp/onebot-cache-test-home', { recursive: true, force: true })
+if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome
+if (prevProfile === undefined) delete process.env.DSH_PROFILE; else process.env.DSH_PROFILE = prevProfile
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

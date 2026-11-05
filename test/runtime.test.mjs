@@ -880,5 +880,22 @@ t('a missing media file still sends the text', degradeMsg.length >= 1 && degrade
 t('the missing media is reported inline', degradeMsg.some((seg) => String(seg.data.text).includes('failed')))
 await bridgeDegrade.stop()
 
+// the cache route returns an inventory (read-only; clears are covered by unit tests)
+const disposeCacheRoutes = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {},
+})
+const cacheRes = fakeRes()
+await routes.get('/onebot-mini/api/cache')({ method: 'GET', url: '/onebot-mini/api/cache', headers: {} }, cacheRes)
+const cacheBody = JSON.parse(cacheRes.body)
+t('the cache route answers 200', cacheRes.statusCode === 200)
+t('the cache route reports a total', typeof cacheBody.totalBytes === 'number' && cacheBody.totalBytes >= 0)
+t('the cache route lists image accounts', Array.isArray(cacheBody.images?.accounts))
+t('the cache route reports the log file', Array.isArray(cacheBody.logs))
+disposeCacheRoutes()
+
+const cachePostRes = fakeRes()
+await routes.get('/onebot-mini/api/cache/clear')({ method: 'GET', url: '/onebot-mini/api/cache/clear', headers: {} }, cachePostRes)
+t('the cache clear route rejects GET', cachePostRes.statusCode === 405)
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
