@@ -76,14 +76,42 @@ export function cardLabel(data) {
 }
 
 /**
- * A model-facing placeholder for any segment kind that is not plain text.
+ * Segment kinds this plugin knows how to represent.
  *
- * Keeps an otherwise-unhandled message from flattening to an empty string (the
- * bridge drops empty messages), so a QQ mini-program card, share, location or
- * any future segment still reaches the agent as *something* instead of nothing.
+ * Anything outside this set is reported as "暂时不能处理" instead of being
+ * silently dropped — see `unknownSegmentTypes`.
+ */
+export const KNOWN_SEGMENT_TYPES = Object.freeze([
+  'text', 'at', 'face', 'mface', 'image', 'record', 'video', 'file',
+  'json', 'xml', 'forward', 'node', 'reply', 'music', 'location', 'contact',
+  'dice', 'rps', 'shake', 'poke',
+])
+
+/**
+ * The unseen segment types in one message, in first-seen order.
+ * @param segments - the `message` field (array of segments, or a CQ string).
+ * @returns the unknown type names; empty when everything is recognised.
+ */
+export function unknownSegmentTypes(segments) {
+  if (!Array.isArray(segments)) return []
+  const unknown = []
+  for (const segment of segments) {
+    if (segment === null || typeof segment !== 'object') continue
+    const type = String(segment.type ?? '')
+    if (type !== '' && !KNOWN_SEGMENT_TYPES.includes(type) && !unknown.includes(type)) unknown.push(type)
+  }
+  return unknown
+}
+
+/**
+ * A model-facing placeholder for a non-text segment kind we handle.
+ *
+ * `text`/`at` are handled inline; media is downloaded before this is called.
+ * Unknown kinds return '' on purpose so the bridge can answer "暂时不能处理"
+ * instead of pretending it understood them.
  * @param type - the segment type.
  * @param data - the segment's `data`.
- * @returns a bracketed placeholder, or '' for an empty type.
+ * @returns a bracketed placeholder, or '' for an empty/unknown type.
  */
 export function segmentPlaceholder(type, data) {
   const kind = String(type ?? '')
@@ -105,8 +133,8 @@ export function segmentPlaceholder(type, data) {
   if (kind === 'rps') return '[猜拳]'
   if (kind === 'shake') return '[窗口抖动]'
   if (kind === 'poke') return '[戳一戳]'
-  // Unknown future segment: keep a plain marker rather than dropping the message.
-  return '[' + kind + ']'
+  // Unknown kind: let the caller answer "暂时不能处理" instead of inventing one.
+  return ''
 }
 
 /** A download longer than this is abandoned. */

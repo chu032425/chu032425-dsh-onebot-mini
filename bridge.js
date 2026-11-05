@@ -16,7 +16,7 @@
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, actionLabel } from './toolcatalog.js'
 import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
-import { buildInboundText, removeInbound, segmentPlaceholder } from './inbound.js'
+import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes } from './inbound.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -372,7 +372,18 @@ export class ChatBridge {
     } else {
       body = flattenMessage(frame.message)
     }
-    if (body === '') return
+    // Never leave a chat with no answer: a message that carries nothing we can
+    // turn into model input (an unseen segment type, a bare reply marker, an
+    // empty text) gets an explicit "cannot handle yet" notice instead of silence.
+    if (body === '') {
+      const unknown = unknownSegmentTypes(frame.message)
+      const notice = unknown.length > 0
+        ? '暂时不能处理这种消息（' + unknown.join('/') + '）'
+        : '暂时不能处理这条消息'
+      this.log.record('bridge', { note: 'unsupported message; sending notice', chatId, kinds: unknown.join(',') })
+      await this.sendNotice(chatId, chat, notice)
+      return
+    }
 
     const text = speakerPrefix(frame, chat.kind, this.config.senderPrefix) + body
     await this.dispatch(chatId, chat, text, frame, savedPaths)

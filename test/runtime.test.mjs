@@ -916,6 +916,17 @@ await bridgeInbound.handleInbound(inbound({
 const chatCard = bridgeInbound.chats.get('private:31006')
 const cardText = (chatCard?.agent.followups[0]?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text).join('')
 t('a json card message reaches the agent', cardText.includes('[卡片'), cardText)
+
+// An unseen segment type must still get an answer: a "cannot handle" notice, not
+// silence, and without spinning up an agent turn.
+const unknownSent = []
+const unknownTransport = { selfId: '1', state: 'online', sendText: async (chat, text) => { unknownSent.push(text); return { message_id: 1 } }, sendMessage: async () => ({ message_id: 1 }), call: async () => ({}) }
+const bridgeUnknown = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: unknownTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeUnknown.start()
+await bridgeUnknown.handleInbound(inbound({ user_id: 31007, message_id: 316, message: [{ type: 'markdown', data: { content: 'x' } }] }))
+t('an unsupported message still gets a reply', unknownSent.length === 1 && unknownSent[0].includes('暂时不能处理'), JSON.stringify(unknownSent))
+t('an unsupported message does not create an agent turn', bridgeUnknown.chats.get('private:31007') === undefined)
+await bridgeUnknown.stop()
 await bridgeInbound.stop()
 fsInbound.rmSync(inboundWs, { recursive: true, force: true })
 

@@ -133,7 +133,8 @@ t('flatten drops self mention', flattenMessage([{ type: 'at', data: { qq: '10001
 t('flatten keeps at-all', flattenMessage([{ type: 'at', data: { qq: 'all' } }]) === '@全体成员')
 t('a json mini-program card becomes a labelled placeholder', flattenMessage([{ type: 'json', data: { data: JSON.stringify({ prompt: '[QQ小程序]', desc: '某小程序' }) } }]) === '[卡片: QQ小程序]')
 t('a card-only message is not flattened to empty', flattenMessage([{ type: 'json', data: {} }]).startsWith('[卡片'))
-t('an unknown segment still yields a placeholder', flattenMessage([{ type: 'markdown', data: {} }]) === '[markdown]')
+t('an unknown segment yields nothing to the model', flattenMessage([{ type: 'markdown', data: {} }]) === '')
+t('unknown segment types are reported', JSON.stringify(unknownSegmentTypes([{ type: 'text', data: { text: 'x' } }, { type: 'markdown', data: {} }, { type: 'markdown', data: {} }])) === '["markdown"]')
 t('a cq json string becomes a card placeholder', unescapeCq('[CQ:json,data={"prompt":"&#91;QQ小程序&#93;"}]') === '[卡片]')
 t('cq fallback unescapes and strips', unescapeCq('a&#91;b&#93; &amp; [CQ:image,file=x]') === 'a[b] & [图片]')
 t('mention via segment', isAddressed({ message: [{ type: 'at', data: { qq: '10001' } }] }, '10001') === true)
@@ -340,6 +341,7 @@ t('the media paragraph requires listing first', mediaText.includes('onebot_list_
 import {
   inboxRoot, chatFolder, safeFileName, extensionFor, sourceFromData, sourceFromResponse,
   mediaPlaceholder, buildInboundText, unescapeCqLite, sniffImageExtension,
+  unknownSegmentTypes, segmentPlaceholder, KNOWN_SEGMENT_TYPES,
 } from '../inbound.js'
 t('inbox root follows the workspace cache convention', inboxRoot({ workspacePath: '/workspace/QQ' }, { kind: 'private', id: '2000001' }, 'private:2000001') === '/workspace/QQ/onebot-mini-cache/QQ/2000001')
 t('an explicit inboundDir overrides the default', inboxRoot({ inboundDir: '/tmp/x' }, { kind: 'private', id: '42' }, 'private:42') === '/tmp/x/private-42')
@@ -356,6 +358,9 @@ t('the file placeholder names the file', mediaPlaceholder('file', '/tmp/a.pdf', 
 t('a failed download keeps the bare placeholder', mediaPlaceholder('image') === '[图片]')
 t('the CQ fallback strips media tags', unescapeCqLite('[CQ:image,file=x] hi') === '[图片] hi')
 t('the CQ fallback turns a json card into a placeholder', unescapeCqLite('[CQ:json,data={"prompt":"&#91;QQ小程序&#93;"}]') === '[卡片]')
+t('a known card type has a labelled placeholder', segmentPlaceholder('json', { data: '{"prompt":"[QQ小程序]"}' }) === '[卡片: QQ小程序]')
+t('an unknown type has no placeholder', segmentPlaceholder('markdown', {}) === '')
+t('the known-type set covers cards and media', ['json', 'xml', 'image', 'record', 'text'].every((tp) => KNOWN_SEGMENT_TYPES.includes(tp)))
 t('image magic bytes pick the extension', sniffImageExtension(Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')) === 'png'
   && sniffImageExtension(Buffer.from('ffd8ffe0', 'hex')) === 'jpg')
 
