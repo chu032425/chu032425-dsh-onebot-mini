@@ -909,6 +909,41 @@ t('an inbound image turn carries a local path', /\[图片: \/tmp\/onebot-inbound
 await bridgeInbound.stop()
 fsInbound.rmSync(inboundWs, { recursive: true, force: true })
 
+// deleteInboundMedia: the downloaded source is removed only after the turn that
+// read it has ended, and only when the setting is on.
+const inboundPng = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').toString('base64')
+const mediaOnly = [{ type: 'image', data: { file: 'base64://' + inboundPng } }]
+const delInboundWs = '/tmp/onebot-inbound-del-' + process.pid
+const quietTransport = { selfId: '1', state: 'online', sendText: async () => ({ message_id: 1 }), sendMessage: async () => ({ message_id: 1 }), call: async () => ({}) }
+const bridgeDelInbound = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', inboundDir: delInboundWs, inboundMedia: true, inboundMediaMaxMb: 5, deleteInboundMedia: true }, connection: quietTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeDelInbound.start()
+await bridgeDelInbound.handleInbound(inbound({ user_id: 31004, message_id: 313, message: mediaOnly }))
+const chatDelInbound = bridgeDelInbound.chats.get('private:31004')
+const delInboundText = (chatDelInbound.agent.followups[0].content ?? []).filter((block) => block.type === 'text').map((block) => block.text).join('')
+const delInboundPath = /\[图片: (\/tmp\/onebot-inbound-del-\d+\/private-31004\/[^\]]+)\]/.exec(delInboundText)?.[1]
+t('the incoming file exists before its turn ends', typeof delInboundPath === 'string' && fsInbound.existsSync(delInboundPath))
+sessionEvent({ id: chatDelInbound.sessionId }, { type: 'turn/start', data: { turn: 1 } })
+sessionEvent({ id: chatDelInbound.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '收到' }] } } })
+sessionEvent({ id: chatDelInbound.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
+await wait(160)
+t('the incoming file is removed after the turn ends when enabled', delInboundPath !== undefined && !fsInbound.existsSync(delInboundPath))
+await bridgeDelInbound.stop()
+fsInbound.rmSync(delInboundWs, { recursive: true, force: true })
+
+const keepInboundWs = '/tmp/onebot-inbound-keep-' + process.pid
+const bridgeKeepInbound = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', inboundDir: keepInboundWs, inboundMedia: true, inboundMediaMaxMb: 5, deleteInboundMedia: false }, connection: quietTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeKeepInbound.start()
+await bridgeKeepInbound.handleInbound(inbound({ user_id: 31005, message_id: 314, message: mediaOnly }))
+const chatKeepInbound = bridgeKeepInbound.chats.get('private:31005')
+const keepInboundText = (chatKeepInbound.agent.followups[0].content ?? []).filter((block) => block.type === 'text').map((block) => block.text).join('')
+const keepInboundPath = /\[图片: (\/tmp\/onebot-inbound-keep-\d+\/private-31005\/[^\]]+)\]/.exec(keepInboundText)?.[1]
+sessionEvent({ id: chatKeepInbound.sessionId }, { type: 'turn/start', data: { turn: 1 } })
+sessionEvent({ id: chatKeepInbound.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
+await wait(160)
+t('the incoming file is kept after the turn when disabled', keepInboundPath !== undefined && fsInbound.existsSync(keepInboundPath))
+await bridgeKeepInbound.stop()
+fsInbound.rmSync(keepInboundWs, { recursive: true, force: true })
+
 // the cache route returns an inventory (read-only; clears are covered by unit tests)
 const disposeCacheRoutes = registerRoutes(routeCtx, {
   store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {},

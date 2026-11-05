@@ -153,7 +153,7 @@ for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsReset', 'promptsSa
   'promptsPlaceholders', 'promptsNoPlaceholders']) {
   t('prompt copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
-for (const key of ['fieldInboundMedia', 'hintInboundMedia', 'fieldInboundMediaMaxMb', 'hintInboundMediaMaxMb']) {
+for (const key of ['fieldInboundMedia', 'hintInboundMedia', 'fieldInboundMediaMaxMb', 'hintInboundMediaMaxMb', 'fieldDeleteInboundMedia', 'hintDeleteInboundMedia']) {
   t('inbound media label present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 for (const key of ['cacheTitle', 'cacheTotal', 'cacheConfig', 'cacheLogs', 'cacheFiles', 'cacheKindImage', 'cacheKindAudio', 'cacheKindVideo', 'cacheKindFile', 'cacheClearLogs',

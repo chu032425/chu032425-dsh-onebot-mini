@@ -16,7 +16,7 @@
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, actionLabel } from './toolcatalog.js'
 import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
-import { buildInboundText } from './inbound.js'
+import { buildInboundText, removeInbound } from './inbound.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
 const ID_SAFE = /[^A-Za-z0-9-]/g
@@ -221,6 +221,16 @@ export class ChatBridge {
     this.pendingCreates = new Map()
     /** chatId → accumulated assistant text for the open turn. */
     this.buffers = new Map()
+    /**
+     * Incoming-media cleanup, only used when `deleteInboundMedia` is on:
+     *  - inboundQueue: chatId → FIFO of batches (one per queued message) whose
+     *    turn has not started yet;
+     *  - inboundCurrent: chatId → the batches' paths for the turn now running.
+     * Tying paths to a turn stops a queued message's files from being deleted
+     * before its own turn ever reads them.
+     */
+    this.inboundQueue = new Map()
+    this.inboundCurrent = new Map()
     /** chatId → message ids already handled (reconnect replay guard). */
     this.seen = new Map()
     this.dedupWindowMs = 300000
@@ -261,6 +271,8 @@ export class ChatBridge {
     this.chats.clear()
     this.bySession.clear()
     this.buffers.clear()
+    this.inboundQueue.clear()
+    this.inboundCurrent.clear()
     for (const chat of chats) {
       try {
         await chat.dispose()
@@ -318,6 +330,9 @@ export class ChatBridge {
     // path, so the model can open an image with read_image or a file with read.
     // Turned off, it degrades to the bare placeholders that name nothing.
     let body
+    // Paths of the files just downloaded for THIS message; they are only tracked
+    // for cleanup when the operator turned `deleteInboundMedia` on.
+    let savedPaths = []
     if (this.config.inboundMedia !== false) {
       const outcome = await buildInboundText({
         segments: frame.message,
@@ -338,13 +353,18 @@ export class ChatBridge {
         this.log.record('warn', { note: 'inbound media skipped: ' + warning, chatId })
       }
       body = outcome.text
+      if (this.config.deleteInboundMedia === true) {
+        savedPaths = outcome.saved
+          .map((item) => (item !== null && typeof item === 'object' ? item.path : undefined))
+          .filter((path) => typeof path === 'string' && path !== '')
+      }
     } else {
       body = flattenMessage(frame.message)
     }
     if (body === '') return
 
     const text = speakerPrefix(frame, chat.kind, this.config.senderPrefix) + body
-    await this.dispatch(chatId, chat, text, frame)
+    await this.dispatch(chatId, chat, text, frame, savedPaths)
   }
 
   /**
@@ -378,8 +398,9 @@ export class ChatBridge {
    * @param chat - split chat id.
    * @param text - the model-facing text.
    * @param frame - the source event (for logging).
+   * @param savedPaths - incoming files this message produced, for cleanup.
    */
-  async dispatch(chatId, chat, text, frame) {
+  async dispatch(chatId, chat, text, frame, savedPaths = []) {
     // A workspace can be deleted at any time; re-verify before delivering so an
     // existing chat also lands in a real workspace after a delete.
     await this.ensureWorkspace()
@@ -409,6 +430,9 @@ export class ChatBridge {
       try {
         const message = await createPluginUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE })
         record.agent.steer(message)
+        // A steered message joins the turn that is already running, so its files
+        // are cleared when that turn ends.
+        if (savedPaths.length > 0) this.addCurrentInbound(chatId, savedPaths)
         this.log.record('bridge', { note: 'steered into the running turn', chatId, length: text.length })
         return
       } catch (error) {
@@ -416,7 +440,7 @@ export class ChatBridge {
       }
     }
 
-    await this.sendToAgent(chatId, record, text, frame)
+    await this.sendToAgent(chatId, record, text, frame, savedPaths)
   }
 
   /**
@@ -425,8 +449,13 @@ export class ChatBridge {
    * @param record - the chat record.
    * @param text - the message text.
    * @param frame - the originating event, for logging.
+   * @param savedPaths - incoming files this message produced, for cleanup.
    */
-  async sendToAgent(chatId, record, text, frame) {
+  async sendToAgent(chatId, record, text, frame, savedPaths = []) {
+    // Queue this message's files against the turn its follow-up will start. The
+    // batch is popped on `turn/start`, so a message still waiting behind a running
+    // turn never loses its files to that earlier turn's end.
+    if (savedPaths.length > 0) this.enqueueInbound(chatId, savedPaths)
     try {
       const message = await createPluginUserMessage({
         content: [{ type: 'text', text }],
@@ -440,7 +469,54 @@ export class ChatBridge {
         messageId: String(frame?.message_id ?? ''),
       })
     } catch (error) {
+      // No turn will ever start for this batch, so drop it rather than leak the
+      // claim on files that no `turn/end` would clear.
+      if (savedPaths.length > 0) this.dropLastInbound(chatId)
       this.log.record('error', { note: 'delivery failed for ' + chatId, error: this.describeError(error) })
+    }
+  }
+
+  /** Append one message's files to the chat's not-yet-started queue. */
+  enqueueInbound(chatId, paths) {
+    const queue = this.inboundQueue.get(chatId) ?? []
+    queue.push(paths)
+    this.inboundQueue.set(chatId, queue)
+  }
+
+  /** Undo the most recent enqueue (used when delivery failed). */
+  dropLastInbound(chatId) {
+    const queue = this.inboundQueue.get(chatId)
+    if (queue === undefined) return
+    queue.pop()
+    if (queue.length === 0) this.inboundQueue.delete(chatId)
+  }
+
+  /** Attach files to the running turn (a steered message). */
+  addCurrentInbound(chatId, paths) {
+    const current = this.inboundCurrent.get(chatId) ?? []
+    current.push(...paths)
+    this.inboundCurrent.set(chatId, current)
+  }
+
+  /**
+   * Take (and forget) the files bound to the turn that is ending.
+   * @returns the paths to delete, possibly empty.
+   */
+  takeCurrentInbound(chatId) {
+    const paths = this.inboundCurrent.get(chatId)
+    this.inboundCurrent.delete(chatId)
+    return Array.isArray(paths) ? paths : []
+  }
+
+  /** Remove the files of one finished turn, best effort. */
+  releaseInbound(chatId, paths) {
+    if (!Array.isArray(paths) || paths.length === 0) return
+    for (const path of paths) {
+      removeInbound(path).then(() => {
+        this.log.record('bridge', { note: 'inbound media source removed', chatId, path })
+      }).catch(() => {
+        // removeInbound never throws, but never let cleanup break a turn.
+      })
     }
   }
 
@@ -974,6 +1050,12 @@ export class ChatBridge {
       // Reset here, not at dispatch: a message queued while a turn runs must not
       // wipe the text that turn has already accumulated.
       this.buffers.set(chatId, '')
+      // Bind this turn to the oldest queued message's inbound files.
+      const queue = this.inboundQueue.get(chatId)
+      const next = queue !== undefined && queue.length > 0 ? queue.shift() : undefined
+      if (queue !== undefined && queue.length === 0) this.inboundQueue.delete(chatId)
+      if (next !== undefined) this.inboundCurrent.set(chatId, next)
+      else this.inboundCurrent.delete(chatId)
       return
     }
 
@@ -987,15 +1069,19 @@ export class ChatBridge {
     if (event.type === 'turn/end') {
       const buffered = this.buffers.get(chatId) ?? ''
       this.buffers.delete(chatId)
+      // Detach this turn's inbound files now; delete them after the reply has
+      // gone out, because the reply may echo one of those same files back.
+      const inboundPaths = this.takeCurrentInbound(chatId)
       const reason = event.data?.reason
       if (buffered.trim() === '') {
         if (reason?.kind === 'error') {
           const message = String(reason?.error?.message ?? 'turn failed')
           void this.sendNotice(chatId, chat, '⚠️ 本轮出错：' + message)
         }
+        this.releaseInbound(chatId, inboundPaths)
         return
       }
-      void this.deliver(chatId, chat, buffered)
+      void this.deliver(chatId, chat, buffered).finally(() => this.releaseInbound(chatId, inboundPaths))
     }
   }
 

@@ -84,6 +84,9 @@ export const DEFAULTS = Object.freeze({
   // the model can actually read them, and cap one file's size.
   inboundMedia: true,
   inboundMediaMaxMb: 20,
+  // Delete the downloaded incoming file once the turn that parsed it has ended,
+  // the mirror of `deleteSentMedia` for outgoing media.
+  deleteInboundMedia: true,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
   inboundPrompt: DEFAULT_INBOUND_PROMPT,
   toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
@@ -123,6 +126,7 @@ export const FIELD_KINDS = Object.freeze({
   deleteSentMedia: 'boolean',
   inboundMedia: 'boolean',
   inboundMediaMaxMb: 'number',
+  deleteInboundMedia: 'boolean',
   channelPrompt: 'text',
   inboundPrompt: 'text',
   toolCallPrompt: 'text',
@@ -142,7 +146,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
-  { id: 'media', fields: ['inboundMedia', 'inboundMediaMaxMb', 'deleteSentMedia'] },
+  { id: 'media', fields: ['inboundMedia', 'inboundMediaMaxMb', 'deleteInboundMedia', 'deleteSentMedia'] },
   { id: 'reply', fields: ['privateAutoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },

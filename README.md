@@ -9,7 +9,7 @@
 - `onebot_call` 工具：模型可直接调 OneBot 动作（发图、发文件、群管理、戳一戳、撤回、QQ 空间…），
   按 [NapCat 接口文档](https://napcat.apifox.cn/) 收录 **118 个动作 / 9 个分组**，可在左侧「工具」菜单按分组/动作开关；
 - **收到的媒体可读取**：用户发来的图片/语音/视频/文件自动下载到工作区下的 `onebot-mini-cache/QQ/<QQ号或群号>/`
-  （与 QQ 空间图片缓存同一处，统一在「缓存」页可查、可清理），消息里给出本机路径（图片用 `read_image` 看，文件用 `read`/`bash` 读，语音在识别器就绪时自动转写）；
+  （与 QQ 空间图片缓存同一处，统一在「缓存」页可查、可清理），消息里给出本机路径（图片用 `read_image` 看，文件用 `read`/`bash` 读，语音在识别器就绪时自动转写）；`deleteInboundMedia` 默认在解析完这一轮后删除源文件，和「发送后删除源文件」一致；
 - **配置页**：改连接参数并立即重连；
 - **好友与群组页**：好友可展开看在线状态，群可展开看成员列表；
 - **访问控制页**：私聊/群聊的白名单与黑名单，用下拉菜单挑选；
@@ -100,6 +100,7 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `sendTimeoutMs` | `30000` | 动作超时 |
 | `inboundMedia` | `true` | 是否下载用户发来的图片/语音/视频/文件到工作区并交给模型读取；关=只保留 `[图片]` 类占位符 |
 | `inboundMediaMaxMb` | `20` | 单个接收媒体的大小上限（MB），超过即不下载、只保留占位符 |
+| `deleteInboundMedia` | `true` | 收到的媒体在模型处理完这条消息的那一轮对话结束后删除本机源文件（与「发送后删除源文件」对应）；关=留在缓存目录手动清理 |
 | `deleteSentMedia` | `true` | 发出媒体后删除用过的本机源文件 |
 
 ## 收到的媒体
@@ -117,7 +118,7 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 - 下载失败、超过 `inboundMediaMaxMb`、或关闭了 `inboundMedia` 时，退回不带路径的占位符，
   模型会如实说明没收到，而不是编造内容；
 - 图片扩展名按**魔数**判定（PNG/JPEG/GIF/WebP），避免「PNG 存成 .jpg 导致 read_image 类型不符」；
-- 这些文件不会被自动清理（与「缓存页」一致：手动清理，无定时任务；在「缓存」页按对应 `QQ/<号>` 项清空即可）。
+- **解析后删除源文件**：`deleteInboundMedia` 默认开启时，这条消息所在的一轮对话结束后就把本机文件删掉（与「发送后删除源文件」对应；若本轮回复要把这张图再发回去，会等发送完成后再删）。关掉后文件留在缓存目录，按「缓存」页对应 `QQ/<号>` 项手动清空即可（无定时任务）。
 
 ## 会话工作区
 
@@ -358,6 +359,7 @@ QQ 空间、群相册。
 
 - `QQ空间图片`：`{workspacePath}/onebot-mini-cache/QQ/<QQ号>/<hash>.<ext>`
 - `收到的媒体`（图片/语音/视频/文件）：`{workspacePath}/onebot-mini-cache/QQ/<QQ号或群号>/…`
+  （`deleteInboundMedia` 开启时，解析完该轮后即删除，不长期占用这里的空间）
 - 没有对应 QQ 号/群号的缓存：`{workspacePath}/onebot-mini-cache/<自定义名称>/`
 - 例（工作区 `/workspace/QQ`）：
   `/workspace/QQ/onebot-mini-cache/QQ/2000001/`、`/workspace/QQ/onebot-mini-cache/QQ/2000003/`
