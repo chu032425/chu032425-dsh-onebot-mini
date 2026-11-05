@@ -26,6 +26,7 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { accountDir } from './cachepaths.js'
+import { transcodeToWav, transcribeViaGateway } from './stt.js'
 
 /** Segment kinds handled here. */
 export const INBOUND_KINDS = Object.freeze(['image', 'record', 'video', 'file'])
@@ -409,7 +410,14 @@ export async function transcribeVoice(speech, bytes) {
     if (typeof speech.resolve !== 'function' || typeof speech.transcribe !== 'function') return ''
     const snapshot = typeof speech.snapshot === 'function' ? speech.snapshot() : undefined
     const providers = Array.isArray(snapshot?.providers) ? snapshot.providers : []
-    const ready = providers.find((provider) => provider?.preparation?.phase === 'ready')
+    // `standby` means the model files are verified on disk but the worker has not
+    // been woken yet; `ready` means it is already warm. Both can transcribe (the
+    // provider wakes a standby worker on the first request). Any other phase —
+    // unprepared/failed/checking — must NOT download a model inside a chat turn.
+    const ready = providers.find((provider) => {
+      const phase = provider?.preparation?.phase
+      return phase === 'ready' || phase === 'standby'
+    })
     if (ready === undefined) return ''
     const selection = snapshot?.selection ?? {}
     const providerId = selection.providerId ?? ready.id
@@ -458,7 +466,7 @@ export function mediaPlaceholder(kind, path, name, transcript) {
  * @param options - `{ segment, chatId, chat, connection, config, getSpeech, log }`.
  * @returns `{ placeholder, saved?, warning? }`.
  */
-async function ingestSegment({ segment, chatId, chat, connection, config, getSpeech, log }) {
+async function ingestSegment({ segment, chatId, chat, connection, config, getSpeech, messageId, log }) {
   const kind = segment.type
   const maxBytes = Math.max(1, Number(config?.inboundMediaMaxMb ?? 20)) * 1024 * 1024
   const resolved = await resolveSegmentSource(connection, segment, chat)
@@ -490,9 +498,20 @@ async function ingestSegment({ segment, chatId, chat, connection, config, getSpe
   }
 
   let transcript = ''
-  if (kind === 'record') {
-    const speech = typeof getSpeech === 'function' ? getSpeech() : undefined
-    if (speech !== undefined) transcript = await transcribeVoice(speech, read.bytes)
+  if (kind === 'record' && config?.sttEnabled !== false) {
+    // Preferred: let the gateway (NapCat) return QQ's own voice-to-text result
+    // for this message — no local model or ffmpeg involved.
+    if (typeof messageId === 'string' && messageId !== '') {
+      transcript = await transcribeViaGateway(connection, messageId, { log })
+    }
+    // Fallback: transcode locally to 16 kHz mono WAV and ask the Host recognizer.
+    if (transcript === '') {
+      const speech = typeof getSpeech === 'function' ? getSpeech() : undefined
+      if (speech !== undefined) {
+        const wav = await transcodeToWav(config, read.bytes, { log })
+        if (wav !== undefined) transcript = await transcribeVoice(speech, wav)
+      }
+    }
   }
   return {
     placeholder: mediaPlaceholder(kind, path, suggested !== '' ? suggested : undefined, transcript),
@@ -508,7 +527,7 @@ async function ingestSegment({ segment, chatId, chat, connection, config, getSpe
  * @param options - `{ segments, chatId, chat, connection, config, getSpeech, log }`.
  * @returns `{ text, saved, warnings }`.
  */
-export async function buildInboundText({ segments, chatId, chat, connection, config, getSpeech, log }) {
+export async function buildInboundText({ segments, chatId, chat, connection, config, getSpeech, messageId, log }) {
   const saved = []
   const warnings = []
   const record = (note) => {
@@ -540,7 +559,7 @@ export async function buildInboundText({ segments, chatId, chat, connection, con
       continue
     }
     if (INBOUND_KINDS.includes(type)) {
-      const outcome = await ingestSegment({ segment, chatId, chat, connection, config, getSpeech, log: record })
+      const outcome = await ingestSegment({ segment, chatId, chat, connection, config, getSpeech, messageId, log: record })
       if (outcome.warning !== undefined) warnings.push(outcome.warning)
       if (outcome.saved !== undefined) saved.push(outcome.saved)
       parts.push(outcome.placeholder)

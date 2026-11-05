@@ -87,6 +87,12 @@ export const DEFAULTS = Object.freeze({
   // Delete the downloaded incoming file once the turn that parsed it has ended,
   // the mirror of `deleteSentMedia` for outgoing media.
   deleteInboundMedia: true,
+  // Transcribe incoming voice clips to text before the model sees them. Needs a
+  // mounted `speechToText` recognizer and a local ffmpeg to convert QQ audio
+  // (amr/silk/mp3/…) to the 16 kHz mono WAV the recognizer accepts.
+  sttEnabled: true,
+  // Optional absolute path to an ffmpeg binary. Empty = auto-detect.
+  ffmpegPath: '',
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
   inboundPrompt: DEFAULT_INBOUND_PROMPT,
   toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
@@ -127,6 +133,8 @@ export const FIELD_KINDS = Object.freeze({
   inboundMedia: 'boolean',
   inboundMediaMaxMb: 'number',
   deleteInboundMedia: 'boolean',
+  sttEnabled: 'boolean',
+  ffmpegPath: 'string',
   channelPrompt: 'text',
   inboundPrompt: 'text',
   toolCallPrompt: 'text',
@@ -146,7 +154,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
-  { id: 'media', fields: ['inboundMedia', 'inboundMediaMaxMb', 'deleteInboundMedia', 'deleteSentMedia'] },
+  { id: 'media', fields: ['inboundMedia', 'inboundMediaMaxMb', 'deleteInboundMedia', 'deleteSentMedia', 'sttEnabled', 'ffmpegPath'] },
   { id: 'reply', fields: ['privateAutoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },

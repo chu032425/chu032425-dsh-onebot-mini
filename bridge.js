@@ -351,6 +351,7 @@ export class ChatBridge {
         chat,
         connection: this.connection,
         config: this.config,
+        messageId,
         getSpeech: () => {
           try {
             return this.ctx.get?.('speechToText')

@@ -13,6 +13,8 @@ import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
   isAddressed, speakerPrefix, speakerKey, textOfMessage,
 } from '../bridge.js'
+import { buildWav, transcribeViaGateway } from '../stt.js'
+import { tmpdir } from 'node:os'
 
 let pass = 0
 let fail = 0
@@ -60,9 +62,64 @@ t('the reply group holds only the interject switch', JSON.stringify(FIELD_GROUPS
 // delete-inbound-media mirrors delete-sent-media and defaults on
 t('the inbound-delete switch defaults on', DEFAULTS.deleteInboundMedia === true)
 t('the inbound-delete switch is a boolean field', FIELD_KINDS.deleteInboundMedia === 'boolean')
-t('the media group orders inbound delete before sent delete', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'media').fields) === '["inboundMedia","inboundMediaMaxMb","deleteInboundMedia","deleteSentMedia"]')
+t('the media group orders inbound delete before sent delete', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'media').fields) === '["inboundMedia","inboundMediaMaxMb","deleteInboundMedia","deleteSentMedia","sttEnabled","ffmpegPath"]')
 t('a non-boolean inbound-delete falls back to the default', normalizeConfig({ deleteInboundMedia: 'no' }).value.deleteInboundMedia === true)
 t('an explicit false inbound-delete is kept', normalizeConfig({ deleteInboundMedia: false }).value.deleteInboundMedia === false)
+
+// voice -> text: gateway (NapCat fetch_ptt_text) primary, local ffmpeg fallback
+t('the voice-transcribe switch defaults on', DEFAULTS.sttEnabled === true)
+t('the voice-transcribe switch is a boolean field', FIELD_KINDS.sttEnabled === 'boolean')
+t('ffmpegPath defaults to empty (auto-detect)', DEFAULTS.ffmpegPath === '')
+t('ffmpegPath is a string field', FIELD_KINDS.ffmpegPath === 'string')
+t('a non-boolean voice switch falls back to the default', normalizeConfig({ sttEnabled: 'no' }).value.sttEnabled === true)
+t('ffmpegPath coerces to string', normalizeConfig({ ffmpegPath: 123 }).value.ffmpegPath === '123')
+{
+  let captured
+  const conn = { call: async (action, params) => { captured = { action, params }; return { text: '  你好呀  ' } } }
+  const text = await transcribeViaGateway(conn, '12345')
+  t('gateway transcript is trimmed', text === '你好呀')
+  t('gateway action + numeric id', captured.action === 'fetch_ptt_text' && captured.params.message_id === 12345)
+}
+{
+  let captured
+  const conn = { call: async (action, params) => { captured = { action, params }; return { text: 'x' } } }
+  await transcribeViaGateway(conn, 'abc')
+  t('gateway keeps a non-numeric id as string', captured.params.message_id === 'abc')
+}
+t('gateway "" when messageId empty', (await transcribeViaGateway({ call: async () => ({ text: 'x' }) }, '')) === '')
+t('gateway "" when no connection', (await transcribeViaGateway(undefined, '1')) === '')
+t('gateway "" when call throws', (await transcribeViaGateway({ call: async () => { throw new Error('no such action') } }, '1')) === '')
+t('gateway "" when text missing', (await transcribeViaGateway({ call: async () => ({}) }, '1')) === '')
+{
+  const pcm = Buffer.alloc(4)
+  pcm.writeInt16LE(1, 0)
+  pcm.writeInt16LE(-1, 2)
+  const wav = buildWav(pcm)
+  const ok = wav.length === 48 && wav.toString('ascii', 0, 4) === 'RIFF' &&
+    wav.readUInt32LE(4) === 40 && wav.toString('ascii', 8, 12) === 'WAVE' &&
+    wav.toString('ascii', 12, 16) === 'fmt ' && wav.readUInt32LE(16) === 16 &&
+    wav.readUInt16LE(20) === 1 && wav.readUInt16LE(22) === 1 &&
+    wav.readUInt32LE(24) === 16000 && wav.readUInt32LE(28) === 32000 &&
+    wav.readUInt16LE(32) === 2 && wav.readUInt16LE(34) === 16 &&
+    wav.toString('ascii', 36, 40) === 'data' && wav.readUInt32LE(40) === 4
+  t('buildWav emits a canonical 44-byte header', ok)
+}
+{
+  // A record segment whose payload is inline base64, with the gateway returning a
+  // transcript: the placeholder must carry the （转写：…） tail and never run ffmpeg.
+  const dir = pathJoin(tmpdir(), 'onebot-stt-test-' + Date.now())
+  mkdirSync(dir, { recursive: true })
+  const outcome = await buildInboundText({
+    segments: [{ type: 'record', data: { file: 'base64://' + Buffer.from([0xff, 0xf3, 0x00, 0x00]).toString('base64') } }],
+    chatId: 'private:1',
+    chat: { kind: 'private', id: '1' },
+    connection: { call: async () => ({ text: '你好' }) },
+    config: { inboundMedia: true, inboundMediaMaxMb: 20, sttEnabled: true, inboundDir: dir },
+    messageId: '999',
+  })
+  t('record placeholder carries the gateway transcript', outcome.text.startsWith('[语音: ') && outcome.text.includes('（转写：你好）'), outcome.text)
+  rmSync(dir, { recursive: true, force: true })
+}
 
 // session prefix: lowercase-letter start, safe alphabet, default on rejection
 t('session prefix default', DEFAULTS.sessionPrefix === 'onebot')

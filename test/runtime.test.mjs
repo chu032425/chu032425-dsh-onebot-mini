@@ -5,7 +5,9 @@
  * Run with `node test/runtime.test.mjs`.
  */
 import { createServer } from 'node:http'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join as pathJoin } from 'node:path'
 import { cacheRoot } from '../imagecache.js'
 import { OneBotConnection } from '../connection.js'
 import { LogBus } from '../logbus.js'
@@ -224,6 +226,31 @@ t('title is pinned to the id', titles[0] === chat.sessionId)
 t('message reaches the agent', chat.agent.followups.length === 1 && chat.agent.followups[0].role === 'user')
 t('the preset is actually mounted', calls.mounted.length > 0)
 t('onebot_call is registered by default', toolDefs.some((def) => def.name === 'onebot_call'))
+
+// A voice message: the bridge asks the gateway (NapCat fetch_ptt_text) for the
+// transcript and hands it to the agent as （转写：…）, without any local audio work.
+{
+  const sttDir = mkdtempSync(pathJoin(tmpdir(), 'onebot-stt-rt-'))
+  const prevCall = transport.call
+  const voiceCalls = []
+  transport.call = async (action, params) => {
+    if (action === 'fetch_ptt_text') { voiceCalls.push(params); return { text: '这是语音内容' } }
+    return {}
+  }
+  bridge.config.inboundDir = sttDir
+  await bridge.handleInbound(inbound({
+    message_id: 4242,
+    message: [{ type: 'record', data: { file: 'base64://' + Buffer.from([0xff, 0xf3, 0x00, 0x00]).toString('base64') } }],
+  }))
+  const chatV = bridge.chats.get('private:20002')
+  const last = chatV.agent.followups[chatV.agent.followups.length - 1]
+  const content = JSON.stringify(last.content)
+  t('a voice message asks the gateway for its text', voiceCalls.some((p) => String(p.message_id) === '4242'), JSON.stringify(voiceCalls))
+  t('the gateway transcript reaches the agent', content.includes('（转写：这是语音内容）'), content)
+  transport.call = prevCall
+  delete bridge.config.inboundDir
+  rmSync(sttDir, { recursive: true, force: true })
+}
 
 // the channel prompt advertises exactly the enabled actions
 const { buildPlatformPrompt } = await import('../bridge.js')
