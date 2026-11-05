@@ -855,6 +855,15 @@ export class ChatBridge {
       // chat never sees a `onebot_call` that can do nothing. Evaluated per agent
       // at creation time: an existing chat keeps the tool set it was created with.
       const allow = computeAllowlist(this.config)
+      // Record what the agent ctx actually exposes: a missing tools service here
+      // silently costs the model every OneBot tool.
+      this.log.record('bridge', {
+        note: 'setup ctx probe',
+        chatId,
+        hasTools: typeof (agentCtx?.tools ?? agentCtx?.get?.('tools'))?.register === 'function',
+        hasSystemPrompt: typeof agentCtx?.systemPrompt?.section === 'function',
+        keys: Object.keys(agentCtx ?? {}).slice(0, 8).join(','),
+      })
       if (allow !== null) {
         const { registerTools } = await requireToolsOnce()
         registerTools(agentCtx, {
