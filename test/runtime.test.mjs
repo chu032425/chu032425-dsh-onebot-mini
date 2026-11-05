@@ -794,6 +794,34 @@ const noSource = await postJson('/onebot-mini/api/send-media', { chatType: 'grou
 t('a missing source is refused', noSource.status === 400)
 disposeMedia()
 
+// the source file is removed only after a successful send, and only when the
+// setting allows it
+const fsDel = await import('node:fs')
+const delFile = '/tmp/onebot-send-del-' + process.pid + '.txt'
+fsDel.writeFileSync(delFile, 'x')
+const delCalls = []
+const delConn = { state: 'online', selfId: '1', call: async (action, params) => { delCalls.push({ action, params }); return { message_id: 1 } } }
+const disposeDel = registerRoutes(routeCtx, {
+  store: { snapshot: () => ({ config: { ...baseConfig, deleteSentMedia: true } }), read: () => ({ ...baseConfig, deleteSentMedia: true }) },
+  log, getConnection: () => delConn, applyConfig: async () => {},
+})
+const delRes = fakeRes()
+await routes.get('/onebot-mini/api/send-media')({ method: 'POST', url: '/onebot-mini/api/send-media', headers: {}, [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify({ chatType: 'group', chatId: '1', kind: 'file', path: delFile })) } }, delRes)
+t('the send-media route deletes the source when enabled', !fsDel.existsSync(delFile))
+disposeDel()
+
+const keepFile = '/tmp/onebot-send-keep-' + process.pid + '.txt'
+fsDel.writeFileSync(keepFile, 'x')
+const disposeKeep = registerRoutes(routeCtx, {
+  store: { snapshot: () => ({ config: { ...baseConfig, deleteSentMedia: false } }), read: () => ({ ...baseConfig, deleteSentMedia: false }) },
+  log, getConnection: () => delConn, applyConfig: async () => {},
+})
+const keepRes = fakeRes()
+await routes.get('/onebot-mini/api/send-media')({ method: 'POST', url: '/onebot-mini/api/send-media', headers: {}, [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify({ chatType: 'group', chatId: '1', kind: 'file', path: keepFile })) } }, keepRes)
+t('the source is kept when the setting is off', fsDel.existsSync(keepFile))
+disposeKeep()
+try { fsDel.unlinkSync(keepFile) } catch {}
+
 // an image over the cache cap is streamed through, not refused: the route serves
 // the bytes with a "not cached" marker, and nothing is written to disk
 const { fetchIntoCache } = await import('../imagecache.js')
@@ -817,12 +845,17 @@ const mediaTransport = {
   sendMessage: async (chat, message) => { mediaSent.push(message); return { message_id: 1 } },
   call: async () => ({}),
 }
+// A fixture created by the test itself: /tmp is wiped between runs, so a
+// hard-coded path would make this test flaky.
+const fsMod = await import('node:fs')
+const mediaFixture = '/tmp/onebot-reply-fixture-' + process.pid + '.png'
+fsMod.writeFileSync(mediaFixture, Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'))
 const bridgeMedia = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: mediaTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
 bridgeMedia.start()
 await bridgeMedia.handleInbound(inbound({ user_id: 31001, message_id: 310 }))
 const chatMedia = bridgeMedia.chats.get('private:31001')
 sessionEvent({ id: chatMedia.sessionId }, { type: 'turn/start', data: { turn: 1 } })
-sessionEvent({ id: chatMedia.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '给你图 [[image:/tmp/onebot_test.png]] 收好' }] } } })
+sessionEvent({ id: chatMedia.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '给你图 [[image:' + mediaFixture + ']] 收好' }] } } })
 sessionEvent({ id: chatMedia.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
 await wait(120)
 const sentSegments = mediaSent[mediaSent.length - 1] ?? []

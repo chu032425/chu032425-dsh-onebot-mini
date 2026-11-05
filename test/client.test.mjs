@@ -145,6 +145,8 @@ t('the qzone picker offers a dropdown and a manual box', typeof zh.qzoneTargetPl
   && zh.qzoneTargetPlaceholder.includes('QQ') && typeof zh.qzoneTargetMine === 'string' && zh.qzoneTargetMine !== '')
 t('profile menu label present', zh.tabProfile === '个人资料' && en.tabProfile === 'Profile')
 t('qzone settings group label present', zh.groupQzone === '空间' && en.groupQzone === 'Qzone')
+t('media group label present', zh.groupMedia === '媒体' && en.groupMedia === 'Media')
+t('delete-source setting labelled', typeof zh.fieldDeleteSentMedia === 'string' && zh.fieldDeleteSentMedia !== '' && typeof en.fieldDeleteSentMedia === 'string')
 for (const key of ['profileTitle', 'profileChoose', 'profileSelf', 'profileNickname', 'profileSignature',
   'profileLevel', 'profileVip', 'profileOnline', 'profileOnlineUnknown', 'profileUnavailable', 'profileEmpty']) {
   t('profile copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')

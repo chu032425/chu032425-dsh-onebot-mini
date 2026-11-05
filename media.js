@@ -1,3 +1,8 @@
+import { tmpdir } from 'node:os'
+import { isAbsolute, basename, resolve } from 'node:path'
+import { lstat, unlink } from 'node:fs/promises'
+import { dshHome } from './config.js'
+
 /**
  * Sending media segments on a bridged chat.
  *
@@ -101,9 +106,53 @@ export async function sendMedia(connection, options) {
     ? { group_id: Number(chatId), message: [segment] }
     : { user_id: Number(chatId), message: [segment] }
   try {
-    return { ok: true, data: await connection.call(action, params) }
+    const data = await connection.call(action, params)
+    // A source file is only removed after the gateway accepted the send, and
+    // only when the caller asked for it. A URL or inline base64 has nothing to
+    // clean up.
+    let deleted
+    if (options.deleteSource === true && typeof options.path === 'string' && options.path !== '') {
+      const result = await safeUnlink(options.path)
+      deleted = result.ok === true ? 'deleted' : 'kept: ' + result.reason
+    }
+    return deleted === undefined ? { ok: true, data } : { ok: true, data, source: deleted }
   } catch (error) {
     return { ok: false, error: String(error?.message ?? error) }
+  }
+}
+
+/**
+ * The directories a sent source file may be deleted from.
+ *
+ * Deleting an arbitrary absolute path a model produced would be one bad prompt
+ * away from wiping something important, so deletion is limited to scratch and
+ * workspace areas. Anything else is left alone and reported back.
+ * @returns the allowed roots, fully resolved.
+ */
+function allowedDeleteRoots() {
+  return [resolve(tmpdir()), '/workspace', resolve(dshHome())]
+}
+
+/**
+ * Delete one sent source file, refusing anything outside the allowed roots.
+ * @param target - the configured path.
+ * @returns `{ ok: true }` or `{ ok: false, reason }`.
+ */
+export async function safeUnlink(target) {
+  const absolute = resolve(String(target ?? ''))
+  if (!isAbsolute(absolute)) return { ok: false, reason: 'not an absolute path' }
+  const roots = allowedDeleteRoots()
+  const inside = roots.some((root) => absolute === root || absolute.startsWith(root + '/'))
+  if (!inside) return { ok: false, reason: 'outside the allowed roots' }
+  if (roots.includes(absolute)) return { ok: false, reason: 'refusing to delete a root' }
+  try {
+    const info = await lstat(absolute)
+    if (info.isDirectory()) return { ok: false, reason: 'is a directory' }
+    await unlink(absolute)
+    return { ok: true }
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { ok: true }  // already gone: nothing to do
+    return { ok: false, reason: String(error?.message ?? error) }
   }
 }
 
@@ -126,12 +175,15 @@ export const MEDIA_MARKER_PATTERN = /\[\[(image|record|video|file):([^\[\]]+)\]\
  * must not lose the message.
  * @param text - the buffered reply text.
  * @param options - `{ maxBytes? }`.
- * @returns `{ segments, warnings }`.
+ * @returns `{ segments, warnings, sourcePaths }`; `sourcePaths` lists the local
+ *   files that were inlined, so the caller can remove them after a successful
+ *   send.
  */
 export async function buildReplySegments(text, options = {}) {
   const input = String(text ?? '')
   const segments = []
   const warnings = []
+  const sourcePaths = []
   const pushText = (value) => {
     const trimmed = String(value ?? '').trim()
     if (trimmed !== '') segments.push({ type: 'text', data: { text: trimmed } })
@@ -156,17 +208,12 @@ export async function buildReplySegments(text, options = {}) {
         pushText('[' + kind + ' failed: ' + read.reason + ']')
         continue
       }
-      built = buildSegment(kind, { base64: read.base64 }, kind === 'file' ? basenameOf(source) : undefined)
+      built = buildSegment(kind, { base64: read.base64 }, kind === 'file' ? basename(source) : undefined)
+      sourcePaths.push(source)
     }
     segments.push(built)
   }
   pushText(input.slice(lastIndex))
 
-  return { segments, warnings }
-}
-
-/** The last path component, without pulling in node:path for one call. */
-function basenameOf(path) {
-  const parts = String(path).split(/[\\/]/)
-  return parts[parts.length - 1] ?? ''
+  return { segments, warnings, sourcePaths }
 }

@@ -720,6 +720,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         sendJson(res, 200, { ok: false, error: 'not connected' })
         return
       }
+      const config = store.read()
       const result = await sendMedia(connection, {
         chatType: body?.chatType,
         chatId: body?.chatId,
@@ -728,6 +729,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         base64: body?.base64,
         path: body?.path,
         name: body?.name,
+        deleteSource: config.deleteSentMedia === true,
       })
       sendJson(res, result.ok === true ? 200 : 400, result)
     },

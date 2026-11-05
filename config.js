@@ -71,6 +71,7 @@ export const DEFAULTS = Object.freeze({
   logMessagePreview: true,
   logToFile: true,
   sendTimeoutMs: 30000,
+  deleteSentMedia: true,
   imageCacheMaxKb: 1024,
   imageCacheTotalMb: 100,
   imageShowMaxMb: 32,
@@ -102,6 +103,7 @@ export const FIELD_KINDS = Object.freeze({
   logMessagePreview: 'boolean',
   logToFile: 'boolean',
   sendTimeoutMs: 'number',
+  deleteSentMedia: 'boolean',
   imageCacheMaxKb: 'number',
   imageCacheTotalMb: 'number',
   imageShowMaxMb: 'number',
@@ -112,6 +114,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
+  { id: 'media', fields: ['deleteSentMedia'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])

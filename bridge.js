@@ -684,7 +684,12 @@ export class ChatBridge {
       const allow = computeAllowlist(this.config)
       if (allow !== null) {
         const { registerTools } = await import('./tools.js')
-        registerTools(agentCtx, { connection: this.connection, allow, chatId })
+        registerTools(agentCtx, {
+          connection: this.connection,
+          allow,
+          chatId,
+          deleteSentMedia: this.config.deleteSentMedia === true,
+        })
       }
       agentCtx.systemPrompt.section({
         name: 'channel:dsh-onebot-mini',
@@ -752,13 +757,24 @@ export class ChatBridge {
     try {
       // A reply may carry `[[image:…]]`-style markers; those become real message
       // segments so a caption and its picture go out as one message.
-      const { buildReplySegments } = await import('./media.js')
-      const { segments, warnings } = await buildReplySegments(text)
+      const { buildReplySegments, safeUnlink } = await import('./media.js')
+      const { segments, warnings, sourcePaths } = await buildReplySegments(text)
       if (segments.length === 0) return
       for (const warning of warnings) {
         this.log.record('warn', { note: 'reply media skipped: ' + warning, chatId })
       }
       const data = await this.connection.sendMessage(chat, segments)
+      // Only after the gateway accepted the message: remove the source files the
+      // reply attached, when the operator asked for that.
+      if (this.config.deleteSentMedia === true && sourcePaths.length > 0) {
+        for (const path of sourcePaths) {
+          const result = await safeUnlink(path)
+          this.log.record('bridge', {
+            note: result.ok === true ? 'reply media source removed' : 'reply media source kept: ' + result.reason,
+            chatId,
+          })
+        }
+      }
       this.log.record('bridge', {
         note: 'reply sent',
         chatId,

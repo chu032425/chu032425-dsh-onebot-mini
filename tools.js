@@ -53,7 +53,7 @@ const OUTPUT_SCHEMA = Object.freeze({
  *   `allow` is a Set of action names; an action outside it is refused instead
  *   of being relayed. The caller omits the tool entirely when nothing is allowed.
  */
-export function registerTools(agentCtx, { connection, allow, chatId }) {
+export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia }) {
   const allowed = allow instanceof Set ? allow : undefined
   // The chat this agent serves, so a media send can default to it instead of
   // making the model repeat the target on every call.
@@ -132,6 +132,7 @@ export function registerTools(agentCtx, { connection, allow, chatId }) {
         url: args?.url,
         base64: args?.base64,
         name: args?.name,
+        deleteSource: deleteSentMedia === true,
       })
       return result
     },

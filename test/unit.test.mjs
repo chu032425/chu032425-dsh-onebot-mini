@@ -2,7 +2,8 @@
  * Self-contained checks: pure functions, config store, log ring, wire protocol.
  * Run with `node test/unit.test.mjs`. No test framework, no dependencies.
  */
-import { rmSync, writeFileSync, readFileSync } from 'node:fs'
+import { rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { existsSync as readFileSyncExists } from 'node:fs'
 import { acceptKey, takeFrame, encodeText, encodeControl } from '../wire.js'
 import { normalizeConfig, ConfigStore, DEFAULTS, MODE_FIELDS, FIELD_GROUPS } from '../config.js'
 import { TOOL_GROUPS, ALL_ACTIONS, isKnownAction, computeAllowlist, actionLabel, enabledGroups } from '../toolcatalog.js'
@@ -169,7 +170,7 @@ t('an account folder keeps only digits', accountDir('2000002').endsWith('/200000
 t('a hostile account id cannot escape the cache root', !accountDir('../etc').includes('..'))
 
 // --- media segments
-import { buildSegment, MEDIA_KINDS, readFileAsBase64, MAX_MEDIA_BYTES } from '../media.js'
+import { buildSegment, MEDIA_KINDS, readFileAsBase64, MAX_MEDIA_BYTES, safeUnlink } from '../media.js'
 t('an image segment uses base64 when given base64', JSON.stringify(buildSegment('image', { base64: 'AAA' })) === '{"type":"image","data":{"file":"base64://AAA"}}')
 t('a segment uses the url when given a url', JSON.stringify(buildSegment('image', { url: 'http://x/y.png' })) === '{"type":"image","data":{"file":"http://x/y.png"}}')
 t('a file segment carries its name', JSON.stringify(buildSegment('file', { url: 'http://x/y.zip' }, 'a.zip')) === '{"type":"file","data":{"file":"http://x/y.zip","name":"a.zip"}}')
@@ -179,6 +180,18 @@ const readBack = await readFileAsBase64('/tmp/onebot-mini-unit.json')
 t('a local file is read into base64', readBack.ok === true && typeof readBack.base64 === 'string' && readBack.base64.length > 0)
 const missingFile = await readFileAsBase64('/tmp/definitely-not-here-xyz')
 t('a missing file is reported', missingFile.ok === false && missingFile.reason !== '')
+
+// safe deletion: only inside the allowed roots, never a directory, never a root
+const victim = '/tmp/onebot-unlink-' + process.pid + '.txt'
+writeFileSync(victim, 'bye', 'utf8')
+const unlinked = await safeUnlink(victim)
+t('a sent source file inside /tmp is deleted', unlinked.ok === true && !readFileSyncExists(victim))
+const outside = await safeUnlink('/etc/hostname')
+t('a file outside the allowed roots is refused', outside.ok === false && String(outside.reason).includes('outside'))
+const rootDir = await safeUnlink('/workspace')
+t('a root directory is refused', rootDir.ok === false)
+const dirPath = await safeUnlink('/tmp')
+t('the tmp root itself is refused', dirPath.ok === false)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
