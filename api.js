@@ -427,11 +427,33 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
        * @param params - its params.
        * @returns `{ available, error, data }`.
        */
+      /**
+       * Turn a Qzone failure into a code the page can explain.
+       *
+       * Tencent answers a forbidden Qzone read with its own negative codes, not
+       * an OneBot retcode: -4009 and -10031 mean "you may not read this space"
+       * (the owner restricted it, or the account is not a friend / needs
+       * verification). Anything else keeps its raw message so a genuinely odd
+       * gateway stays diagnosable.
+       * @param error - the thrown error.
+       * @returns `{ code, message }`.
+       */
+      const classify = (error) => {
+        const raw = String(error?.message ?? error)
+        const match = /code=(-?\d+)/.exec(raw)
+        const code = match === null ? '' : match[1]
+        if (code === '-4009' || code === '-10031') {
+          return { code, message: 'forbidden' }
+        }
+        return { code, message: raw }
+      }
+
       const read = async (action, params) => {
         try {
-          return { available: true, error: '', data: await connection.call(action, params) }
+          return { available: true, error: '', errorCode: '', data: await connection.call(action, params) }
         } catch (error) {
-          return { available: false, error: String(error?.message ?? error), data: undefined }
+          const info = classify(error)
+          return { available: false, error: info.message, errorCode: info.code, data: undefined }
         }
       }
 
@@ -473,6 +495,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
         return {
           available: result?.available === true,
           error: result?.error ?? '',
+          errorCode: result?.errorCode ?? '',
           total: Number(data?.total ?? 0) || 0,
           items: items.map(post),
         }
@@ -486,11 +509,12 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
           : {
             available: profile.available,
             error: profile.error,
+            errorCode: profile.errorCode ?? '',
             name: String(profile.data?.name ?? ''),
             description: String(profile.data?.description ?? ''),
           },
-        posts: posts === undefined ? { available: false, error: 'not requested', total: 0, items: [] } : listOf(posts),
-        feeds: feeds === undefined ? { available: false, error: 'not requested', total: 0, items: [] } : listOf(feeds),
+        posts: posts === undefined ? { available: false, error: 'not requested', errorCode: '', total: 0, items: [] } : listOf(posts),
+        feeds: feeds === undefined ? { available: false, error: 'not requested', errorCode: '', total: 0, items: [] } : listOf(feeds),
       })
     },
   })

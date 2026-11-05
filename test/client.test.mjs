@@ -131,6 +131,9 @@ for (const key of ['fieldImageCacheMaxKb', 'fieldImageCacheTotalMb']) {
   t('image cache field label present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 t('sex is localized in the friend detail', typeof zh.profileSexUnknown === 'string' && zh.profileSexUnknown === '未知')
+for (const key of ['qzoneForbidden', 'qzoneForbiddenHint', 'qzoneForbiddenSwitch']) {
+  t('permission copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
 for (const key of ['qzoneImageAlt', 'qzoneImageFailed', 'qzoneImageTooLarge']) {
   t('image copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }

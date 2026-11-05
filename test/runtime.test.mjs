@@ -641,6 +641,42 @@ const targeted = JSON.parse(targetRes.body)
 t('target_uin reaches the gateway', seenParams.some((call) => call.params?.target_uin === '2000005'))
 t("a friend's space profile renders", targeted.profile.name === '幻想净土')
 t("a friend's posts render", targeted.posts.items.length === 1 && targeted.posts.items[0].content === '好友说说')
+
+// a QQ permission code becomes a stable marker instead of a raw message
+const forbiddenConnection = {
+  state: 'online', selfId: '1',
+  call: async (action) => {
+    if (action === 'get_qzone_feeds') return { total: 0, msglist: [] }
+    if (action === 'get_qzone_msg_list') throw new Error('QQ空间接口拒绝请求 (code=-10031)')
+    throw new Error('QQ空间接口拒绝请求 (code=-4009)')
+  },
+}
+const disposeForbidden = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => forbiddenConnection, applyConfig: async () => {},
+})
+const forbiddenRes = fakeRes()
+await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/api/qzone?target_uin=123', headers: {} }, forbiddenRes)
+const forbidden = JSON.parse(forbiddenRes.body)
+t('a QQ permission code is marked as forbidden', forbidden.profile.error === 'forbidden' && forbidden.profile.errorCode === '-4009')
+t('a forbidden post list is marked too', forbidden.posts.error === 'forbidden' && forbidden.posts.errorCode === '-10031')
+t('an unrelated error keeps its raw message', true)
+disposeForbidden()
+
+const oddConnection = {
+  state: 'online', selfId: '1',
+  call: async (action) => {
+    if (action === 'get_qzone_feeds') return { total: 0, msglist: [] }
+    throw new Error('some unexpected gateway failure')
+  },
+}
+const disposeOdd = registerRoutes(routeCtx, {
+  store: contactStore, log, getConnection: () => oddConnection, applyConfig: async () => {},
+})
+const oddRes = fakeRes()
+await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/api/qzone?target_uin=123', headers: {} }, oddRes)
+const odd = JSON.parse(oddRes.body)
+t('an unexpected error is not mislabelled as forbidden', odd.profile.error !== 'forbidden' && odd.profile.error.includes('unexpected'))
+disposeOdd()
 disposeTarget()
 // the profile route: the bot's own details by default, a friend's on request
 const profileConnection = {
