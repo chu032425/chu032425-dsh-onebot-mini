@@ -82,6 +82,24 @@ export const ACTION_DOCS = Object.freeze({
       P('headers', 'object', false, '下载请求的自定义请求头'),
     ],
   },
+  // 在线文件：QQ 的「在线文件」传输不走普通消息段，消息本身会是空的，
+  // 需要这几个动作单独取回。仅私聊。
+  get_online_file_msg: {
+    params: [P('user_id', 'string', true, '对方 QQ 号（仅私聊）')],
+    note: '在对方说发了文件、但消息里没有 file 段或 [文件: …] 占位符时使用；返回里的 msg_id / element_id 用于接收。列表里没有新文件，说明那条空消息只是文件传输回执，不要回复。',
+  },
+  receive_online_file: {
+    params: [
+      P('user_id', 'string', true, '对方 QQ 号（仅私聊）'),
+      P('msg_id', 'string', true, '在线文件消息 ID，取自 get_online_file_msg 的结果'),
+      P('element_id', 'string', true, '文件元素 ID，取自 get_online_file_msg 的结果'),
+    ],
+    note: '接收并下载这个在线文件；下载完成后用 get_file 或返回的路径读取内容，再据内容回答。',
+  },
+  get_private_file_url: {
+    params: [P('file_id', 'string', true, '私聊文件 ID，取自 file 段的 file_id 字段')],
+    note: '拿到私聊文件的下载直链；链接有时效，取到后尽快用 download_file 下载。',
+  },
   // --- 群管理 ---
   set_group_ban: {
     params: [groupId, userId, P('duration', 'number', true, '禁言秒数；0 表示解除禁言')],

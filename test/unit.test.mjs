@@ -266,11 +266,14 @@ t('pruned actions stay out of the catalog', [
   'mark_private_msg_as_read', 'send_forward_msg', 'send_group_forward_msg', 'send_private_forward_msg',
   'forward_group_single_msg', 'forward_friend_single_msg', 'get_group_info_ex', 'get_recent_contact',
   'set_group_kick_members', 'set_group_admin', 'set_group_todo', 'complete_group_todo', 'cancel_group_todo',
-  'upload_group_file', 'upload_private_file', 'get_group_file_url', 'get_private_file_url',
+  'upload_group_file', 'upload_private_file', 'get_group_file_url',
   'get_group_root_files', 'get_group_files_by_folder', 'get_group_file_system_info', 'create_group_file_folder',
   'delete_group_folder', 'delete_group_file', 'move_group_file', 'rename_group_file',
 ].every((name) => !isKnownAction(name)))
 t('the two request handlers survived the pruning', isKnownAction('set_friend_add_request') && isKnownAction('set_group_add_request'))
+// QQ 的「在线文件」不产生普通消息段，只能靠这三个扩展动作取回。
+t('the online-file actions are catalogued as extensions', ['get_online_file_msg', 'receive_online_file', 'get_private_file_url']
+  .every((name) => isKnownAction(name) && STANDARD_ACTIONS.has(name) === false))
 t('mark everything as read survived the pruning', isKnownAction('_mark_all_as_read'))
 t('the catalog has no group album section', TOOL_GROUPS.every((group) => group.id !== 'album'))
 t('every catalogued action carries a Chinese annotation', TOOL_GROUPS.every((group) => group.actions.every((action) => /[\u4e00-\u9fa5]/.test(action.zh))))

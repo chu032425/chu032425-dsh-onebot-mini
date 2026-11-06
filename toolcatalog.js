@@ -13,9 +13,9 @@
  *  - 自毁操作：set_restart、bot_exit、clean_cache、clean_stream_temp_file；
  *  - 原始协议：send_packet、nc_get_packet_status，以及流式上传/下载端点。
  *
- * 另外还有一批偏门或平台相关的也没收：闪传与在线文件、自定义表情、群打卡、
- * 频道、Ark 分享卡片、内联键盘按钮、仅 Windows 可用的 ocr_image，以及那一对
- * AI 语音动作。
+ * 另外还有一批偏门或平台相关的也没收：闪传、自定义表情、群打卡、频道、Ark 分享
+ * 卡片、内联键盘按钮、仅 Windows 可用的 ocr_image，以及那一对 AI 语音动作。
+ * （在线文件只收了「列出 / 接收 / 拿直链」三个取回动作，发送与拒绝仍不收。）
  *
  * 按运营者要求又精简过一轮，好让工具面保持小：整个群相册家族、QQ 空间的两个
  * 权限动作、自定义在线状态、请求处理里除两个加好友/加群之外的全部、各会话的
@@ -114,6 +114,10 @@ export const TOOL_GROUPS = Object.freeze([
     a('get_record', '获取语音文件', 'Fetch a voice recording'),
     a('get_file', '获取文件', 'Fetch a file'),
     a('download_file', '下载网络文件到本地', 'Download a remote file to disk'),
+    // QQ 的「在线文件」传输不产生普通消息段，消息本身是空的，只能靠这几个动作取回。
+    a('get_online_file_msg', '获取私聊在线文件消息', 'List private online-file messages'),
+    a('receive_online_file', '接收并下载私聊在线文件', 'Accept a private online file'),
+    a('get_private_file_url', '获取私聊文件下载直链', 'Get a private file download URL'),
   ]) }),
 
   Object.freeze({ id: 'group', actions: Object.freeze([
