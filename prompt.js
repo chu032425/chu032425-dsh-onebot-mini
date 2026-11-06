@@ -74,30 +74,108 @@ export const LEGACY_CHANNEL_PROMPT_V2 = [
   '- 本通道没有 Web 端的审批卡片：不要调用 exit_plan_mode，需要计划时用纯文本写出。',
 ].join('\n')
 
+/** 默认：流式（按段实时发）的回复发送方式段落。 */
+export const DEFAULT_REPLY_MODE_STREAM_PROMPT = '- 你的回复会按段实时发出：每产生一段文字就作为一条独立的 QQ 消息发给用户，用户能边看边等。'
+  + '想清楚再发，避免前后矛盾或反复改动。'
+
+/** 默认：任务完成一次发送的回复发送方式段落。 */
+export const DEFAULT_REPLY_MODE_FINAL_PROMPT = '- 一轮回复只产生一条对外消息：插件会缓存你的文本块，并在本轮结束时统一发送。不要试图把一条回复拆成多条消息。'
+
 /**
- * 回复发送方式段落，随 `replyMode` 变化。
- *
+ * 回复发送方式段落，随 `replyMode` 变化；`template` 是该模式在提示词页编辑的文本。
  * @param mode - `stream` 或 `final`。
+ * @param template - 覆盖文本；为空则用该模式的默认文案。
  * @returns 该段落。
  */
-export function replyModeParagraph(mode) {
-  if (mode === 'final') {
-    return '- 一轮回复只产生一条对外消息：插件会缓存你的文本块，并在本轮结束时统一发送。不要试图把一条回复拆成多条消息。'
-  }
-  return '- 你的回复会按段实时发出：每产生一段文字就作为一条独立的 QQ 消息发给用户，用户能边看边等。'
-    + '想清楚再发，避免前后矛盾或反复改动。'
+export function replyModeParagraph(mode, template) {
+  const custom = String(template ?? '').trim()
+  if (custom !== '') return custom
+  return mode === 'final' ? DEFAULT_REPLY_MODE_FINAL_PROMPT : DEFAULT_REPLY_MODE_STREAM_PROMPT
 }
+
+/** 默认：管理员段落；`{adminId}` 会替换为管理员 QQ 号。 */
+export const DEFAULT_ADMIN_PROMPT = '- 管理员是 QQ {adminId}：管理员的要求优先处理；涉及敏感或管理类操作时，以管理员的指令为准。'
 
 /**
  * 管理员段落：把配置里的管理员 QQ 号告诉模型，并要求其指令优先。
- *
  * @param adminUserId - 管理员的 QQ 号；空表示未设置。
+ * @param template - 提示词页可编辑的模板，支持 `{adminId}`。
  * @returns 该段落，未设置时为空串（占位符所在整行会被删掉）。
  */
-export function adminParagraph(adminUserId) {
+export function adminParagraph(adminUserId, template) {
   const id = String(adminUserId ?? '').trim()
   if (id === '') return ''
-  return '- 管理员是 QQ ' + id + '：管理员的要求优先处理；涉及敏感或管理类操作时，以管理员的指令为准。'
+  const custom = String(template ?? '').trim()
+  const base = custom !== '' ? custom : DEFAULT_ADMIN_PROMPT
+  return base.replace(/\{adminId\}/g, id)
+}
+
+/** 默认：群聊发言人前缀说明。 */
+export const DEFAULT_SENDER_PREFIX_PROMPT = '- 群消息会带有 [HH:MM 昵称(QQ)] 前缀，以便区分不同发言人。'
+
+/**
+ * 群聊发言人前缀段落（可被提示词页覆盖）。
+ * @param template - 覆盖文本；为空则用默认。
+ * @returns 该段落。
+ */
+export function senderPrefixParagraph(template) {
+  const custom = String(template ?? '').trim()
+  return custom !== '' ? custom : DEFAULT_SENDER_PREFIX_PROMPT
+}
+
+/** 默认：媒体发送段落（工具启用时注入）。 */
+export const DEFAULT_MEDIA_PROMPT = [
+  '- 要把图片、语音、视频或文件作为单独一条消息发出时，调用 onebot_send_media 工具。要让它和文字一起作为一条回复发出时，在回复里写标记：[[image:/abs/path.png]]、[[record:/abs/a.wav]]、[[video:/abs/a.mp4]] 或 [[file:/abs/a.zip]]——路径也可以是 http(s) URL。插件会把每个标记替换成真实附件。仅在用户要求时才发送媒体。',
+  '- 你看不到磁盘。在说出某个本地文件名之前，先对该目录调用 onebot_list_files，使用它返回的真实文件名。绝不臆造文件名：路径错误会导致附件发送失败，用户只会看到一条简短提示。',
+  '- 当用户要图片、语音、视频或文件时，你【必须】调用 onebot_send_media（先列目录）。不要回复说你没有权限、账号受限、只有管理员才能发媒体、或工具不可用——这些说法在本通道都是错误的。如果确实发送失败，如实报告工具返回的错误。绝不要让用户把你设为管理员来换取发媒体的能力。',
+].join('\n')
+
+/**
+ * 媒体发送段落（可被提示词页覆盖）。
+ * @param template - 覆盖文本；为空则用默认。
+ * @returns 该段落。
+ */
+export function mediaParagraph(template) {
+  const custom = String(template ?? '').trim()
+  return custom !== '' ? custom : DEFAULT_MEDIA_PROMPT
+}
+
+/** 默认：工具清单段落（工具启用时注入）。 */
+export const DEFAULT_TOOLS_PROMPT = [
+  '## 本插件提供的工具（所有 QQ 相关操作都必须使用这些工具）',
+  '- onebot_call：执行任意 OneBot 11 动作（发消息、群管理、查询、互动、QQ 空间、群相册等）。把动作名放进 action，参数放进 params。',
+  '- onebot_send_media：向当前 QQ 会话发送图片、语音、视频或文件；可直接传本机文件路径（自动内联字节）或 URL。',
+  '- onebot_list_files：列出宿主机某个目录下的文件，发本地文件前先用它确认真实文件名。',
+  '- 所有 QQ 相关操作（发消息、发图片/语音/视频/文件、群管理、查询等）都必须通过上述工具完成；不要使用任何其他以 qq_ 开头的工具或第三方 QQ 工具。如果工具报错，请如实转述错误，不要声称没有权限。',
+].join('\n')
+
+/**
+ * 本插件工具清单段落。
+ *
+ * 只有工具确实可用（`allow` 是 Set）时才输出；工具关闭时返回空串，整行会被
+ * 渲染器删掉，避免向模型宣传一个根本不存在的工具。工具清单本身是固定的三项，
+ * 因为 registerTools 总是同时注册它们。
+ * @param allow - computeAllowlist 得到的可用动作集合，或 null。
+ * @param template - 提示词页可编辑的覆盖文本；为空则用默认。
+ * @returns 工具清单段落，或空串。
+ */
+export function toolsParagraph(allow, template) {
+  if (!(allow instanceof Set)) return ''
+  const custom = String(template ?? '').trim()
+  return custom !== '' ? custom : DEFAULT_TOOLS_PROMPT
+}
+
+/** 默认：动作清单前的说明（工具启用时注入，具体动作列表在代码里生成）。 */
+export const DEFAULT_ACTIONS_PROMPT = '- 除纯文本回复外的任何操作，都要调用 onebot_call 工具，并在 action 填 OneBot 动作名、params 填参数。下面只接受已启用的动作，其他一律拒绝。每条动作都写明了功能、参数和用法。'
+
+/**
+ * 动作清单前的说明（可被提示词页覆盖）。
+ * @param template - 覆盖文本；为空则用默认。
+ * @returns 该段落。
+ */
+export function actionsParagraph(template) {
+  const custom = String(template ?? '').trim()
+  return custom !== '' ? custom : DEFAULT_ACTIONS_PROMPT
 }
 
 /** 频道模板声明的占位符。 */
@@ -118,11 +196,13 @@ export const DEFAULT_INBOUND_PROMPT = [
 ].join('\n')
 
 /**
- * 「收到的媒体」段落（默认文案的便捷读取）。
+ * 「收到的媒体」段落（可被提示词页覆盖）。
+ * @param template - 覆盖文本；为空则用默认。
  * @returns 该段落。
  */
-export function inboundParagraph() {
-  return DEFAULT_INBOUND_PROMPT
+export function inboundParagraph(template) {
+  const custom = String(template ?? '').trim()
+  return custom !== '' ? custom : DEFAULT_INBOUND_PROMPT
 }
 
 /**
@@ -156,53 +236,18 @@ export const DEFAULT_INTERJECT_PROMPT = '你负责为一位可能仍在作答的
  */
 export const PROMPT_DEFS = Object.freeze([
   Object.freeze({ id: 'channel', field: 'channelPrompt', labelKey: 'promptDefChannel', placeholders: PROMPT_PLACEHOLDERS, default: DEFAULT_CHANNEL_PROMPT }),
+  Object.freeze({ id: 'replyModeStream', field: 'replyModeStreamPrompt', labelKey: 'promptDefReplyModeStream', placeholders: Object.freeze([]), default: DEFAULT_REPLY_MODE_STREAM_PROMPT }),
+  Object.freeze({ id: 'replyModeFinal', field: 'replyModeFinalPrompt', labelKey: 'promptDefReplyModeFinal', placeholders: Object.freeze([]), default: DEFAULT_REPLY_MODE_FINAL_PROMPT }),
+  Object.freeze({ id: 'admin', field: 'adminPrompt', labelKey: 'promptDefAdmin', placeholders: Object.freeze(['{adminId}']), default: DEFAULT_ADMIN_PROMPT }),
+  Object.freeze({ id: 'senderPrefix', field: 'senderPrefixPrompt', labelKey: 'promptDefSenderPrefix', placeholders: Object.freeze([]), default: DEFAULT_SENDER_PREFIX_PROMPT }),
+  Object.freeze({ id: 'media', field: 'mediaPrompt', labelKey: 'promptDefMedia', placeholders: Object.freeze([]), default: DEFAULT_MEDIA_PROMPT }),
+  Object.freeze({ id: 'tools', field: 'toolsPrompt', labelKey: 'promptDefTools', placeholders: Object.freeze([]), default: DEFAULT_TOOLS_PROMPT }),
+  Object.freeze({ id: 'actions', field: 'actionsPrompt', labelKey: 'promptDefActions', placeholders: Object.freeze([]), default: DEFAULT_ACTIONS_PROMPT }),
   Object.freeze({ id: 'inbound', field: 'inboundPrompt', labelKey: 'promptDefInbound', placeholders: Object.freeze([]), default: DEFAULT_INBOUND_PROMPT }),
   Object.freeze({ id: 'toolCall', field: 'toolCallPrompt', labelKey: 'promptDefToolCall', placeholders: Object.freeze(['{enabledNote}']), default: DEFAULT_TOOL_CALL_PROMPT }),
   Object.freeze({ id: 'toolMedia', field: 'toolMediaPrompt', labelKey: 'promptDefToolMedia', placeholders: Object.freeze([]), default: DEFAULT_TOOL_MEDIA_PROMPT }),
   Object.freeze({ id: 'interject', field: 'interjectPrompt', labelKey: 'promptDefInterject', placeholders: Object.freeze([]), default: DEFAULT_INTERJECT_PROMPT }),
 ])
-
-/**
- * 本插件工具清单段落。
- *
- * 只有工具确实可用（`allow` 是 Set）时才输出；工具关闭时返回空串，整行会被
- * 渲染器删掉，避免向模型宣传一个根本不存在的工具。工具清单本身是固定的三项，
- * 因为 registerTools 总是同时注册它们。
- * @param allow - computeAllowlist 得到的可用动作集合，或 null。
- * @returns 工具清单段落，或空串。
- */
-export function toolsParagraph(allow) {
-  if (!(allow instanceof Set)) return ''
-  return [
-    '## 本插件提供的工具（所有 QQ 相关操作都必须使用这些工具）',
-    '- onebot_call：执行任意 OneBot 11 动作（发消息、群管理、查询、互动、QQ 空间、群相册等）。把动作名放进 action，参数放进 params。',
-    '- onebot_send_media：向当前 QQ 会话发送图片、语音、视频或文件；可直接传本机文件路径（自动内联字节）或 URL。',
-    '- onebot_list_files：列出宿主机某个目录下的文件，发本地文件前先用它确认真实文件名。',
-    '- 所有 QQ 相关操作（发消息、发图片/语音/视频/文件、群管理、查询等）都必须通过上述工具完成；不要使用任何其他以 qq_ 开头的工具或第三方 QQ 工具。如果工具报错，请如实转述错误，不要声称没有权限。',
-  ].join('\n')
-}
-
-/**
- * 媒体段落，在「可发送媒体」时使用。
- * @returns 该段落。
- */
-export function mediaParagraph() {
-  return '- 要把图片、语音、视频或文件作为单独一条消息发出时，调用 onebot_send_media 工具。'
-    + '要让它和文字一起作为一条回复发出时，在回复里写标记：'
-    + '[[image:/abs/path.png]]、[[record:/abs/a.wav]]、[[video:/abs/a.mp4]] 或 [[file:/abs/a.zip]]——路径也可以是 http(s) URL。'
-    + '插件会把每个标记替换成真实附件。仅在用户要求时才发送媒体。\n'
-    + '- 你看不到磁盘。在说出某个本地文件名之前，先对该目录调用 onebot_list_files，使用它返回的真实文件名。'
-    + '绝不臆造文件名：路径错误会导致附件发送失败，用户只会看到一条简短提示。\n'
-    + '- 当用户要图片、语音、视频或文件时，你【必须】调用 onebot_send_media（先列目录）。'
-    + '不要回复说你没有权限、账号受限、只有管理员才能发媒体、或工具不可用——这些说法在本通道都是错误的。'
-    + '如果确实发送失败，如实报告工具返回的错误。'
-    + '绝不要让用户把你设为管理员来换取发媒体的能力。'
-}
-
-/** 群聊发言人前缀说明。 */
-export function senderPrefixParagraph() {
-  return '- 群消息会带有 [HH:MM 昵称(QQ)] 前缀，以便区分不同发言人。'
-}
 
 /**
  * 填充模板，丢掉展开为空的占位符所在行。

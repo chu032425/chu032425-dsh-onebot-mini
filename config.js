@@ -19,7 +19,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_ACTIONS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** The DSH home, honoring `$DSH_HOME` then `~/.dsh`. */
 export function dshHome() {
@@ -101,6 +101,13 @@ export const DEFAULTS = Object.freeze({
   // the mirror of `deleteSentMedia` for outgoing media.
   deleteInboundMedia: true,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
+  replyModeStreamPrompt: DEFAULT_REPLY_MODE_STREAM_PROMPT,
+  replyModeFinalPrompt: DEFAULT_REPLY_MODE_FINAL_PROMPT,
+  adminPrompt: DEFAULT_ADMIN_PROMPT,
+  senderPrefixPrompt: DEFAULT_SENDER_PREFIX_PROMPT,
+  mediaPrompt: DEFAULT_MEDIA_PROMPT,
+  toolsPrompt: DEFAULT_TOOLS_PROMPT,
+  actionsPrompt: DEFAULT_ACTIONS_PROMPT,
   inboundPrompt: DEFAULT_INBOUND_PROMPT,
   toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
   toolMediaPrompt: DEFAULT_TOOL_MEDIA_PROMPT,
@@ -143,6 +150,13 @@ export const FIELD_KINDS = Object.freeze({
   inboundMediaMaxMb: 'number',
   deleteInboundMedia: 'boolean',
   channelPrompt: 'text',
+  replyModeStreamPrompt: 'text',
+  replyModeFinalPrompt: 'text',
+  adminPrompt: 'text',
+  senderPrefixPrompt: 'text',
+  mediaPrompt: 'text',
+  toolsPrompt: 'text',
+  actionsPrompt: 'text',
   inboundPrompt: 'text',
   toolCallPrompt: 'text',
   toolMediaPrompt: 'text',

@@ -18,7 +18,7 @@
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, GROUP_LABELS } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, actionsParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes } from './inbound.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
@@ -1291,25 +1291,25 @@ export function buildPlatformPrompt(config) {
     : DEFAULT_CHANNEL_PROMPT
   const allow = computeAllowlist(config)
 
-  const replyMode = replyModeParagraph(config?.replyMode)
-  const admin = adminParagraph(config?.adminUserId)
-  const senderPrefix = config?.senderPrefix ? senderPrefixParagraph() : ''
-  const inbound = config?.inboundMedia === false
-    ? ''
-    : (String(config?.inboundPrompt ?? '').trim() !== '' ? String(config.inboundPrompt) : inboundParagraph())
+  const replyMode = replyModeParagraph(
+    config?.replyMode,
+    config?.replyMode === 'final' ? config?.replyModeFinalPrompt : config?.replyModeStreamPrompt,
+  )
+  const admin = adminParagraph(config?.adminUserId, config?.adminPrompt)
+  const senderPrefix = config?.senderPrefix ? senderPrefixParagraph(config?.senderPrefixPrompt) : ''
+  const inbound = config?.inboundMedia === false ? '' : inboundParagraph(config?.inboundPrompt)
   let media = ''
   let tools = ''
   let actions = ''
   if (allow === null) {
     actions = '- 本通道已关闭 onebot_call 工具：你无法调用任何 OneBot 动作（发图/发文件、群管理、查询等），只能用纯文本回复。'
   } else {
-    media = mediaParagraph()
-    tools = toolsParagraph(allow)
+    media = mediaParagraph(config?.mediaPrompt)
+    tools = toolsParagraph(allow, config?.toolsPrompt)
     const overrides = config?.actionPrompts !== null && typeof config?.actionPrompts === 'object' && !Array.isArray(config.actionPrompts)
       ? config.actionPrompts
       : {}
-    const lines = ['- 除纯文本回复外的任何操作，都要调用 onebot_call 工具，并在 action 填 OneBot 动作名、params 填参数。'
-      + '下面只接受已启用的动作，其他一律拒绝。每条动作都写明了功能、参数和用法。']
+    const lines = [actionsParagraph(config?.actionsPrompt)]
     // Advertise exactly what the operator left enabled, with each action's own
     // prompt (built-in doc or the operator's override), so the model never wastes
     // a turn on an action that would be refused and knows the parameters.
