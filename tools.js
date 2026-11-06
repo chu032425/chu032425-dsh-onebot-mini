@@ -2,9 +2,9 @@
  * 暴露给聊天 agent 的 OneBot 工具。
  *
  * 用一个通用入口代替「每个动作一个工具」：模型传入动作名（OneBot 动作或本插件
- * 内部实现的本地动作）与参数。OneBot 动作转给传输层，本地动作（send_message、
- * list_files）在这里执行。这样模型的工具列表只有一项，却仍覆盖媒体、文件、
- * 群管理和网关提供的其他动作。
+ * 内部实现的本地动作）与参数。OneBot 动作转给传输层，本地动作（get_action_doc、
+ * send_message、list_files）在这里执行。这样模型的工具列表只有一项，却仍覆盖
+ * 媒体、文件、群管理和网关提供的其他动作。
  *
  * `parameters` 是裸 JSON Schema，而不是 schema 构建器规格：`ctx.tools.register`
  * 接收可直接注册的定义，只有 `defineTool` 助手才编译构建器规格。保持裸 JSON
@@ -12,7 +12,7 @@
  */
 
 import { DEFAULT_TOOL_CALL_PROMPT } from './prompt.js'
-import { LOCAL_ACTIONS, isKnownAction } from './toolcatalog.js'
+import { LOCAL_ACTIONS, isKnownAction, actionLabel } from './toolcatalog.js'
 
 /** 工具定义中不依赖实时连接的部分。 */
 const PARAMETERS = Object.freeze({
@@ -21,13 +21,14 @@ const PARAMETERS = Object.freeze({
     action: {
       type: 'string',
       description: 'Action name: an OneBot 11 action (e.g. send_group_msg, get_group_info, set_group_ban) '
-        + 'or a local action (send_message for text/media/图文混排, list_files).',
+        + 'or a local action (get_action_doc to read one action\'s full parameters and usage, '
+        + 'send_message for text/media/图文混排, list_files).',
     },
     params: {
       type: 'object',
       additionalProperties: true,
       description: 'Action parameters, e.g. { user_id, message }, { group_id, message }, '
-        + 'or for local actions { text, kind, path } / { dir }. '
+        + 'or for local actions { name } (get_action_doc), { text, kind, path } (send_message) / { dir } (list_files). '
         + 'Message segments look like [{ "type": "text", "data": { "text": "hi" } }, '
         + '{ "type": "image", "data": { "file": "/path/to.png" } }].',
     },
@@ -92,7 +93,7 @@ async function runListFiles(params) {
  *   `allow` 是动作名集合；集合外的动作被拒绝而不是转发。无任何动作可用时调用方
  *   会完全不注册该工具。
  */
-export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia, prompts, recordLog, adminOnly, adminUserId, senderOf }) {
+export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia, prompts, recordLog, adminOnly, adminUserId, senderOf, actionPromptOf }) {
   // 任何带 `tools` 服务的上下文都可用：agent 作用域上下文只为该 agent 注册，
   // 插件自身的上下文则全局注册——后者是复用在线 agent（setup 未跑过）的兜底。
   const tools = agentCtx?.tools ?? agentCtx?.get?.('tools')
@@ -153,6 +154,31 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
       // 本地动作永不到达网关，在进程内执行。
       if (LOCAL_ACTIONS.has(action)) {
         try {
+          // 渐进式披露：系统提示只列动作名 + 中文注释，模型按名字来取这个动作的
+          // 完整说明（功能、每个参数、调用示例）。说明来自工具页的内置文案或运营
+          // 者覆盖，所以「工具」页编辑的内容就是模型最终读到的内容。
+          if (action === 'get_action_doc') {
+            const name = String(params?.name ?? params?.action ?? '').trim()
+            if (name === '') {
+              return { ok: false, error: 'get_action_doc needs params.name: the action whose documentation you want' }
+            }
+            if (!isKnownAction(name)) {
+              return { ok: false, error: 'action "' + name + '" is not offered by this plugin' }
+            }
+            if (allowed !== undefined && !allowed.has(name)) {
+              return { ok: false, error: 'action "' + name + '" is switched off in the OneBot-Mini tools page' }
+            }
+            const doc = typeof actionPromptOf === 'function' ? String(actionPromptOf(name) ?? '').trim() : ''
+            return {
+              ok: true,
+              data: {
+                name,
+                label: actionLabel(name),
+                admin_only: adminOnlySet.has(name),
+                doc: doc !== '' ? doc : actionLabel(name),
+              },
+            }
+          }
           if (action === 'send_message') {
             const chatType = String(params?.chatType ?? env.defaultType ?? '').trim()
             const targetId = String(params?.chatId ?? env.defaultId ?? '').trim()

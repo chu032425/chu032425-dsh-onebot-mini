@@ -94,11 +94,12 @@ export const STANDARD_ACTIONS = Object.freeze(new Set([
  * 在本插件内部实现、不转发给网关的动作。它们共用同一个 `onebot_call` 工具：
  * 工具先把这些名字派给本地处理器，剩下的才落到 OneBot 传输层。
  */
-export const LOCAL_ACTIONS = Object.freeze(new Set(['send_message', 'list_files']))
+export const LOCAL_ACTIONS = Object.freeze(new Set(['get_action_doc', 'send_message', 'list_files']))
 
 /** 面向运营者的分组。这里的顺序就是「工具」页显示的顺序。 */
 export const TOOL_GROUPS = Object.freeze([
   Object.freeze({ id: 'local', actions: Object.freeze([
+    a('get_action_doc', '获取某个动作的详细说明（参数与用法）', 'Get the detailed documentation (parameters and usage) for one action'),
     a('send_message', '发送消息（文字 / 图片 / 语音 / 视频 / 文件；仅文字+图片可同条）', 'Send a message (text, image, voice, video, file; only text+image share one)'),
     a('list_files', '列出本机目录文件', 'List host directory files'),
   ]) }),
@@ -220,17 +221,36 @@ export function isKnownAction(action) {
 }
 
 /**
+ * 按名字找一条目录动作。
+ * @param action - 动作名。
+ * @returns 目录条目；未收录时为 undefined。
+ */
+export function findAction(action) {
+  const name = String(action)
+  for (const group of TOOL_GROUPS) {
+    for (const entry of group.actions) {
+      if (entry.name === name) return entry
+    }
+  }
+  return undefined
+}
+
+/**
  * 一个动作的中文注释。
  * @param action - 动作名。
  * @returns 注释；没有收录时退回动作名本身。
  */
 export function actionLabel(action) {
-  for (const group of TOOL_GROUPS) {
-    for (const entry of group.actions) {
-      if (entry.name === action) return entry.zh
-    }
-  }
-  return String(action)
+  return findAction(action)?.zh ?? String(action)
+}
+
+/**
+ * 一个动作的内置提示词（`actiondocs.js` 生成的默认说明，不含运营者覆盖）。
+ * @param action - 动作名。
+ * @returns 默认提示词；未收录时为空串。
+ */
+export function actionDefaultPrompt(action) {
+  return findAction(action)?.defaultPrompt ?? ''
 }
 
 /**

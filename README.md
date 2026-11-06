@@ -5,6 +5,9 @@
 - QQ 私聊与群聊消息 → dsh 会话：一个聊天一个持久会话，重启自动续；
 - 模型回复 → 通过同一条 WebSocket 发回原聊天；
 - **唯一的 `onebot_call` 工具**：模型只记一个工具，用 `action` + `params` 调任意动作；
+  系统提示只列**动作名 + 中文注释**，详细参数用 `get_action_doc` 按需取；
+- 每个 QQ 会话还会注入一段**身份验证 / 权限 / 隐私规则**（按本插件字段与工具改写，
+  可在「提示词」页整段编辑），并强调回复只留在当前会话；
 - 收到的图片 / 语音 / 视频 / 文件会下载到本地并给出路径，模型能真的打开看；
 - 左侧一个面板，九个标签页：日志、工具、好友与群组、访问控制、空间、个人资料、提示词、缓存、设置。
 
@@ -59,32 +62,36 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 
 设置页按七组排列（连接 / 访问 / 会话 / 媒体 / 回复行为 / 空间 / 诊断）。
 
+> 下表「默认」已按当前部署「设置菜单」里的配置**固化为插件携带默认值**，但**不含
+> 任何密钥或真实 QQ/群号**：`accessToken`、`botQQ`、`adminUserId`、`denyFrom`、
+> `allowFrom`、`allowGroups`、`denyGroups` 一律留空，敏感身份由部署者自行填写。
+
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `mode` | `reverse` | `reverse`=网关拨入；`forward`=插件拨出 |
-| `host` / `port` | `127.0.0.1` / `8643` | 反向监听；跨机部署改 `0.0.0.0` |
+| `host` / `port` | `0.0.0.0` / `8645` | 反向监听；跨机部署用 `0.0.0.0` |
 | `url` | `ws://127.0.0.1:3001` | 正向目标 |
 | `accessToken` | 空 | 反向必填；正向作为 `Authorization: Bearer`。设置页是密码型输入框，带眼睛按钮切换明文/隐藏 |
 | `botQQ` | 空 | 机器人账号；连接后自动识别并回填 |
-| `requireMention` | `true` | 群聊需 @ 机器人才响应（`botQQ` 未知时 fail-closed） |
+| `requireMention` | `false` | 群聊是否需 @ 机器人才响应（`botQQ` 未知时 fail-closed） |
 | `allowFrom` / `allowGroups` | `[]` | 白名单；空=不限制。在「访问控制」页用下拉选 |
-| `denyFrom` / `denyGroups` | `[]` | 黑名单；**优先级高于白名单**，命中的会话一律拒绝 |
-| `adminUserId` | 空 | 管理员 QQ 号（单个）；在「访问控制」页从好友里选一位，留空=不设管理员 |
-| `workspacePath` | **必填** | 会话工作区；被删除时自动重建 |
+| `denyFrom` / `denyGroups` | `[]` | 黑名单；**优先级高于白名单**，命中的会话一律拒绝。默认不携带任何真实 QQ/群号 |
+| `adminUserId` | 空 | 管理员 QQ 号（单个）；在「访问控制」页从好友里选一位，留空=不设管理员。默认不携带 |
+| `workspacePath` | **必填**（默认 `/workspace/QQ`） | 会话工作区；被删除时自动重建 |
 | `agentPreset` | 空 | 会话使用的 agent 预设；留空=部署默认，被删除/损坏时自动回退 |
 | `agentModel` | 空 | 会话使用的模型（`provider::model`）；留空=部署默认 |
-| `sessionPermission` | **必填** | 会话权限预设（沙箱+审批），新建会话时应用 |
-| `compactRatio` | `0.8` | 上下文压缩比例，达到后先压缩再回答；可填 0–1 或百分比，`0`=关闭这条预压缩 |
+| `sessionPermission` | **必填**（默认 `workspace-write`） | 会话权限预设（沙箱+审批），新建会话时应用 |
+| `compactRatio` | `0.2` | 上下文压缩比例，达到后先压缩再回答；可填 0–1 或百分比，`0`=关闭这条预压缩 |
 | `senderPrefix` | `true` | 每条消息加「会话 + 发送者」抬头：群聊 `[群聊 群号 · HH:MM · 发送者 QQ 昵称(角色)]`、私聊 `[私聊 QQ · HH:MM · 发送者 QQ 昵称]`；发送者 QQ 永远在，关掉只去掉昵称/角色/时间 |
 | `sessionPrefix` | `onebot` | 会话 ID 前缀；小写字母开头，只含小写字母/数字/连字符 |
 | `titleEqualsId` | `true` | 会话标题钉成会话 ID |
 | `replyMode` | `stream` | `stream`=每产生一段就发一段；`final`=整轮攒成一条、结束时发送 |
 | `privateAutoInterject` | `true` | 私聊里新消息能否打断正在进行的回答 |
 | `pokeEvents` | `true` | 收到戳一戳是否交给模型回答；关=直接忽略 |
-| `pokeBack` | `false` | 被戳后是否反戳回去（默认关，避免两个机器人互相戳） |
+| `pokeBack` | `true` | 被戳后是否反戳回去（默认关可避免两个机器人互相戳） |
 | `onebotToolEnabled` | `true` | 是否给模型注册 `onebot_call`；关=模型完全看不到它 |
-| `onebotToolDisabled` | `[]` | 被禁用的动作名单（「工具」页勾选；未知动作会被忽略） |
-| `toolAdminOnly` | 敏感动作 | **仅管理员可用**的动作名单（「工具」页每行的「非管理员可用」取消勾选即加入）；缺省给出厂默认，见下文 |
+| `onebotToolDisabled` | `send_private_msg`、`send_group_msg`、`send_msg` | 被禁用的动作名单（「工具」页勾选；未知动作会被忽略） |
+| `toolAdminOnly` | 当前部署清单（61 项） | **仅管理员可用**的动作名单（「工具」页每行的「非管理员可用」取消勾选即加入）；出厂内置敏感动作见下文 |
 | `actionPrompts` | `{}` | 逐动作提示词覆盖；只有改过的动作才记录 |
 | `inboundMedia` | `true` | 是否下载收到的媒体并交给模型读取 |
 | `inboundMediaMaxMb` | `20` | 单个接收媒体的上限（MB） |
@@ -98,9 +105,10 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `logToFile` | `true` | 是否同时写 JSONL 日志文件 |
 | `sendTimeoutMs` | `30000` | 单个动作超时 |
 
-另有十项提示词字段（`channelPrompt`、`replyModeStreamPrompt`、`replyModeFinalPrompt`、
-`adminPrompt`、`senderPrefixPrompt`、`mediaPrompt`、`toolsPrompt`、`inboundPrompt`、
-`toolCallPrompt`、`pokePrompt`），全部在「提示词」页里改，见下文。
+另有九项提示词字段（`channelPrompt`、`securityPrompt`、`replyModeStreamPrompt`、
+`replyModeFinalPrompt`、`adminPrompt`、`senderPrefixPrompt`、`mediaPrompt`、`toolsPrompt`、
+`inboundPrompt`），全部在「提示词」页里改，见下文。`toolCallPrompt`（工具描述）与
+`pokePrompt`（戳一戳）已固定内置、不再单独成项。
 
 ## 收到的媒体
 
@@ -192,18 +200,26 @@ Web 界面里手动改过的设置）：
 
 | 参数 | 说明 |
 |---|---|
-| `action` | 动作名：一个 OneBot 11 动作，或本插件的本地动作（`send_message`、`list_files`） |
+| `action` | 动作名：一个 OneBot 11 动作，或本插件的本地动作（`get_action_doc`、`send_message`、`list_files`） |
 | `params` | 该动作的参数对象 |
 
-动作目录共 **74 个动作 / 9 个分组**（其中 72 个 OneBot 动作、8 个 OneBot 分组，外加 2 个本地动作
+**系统提示里只放「动作名 + 中文注释」。** 模型先据此判断该用哪个动作，再用
+`onebot_call(action="get_action_doc", params={"name":"动作名"})` 取该动作的完整说明
+（功能、每个参数、调用示例），然后才真正调用它。这样提示词不会被上百条参数说明撑爆：
+以前把每个动作的功能/参数/用法都塞进 system prompt（约 1.5 万字符），现在只列名称和
+注释（约 4 千字符），详细说明按需拉取。`get_action_doc` 返回的正是「工具」页里显示、
+可逐个编辑的那份文案（运营者覆盖优先，否则用内置说明），所以改了「工具」页的提示词
+就等于改了模型按需读到的内容。
+
+动作目录共 **78 个动作 / 9 个分组**（其中 75 个 OneBot 动作、8 个 OneBot 分组，外加 3 个本地动作
 单独成组）。「工具」页按分组与单个动作勾选，每行是勾选框 + 中文说明 + 动作 id
 （如 `禁言群成员 / set_group_ban`）+ 「标准 / NapCat 扩展 / 本地」徽章：
 
 | 分组 | 动作数 |
 |---|---|
-| 本地工具（插件自带） | 2 |
+| 本地工具（插件自带） | 3 |
 | 发送消息 | 3 |
-| 媒体与文件 | 4 |
+| 媒体与文件 | 7 |
 | 群管理 | 11 |
 | 查询与信息 | 22 |
 | 互动与消息操作 | 12 |
@@ -213,6 +229,7 @@ Web 界面里手动改过的设置）：
 
 每行下方还有一个**默认折叠的「提示词」**，展开后可查看并修改该动作写给模型的说明——默认内容来自
 `actiondocs.js`，包含该动作的**功能、每个参数（名称/类型/是否必填/含义）和调用示例**。
+这份说明就是模型通过 `get_action_doc` 取到的内容。
 
 规则：
 
@@ -229,12 +246,14 @@ Web 界面里手动改过的设置）：
 
 存储上记录的是「被禁用的动作」列表，所以以后版本新增的动作对老配置默认是启用的。逐动作提示词的
 修改只保存被你改过的那些（`actionPrompts`，动作名 → 文本）；留空或点「恢复默认」即删除该条，
-重新使用 `actiondocs.js` 里的内置说明。这些说明会随频道提示词的 `{actions}` 一起发给模型。
+重新使用 `actiondocs.js` 里的内置说明。这些说明在模型调用 `get_action_doc` 时返回（频道提示词的
+`{actions}` 只列名称与注释，不再把详细文案塞进去）。
 
 工具页顶部有**搜索框**，可按动作名或中文说明过滤。
 
-模型看到的系统提示里会自动列出**当前已启用**的动作，并带上每个动作的功能、参数和用法
-（分组标题 + `动作名：功能…参数…用法…`），所以关掉某个动作后模型根本不会再尝试它。
+模型看到的系统提示里会自动列出**当前已启用**的动作，但只给**动作名 + 中文注释**
+（分组标题 + `动作名：中文注释`）；具体参数与用法由模型用 `get_action_doc` 按需获取。
+关掉某个动作后它根本不在列表里，模型不会再尝试它。
 
 ### 目录里刻意不收的动作
 
@@ -402,20 +421,21 @@ QQ 空间的「修改说说权限 / 设置访问限制」、账号资料的「�
 展示并编辑**所有模型可见的提示词**。页面由一份**提示词注册表**（`prompt.js` 的 `PROMPT_DEFS`）驱动：
 以后代码里新增一处提示词，只要在注册表登记一条，就会自动出现在这个页面上、自动持久化。
 
-当前收录十处：
+当前收录九处：
 
 | 提示词 | 作用 |
 |---|---|
 | 频道提示词 | 注入到每个 QQ 会话 system prompt 的频道说明（含各占位符） |
+| 安全与权限提示词 | 作为独立 system prompt 段落注入每个 QQ 会话：身份验证、权限与隐私规则；已把策略里的抽象字段（actor_qq / actor_role / allowed_actions / allowed_scopes / authorization_verified 等）映射到本插件实际字段（发送者抬头、`adminUserId`、`onebotToolDisabled` / `toolAdminOnly`、`allowFrom` / `denyFrom` / `allowGroups` / `denyGroups`、`workspacePath`）与工具（`onebot_call`），可整段编辑 |
 | 流式回复提示词 | 回复方式为「流式」时，展开到 `{replyMode}` 的那句 |
 | 完成时回复提示词 | 回复方式为「任务完成一次发送」时，展开到 `{replyMode}` 的那句 |
 | 管理员提示词 | 设置管理员后展开到 `{admin}`；`{adminId}` 替换成管理员 QQ 号，未设置则不注入 |
 | 发言人前缀提示词 | 开启「会话 + 发送者抬头」时展开到 `{senderPrefix}` |
 | 媒体发送提示词 | 工具启用时展开到 `{media}`，告诉模型怎么发图/语音/视频/文件 |
-| 工具清单提示词 | 工具启用时展开到 `{tools}`：工具总览、硬规则与调用说明；具体动作列表自动接在后面 |
+| 工具清单提示词 | 工具启用时展开到 `{tools}`：工具总览、硬规则，以及「只列动作名+注释、用 `get_action_doc` 取详细说明」的渐进式披露说明；动作列表自动接在后面 |
 | 收到的媒体提示词 | 告诉模型收到的媒体已存到本机、如何读取（关闭接收媒体时不注入） |
-| onebot_call 工具描述 | 模型决定是否调 `onebot_call` 时读到的说明 |
-| 戳一戳提示词 | 收到戳一戳时展开到 `{poke}`：说明这类事件没有正文、应当用文字回应（`pokeEvents` 关闭时不注入） |
+
+> `onebot_call` 工具描述与戳一戳文案是**固定内置**、不再单独占一项：前者就是注册到工具上的 `description`（详细规则在「工具清单提示词」里），后者随频道提示词的 `{poke}` 占位符展开（`pokeEvents` 关闭时为空）。
 
 频道提示词的占位符：
 
@@ -425,10 +445,10 @@ QQ 空间的「修改说说权限 / 设置访问限制」、账号资料的「�
 | `{admin}` | 管理员身份说明（未设置管理员时为空） |
 | `{senderPrefix}` | 「会话 + 发送者抬头」的说明（关闭时为空） |
 | `{media}` | 媒体发送说明（工具关闭时为空） |
-| `{tools}` | 工具说明（唯一的 `onebot_call`，含本地动作 `send_message` / `list_files`）与「QQ 相关操作只能用这个工具」的硬规则（工具关闭时为空） |
+| `{tools}` | 工具说明（唯一的 `onebot_call`，含本地动作 `get_action_doc` / `send_message` / `list_files`）与「QQ 相关操作只能用这个工具」的硬规则（工具关闭时为空） |
 | `{inbound}` | 收到的媒体说明（`inboundMedia` 关闭时为空） |
 | `{poke}` | 戳一戳说明（`pokeEvents` 关闭时为空） |
-| `{actions}` | 当前**已启用**的动作列表（工具关闭时换成「工具已关闭」提示） |
+| `{actions}` | 当前**已启用**的动作列表——只列**动作名 + 中文注释**，并提示先用 `get_action_doc` 取详细参数（工具关闭时换成「工具已关闭」提示） |
 
 - 其它文字都可以自由改，改完点「保存提示词」；「恢复默认」一键还原；
 - 留空保存也会回到默认（避免误删导致模型失去频道说明）；
@@ -517,7 +537,7 @@ QQ 空间的「修改说说权限 / 设置访问限制」、账号资料的「�
 | `path` | DSH 本机文件路径；插件读取后**内联为 base64**，网关不需要访问本机文件 |
 | `url` | 网关能访问到的 http(s) 地址 |
 | `base64` | 原始 base64（不带 `data:` 前缀） |
-| `chatType` / `chatId` | 省略则用当前会话 |
+| `chatType` / `chatId` | 保留字段：请勿填写；消息始终发到当前会话（插件不允许跨会话发送） |
 
 单次上限 20 MB。同样有一条 `POST /onebot-mini/api/send-media` 接口供页面/脚本调用。
 
@@ -571,8 +591,8 @@ QQ 空间的「修改说说权限 / 设置访问限制」、账号资料的「�
 | `bridge.js` | 聊天 ↔ 会话的桥：门禁、投递、回复、回合生命周期 |
 | `message.js` | 构造插件发起的用户消息 |
 | `toolcatalog.js` | 动作白名单与分组（工具页数据源） |
-| `actiondocs.js` | 每个动作的结构化说明（提示词数据源） |
-| `tools.js` | 唯一的 `onebot_call` 工具 |
+| `actiondocs.js` | 每个动作的结构化说明（`get_action_doc` 与「工具」页的数据源） |
+| `tools.js` | 唯一的 `onebot_call` 工具（含本地动作 `get_action_doc` / `send_message` / `list_files`） |
 | `prompt.js` | 提示词注册表与渲染 |
 | `config.js` | 配置存储与校验 |
 | `media.js` | 出站媒体：段构造、`send_msg` 包装、回复标记 |

@@ -327,6 +327,11 @@ export const ACTION_DOCS = Object.freeze({
     params: [P('profile', 'object', true, '要修改的 QQ 空间资料对象（昵称、签名等）')],
   },
   // --- 本地工具（包装标准动作，不直接转发网关） ---
+  get_action_doc: {
+    params: [P('name', 'string', true, '要查看详细说明的动作名，如 set_group_ban')],
+    summary: '获取指定动作的详细说明（功能、每个参数与调用示例）',
+    note: '系统提示里只列动作名和中文注释，所以要调用某个动作前先用它查清参数与用法；只对已启用的动作返回说明。',
+  },
   send_message: {
     params: [
       P('text', 'string', false, '要发送的文字。只有图片能和文字合成一条消息；语音/视频/文件必须单独发'),
@@ -335,8 +340,8 @@ export const ACTION_DOCS = Object.freeze({
       P('url', 'string', false, '可直接下载的媒体 http(s) 链接（与 path / base64 三选一）'),
       P('base64', 'string', false, '原始 base64 媒体内容（不带 data: 前缀，与 path / url 三选一）'),
       P('name', 'string', false, '显示的文件名，仅 kind="file" 时使用'),
-      P('chatType', 'enum', false, '"private" 私聊 或 "group" 群聊；省略则用当前会话'),
-      P('chatId', 'string', false, '目标 QQ 号或群号；省略则用当前会话'),
+      P('chatType', 'enum', false, '保留字段：请勿填写，消息始终发到当前会话'),
+      P('chatId', 'string', false, '保留字段：请勿填写，消息始终发到当前会话'),
     ],
     summary: '向 QQ 会话发送一条消息，支持六种组合：纯文字、纯图片、文字+图片、纯语音、纯视频、纯文件',
     note: '六种组合：'
@@ -347,7 +352,7 @@ export const ACTION_DOCS = Object.freeze({
       + '⑤纯视频 params={"kind":"video","path":"/绝对/路径.mp4"}；'
       + '⑥纯文件 params={"kind":"file","path":"/绝对/路径.zip","name":"显示名.zip"}。'
       + '只有图片可以与文字同条发送：语音、视频、文件不能带 text，需要说明时先发文字再发媒体，分成两条。'
-      + '要发到其他会话时，任意组合再加 "chatType":"group","chatId":"群号"。'
+      + '只能在当前会话发送：不要填 chatType / chatId 指向别的群或好友。'
       + 'text 与 kind 至少给一个；kind 填了就还要给 path / url / base64 之一。'
       + '发本地文件前先用 list_files 确认文件名。',
   },

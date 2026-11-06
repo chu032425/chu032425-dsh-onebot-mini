@@ -16,8 +16,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { TOOL_GROUPS, isKnownAction, DEFAULT_ADMIN_ONLY } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, LEGACY_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_INBOUND_PROMPT, DEFAULT_POKE_PROMPT, PROMPT_DEFS } from './prompt.js'
+import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, LEGACY_CHANNEL_PROMPT_V3, DEFAULT_SECURITY_PROMPT, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, LEGACY_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, LEGACY_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, LEGACY_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, LEGACY_TOOLS_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** DSH 主目录：先看 `$DSH_HOME`，再看 `~/.dsh`。 */
 export function dshHome() {
@@ -43,37 +43,73 @@ export function logPath() {
   return configPath().replace(/onebot-mini\.json$/, 'onebot-mini.log.jsonl')
 }
 
-/** 每个可接受的字段及其默认值，唯一权威来源。 */
+/**
+ * 当前部署固化的「仅管理员可用」动作清单（由设置菜单导出，作为插件携带默认值）。
+ *
+ * 出厂的内置敏感动作集合见 `toolcatalog.js` 的 `DEFAULT_ADMIN_ONLY`（仍作为
+ * `computeAdminOnly` 在字段缺失时的兜底）；这里记录运营者实际启用的一整套范围。
+ * 注意：这是一份运营者定制清单，不是通用安全默认。
+ */
+const CARRIED_TOOL_ADMIN_ONLY = Object.freeze([
+  'set_group_ban', 'set_group_kick', 'set_group_whole_ban', 'set_group_card',
+  'set_group_name', 'set_group_leave', 'set_group_special_title', 'set_group_remark',
+  'set_group_portrait', '_send_group_notice', '_del_group_notice', 'delete_msg',
+  'send_msg', 'send_group_msg', 'send_private_msg', 'get_login_info', 'get_status',
+  'get_version_info', 'can_send_image', 'can_send_record', 'get_friend_list',
+  'get_friends_with_category', 'get_unidirectional_friend_list', 'get_group_list',
+  'get_group_info', 'get_group_detail_info', 'get_group_share_link',
+  'get_group_member_list', 'get_group_member_info', 'get_group_shut_list',
+  'get_group_honor_info', 'get_group_at_all_remain', 'get_group_system_msg',
+  'get_essence_msg_list', '_get_group_notice', 'get_stranger_info',
+  'nc_get_user_status', 'send_like', '_mark_all_as_read', 'get_group_msg_history',
+  'get_friend_msg_history', 'set_friend_add_request', 'set_group_add_request',
+  'set_friend_remark', 'set_self_longnick', 'set_qq_profile', 'set_qq_avatar',
+  'set_online_status', 'set_input_status', 'send_qzone_msg', 'delete_qzone_msg',
+  'get_qzone_msg_list', 'get_qzone_msg_detail', 'get_qzone_feeds', 'comment_qzone',
+  'like_qzone', 'unlike_qzone', 'get_qzone_comment_list', 'get_qzone_comment_replies',
+  'get_qzone_profile', 'set_qzone_profile',
+])
+
+/**
+ * 每个可接受的字段及其默认值，唯一权威来源。
+ *
+ * 下面这些默认值已按当前部署「设置菜单」里的配置固化，但**不含任何密钥或真实
+ * QQ/群号**：`accessToken`、`botQQ` 保持为空；`adminUserId`、`denyFrom`、
+ * `allowFrom`、`allowGroups`、`denyGroups` 一律留空，敏感身份由部署者自行填写。
+ * 这样源码/仓库里不会带出任何真实账号信息。
+ */
 export const DEFAULTS = Object.freeze({
   mode: 'reverse',
-  host: '127.0.0.1',
-  port: 8643,
+  host: '0.0.0.0',
+  port: 8645,
   url: 'ws://127.0.0.1:3001',
   accessToken: '',
   botQQ: '',
-  requireMention: true,
+  requireMention: false,
   allowFrom: [],
+  // 不携带任何真实 QQ / 群号：这些属于敏感信息，交付时留空，由部署者自行在
+  // 「访问控制」页填写。
   denyFrom: [],
   allowGroups: [],
   denyGroups: [],
   // 唯一的机器人管理员账号：在「访问控制」页从好友列表里挑一个 QQ 号。
   // 留空表示没设管理员。
   adminUserId: '',
-  workspacePath: '',
+  workspacePath: '/workspace/QQ',
   agentPreset: '',
   senderPrefix: true,
   sessionPrefix: 'onebot',
-  sessionPermission: '',
+  sessionPermission: 'workspace-write',
   agentModel: '',
   // 回答前的上下文压缩：当最近一次测得的占用（已用 token / 上下文窗口）达到这个
   // 比例时，先压缩会话再投递新消息。0 关闭这条预检查（Harness 自带的自动压缩
   // 仍然有效）；大于 1 的值按百分比理解（80 → 0.8）。
-  compactRatio: 0.8,
+  compactRatio: 0.2,
   onebotToolEnabled: true,
-  onebotToolDisabled: [],
-  // 「仅管理员可用」的动作集合（出厂默认给敏感动作，见 DEFAULT_ADMIN_ONLY）。
+  onebotToolDisabled: ['send_private_msg', 'send_group_msg', 'send_msg'],
+  // 「仅管理员可用」的动作集合：当前部署固化的整套清单（见 CARRIED_TOOL_ADMIN_ONLY）。
   // 工具页每一行都有「非管理员可用」开关，取消勾选即加入这里。
-  toolAdminOnly: [...DEFAULT_ADMIN_ONLY],
+  toolAdminOnly: [...CARRIED_TOOL_ADMIN_ONLY],
   // 「工具」页的逐动作提示词覆盖，按动作名索引。只保存运营者真正改过的动作；
   // 缺失或留空表示「用 actiondocs.js 里的内置说明」。刻意不出现在设置页：
   // 它在「工具」页里改。
@@ -88,8 +124,9 @@ export const DEFAULTS = Object.freeze({
   privateAutoInterject: true,
   // 收到戳一戳是否交给模型回答。默认开启；关掉后戳一戳事件直接忽略。
   pokeEvents: true,
-  // 被戳一戳后是否反戳回去。默认关闭：两个机器人都打开会互相戳个没完。
-  pokeBack: false,
+  // 被戳一戳后是否反戳回去。当前部署默认开启（两个机器人都打开会互相戳个没完，
+  // 单机器人自用可接受）。
+  pokeBack: true,
   // 助手的回答怎么到达聊天：
   //  - stream（默认）：每产生一条助手消息就立刻发出去；
   //  - final：把每个文本块攒起来，回合结束时发一条 QQ 消息（多步回合不会刷屏）。
@@ -103,6 +140,7 @@ export const DEFAULTS = Object.freeze({
   // 开关。
   deleteInboundMedia: true,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
+  securityPrompt: DEFAULT_SECURITY_PROMPT,
   replyModeStreamPrompt: DEFAULT_REPLY_MODE_STREAM_PROMPT,
   replyModeFinalPrompt: DEFAULT_REPLY_MODE_FINAL_PROMPT,
   adminPrompt: DEFAULT_ADMIN_PROMPT,
@@ -110,8 +148,6 @@ export const DEFAULTS = Object.freeze({
   mediaPrompt: DEFAULT_MEDIA_PROMPT,
   toolsPrompt: DEFAULT_TOOLS_PROMPT,
   inboundPrompt: DEFAULT_INBOUND_PROMPT,
-  toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
-  pokePrompt: DEFAULT_POKE_PROMPT,
   imageCacheMaxKb: 1024,
   imageCacheTotalMb: 100,
   imageShowMaxMb: 32,
@@ -152,6 +188,7 @@ export const FIELD_KINDS = Object.freeze({
   inboundMediaMaxMb: 'number',
   deleteInboundMedia: 'boolean',
   channelPrompt: 'text',
+  securityPrompt: 'text',
   replyModeStreamPrompt: 'text',
   replyModeFinalPrompt: 'text',
   adminPrompt: 'text',
@@ -159,8 +196,6 @@ export const FIELD_KINDS = Object.freeze({
   mediaPrompt: 'text',
   toolsPrompt: 'text',
   inboundPrompt: 'text',
-  toolCallPrompt: 'text',
-  pokePrompt: 'text',
   privateAutoInterject: 'boolean',
   pokeEvents: 'boolean',
   pokeBack: 'boolean',
@@ -306,8 +341,25 @@ export function normalizeConfig(raw) {
 
   // 仍等于旧版出厂默认的频道提示词会升级到当前版本：v1 把回复那句写死了，v2 有了
   // `{replyMode}` 但还没有 `{admin}`。运营者改过的提示词绝不动。
-  if (value.channelPrompt === LEGACY_CHANNEL_PROMPT || value.channelPrompt === LEGACY_CHANNEL_PROMPT_V2) {
+  if (value.channelPrompt === LEGACY_CHANNEL_PROMPT || value.channelPrompt === LEGACY_CHANNEL_PROMPT_V2 || value.channelPrompt === LEGACY_CHANNEL_PROMPT_V3) {
     value.channelPrompt = DEFAULT_CHANNEL_PROMPT
+  }
+
+  // 旧版工具清单把所有动作说明都塞进系统提示，且没提 get_action_doc。仍等于旧默认
+  // 的升级到新默认（改为「只列名称+注释、按需取详细说明」的渐进式披露）；运营者
+  // 改过的工具清单保持原样。
+  if (value.toolsPrompt === LEGACY_TOOLS_PROMPT) {
+    value.toolsPrompt = DEFAULT_TOOLS_PROMPT
+  }
+
+  // 旧版管理员段落把管理员指令当成最高优先；升级为「管理员也受平台安全规则约束」。
+  if (value.adminPrompt === LEGACY_ADMIN_PROMPT) {
+    value.adminPrompt = DEFAULT_ADMIN_PROMPT
+  }
+
+  // 旧版媒体段落暗示可以发到别的会话；升级为「只在当前会话发送」。
+  if (value.mediaPrompt === LEGACY_MEDIA_PROMPT) {
+    value.mediaPrompt = DEFAULT_MEDIA_PROMPT
   }
 
   // 旧版发言人前缀说明只提「[HH:MM 昵称(QQ)]」，而抬头现在同时解析出会话和

@@ -10,8 +10,8 @@
 
 import { mkdir, stat } from 'node:fs/promises'
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
-import { computeAllowlist, computeAdminOnly, enabledGroups, GROUP_LABELS } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, pokeParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { computeAllowlist, computeAdminOnly, enabledGroups, GROUP_LABELS, actionDefaultPrompt } from './toolcatalog.js'
+import { DEFAULT_CHANNEL_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, pokeParagraph, securityParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes, unescapeCq } from './inbound.js'
 import { buildReplySegments, groupReplySegments, safeUnlink } from './media.js'
 
@@ -1047,8 +1047,19 @@ export class ChatBridge {
       adminOnly: computeAdminOnly(this.config),
       adminUserId: this.config.adminUserId,
       senderOf: () => this.turnSender.get(chatId) ?? '',
+      // 模型用 get_action_doc 取某个动作的完整说明时，返回「工具」页里显示的那份
+      // 文案：运营者覆盖过就用覆盖，否则用 actiondocs.js 生成的内置说明。
+      actionPromptOf: (name) => {
+        const overrides = this.config?.actionPrompts !== null && typeof this.config?.actionPrompts === 'object' && !Array.isArray(this.config.actionPrompts)
+          ? this.config.actionPrompts
+          : {}
+        const override = overrides[name]
+        if (typeof override === 'string' && override.trim() !== '') return override.trim()
+        return actionDefaultPrompt(name)
+      },
       prompts: {
-        call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
+        // 工具描述固定内置（不再单独占提示词页的一项）；详细规则在 {tools} 里。
+        call: renderToolCallPrompt(undefined, allow),
       },
       recordLog: chatId === ''
         ? (note) => this.log.record('bridge', { note })
@@ -1109,6 +1120,13 @@ export class ChatBridge {
         name: 'channel:dsh-onebot-mini',
         order: 90,
         text: buildPlatformPrompt(this.config),
+      })
+      // 安全/权限/隐私规则单独成段：与是否启用工具无关，始终注入，且可在「提示词」
+      // 页整段改写。它把通用的 QQ 助手安全策略按本插件的真实字段与工具做了映射。
+      agentCtx.systemPrompt.section({
+        name: 'channel:dsh-onebot-mini:security',
+        order: 91,
+        text: buildSecurityPrompt(this.config),
       })
       const registry = typeof this.getAgentPresets === 'function' ? this.getAgentPresets() : undefined
       if (registry === undefined) return
@@ -1342,29 +1360,35 @@ export function buildPlatformPrompt(config) {
   } else {
     media = mediaParagraph(config?.mediaPrompt)
     tools = toolsParagraph(allow, config?.toolsPrompt)
-    const overrides = config?.actionPrompts !== null && typeof config?.actionPrompts === 'object' && !Array.isArray(config.actionPrompts)
-      ? config.actionPrompts
-      : {}
-    const lines = []
-    // 只宣告运营方真正留下的 action，并附上各自的提示词（内置文档或运营方覆
-    // 盖），模型因此不会把回合浪费在一个会被拒的动作上，也知道参数。
+    // 渐进式披露：系统提示只列「动作名 + 中文注释」，让模型自己判断该用哪个；
+    // 选定后再用 get_action_doc 取该动作的完整参数与用法（那份详细说明保存在
+    // 「工具」页，可逐个编辑）。这样提示词不会被上百条参数说明撑爆。
+    const lines = [
+      '## 可用动作（只列动作名与中文注释）',
+      '要调用某个动作前，先用 onebot_call(action="get_action_doc", params={"name":"动作名"}) 取它的详细说明（功能、每个参数与用法），再按说明调用；没取说明前不要臆测参数。',
+    ]
     for (const group of enabledGroups(allow)) {
       lines.push('【' + (GROUP_LABELS[group.id] ?? group.id) + '】')
       for (const action of group.actions) {
-        const override = overrides[action.name]
-        const body = (typeof override === 'string' && override.trim() !== '')
-          ? override.trim()
-          : action.defaultPrompt
         // 标出「仅管理员可用」，模型就不会把回合浪费在一个注定被拒的动作上。
         const guard = adminOnly.has(action.name) ? '（仅管理员可用）' : ''
-        lines.push('- ' + action.name + guard + '：' + String(body ?? '').replace(/\s*\n+\s*/g, ' '))
+        lines.push('- ' + action.name + guard + '：' + String(action.zh ?? ''))
       }
     }
     actions = lines.join('\n')
   }
 
   // 戳一戳段落跟着「是否接收戳一戳」走：关掉后整段从提示词里消失。
-  const poke = pokeParagraph(config?.pokeEvents !== false, config?.pokePrompt)
+  // 文案已合并进频道提示词的 {poke} 占位符（固定内置，不再单独成项）。
+  const poke = pokeParagraph(config?.pokeEvents !== false)
 
   return renderPrompt(template, { replyMode, admin, senderPrefix, media, tools, actions, inbound, poke })
+}
+
+/** 注入每个 QQ 会话的「身份验证 / 权限 / 隐私」规则段落（与是否启用工具无关）。
+ * @param config - 生效配置。
+ * @returns 规则文本。
+ */
+export function buildSecurityPrompt(config) {
+  return securityParagraph(config?.securityPrompt)
 }

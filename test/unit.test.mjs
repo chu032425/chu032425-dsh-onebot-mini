@@ -7,11 +7,11 @@ import { join as pathJoin } from 'node:path'
 import { existsSync as readFileSyncExists } from 'node:fs'
 import { acceptKey, takeFrame, encodeText, encodeControl } from '../wire.js'
 import { normalizeConfig, ConfigStore, DEFAULTS, MODE_FIELDS, FIELD_GROUPS, FIELD_KINDS } from '../config.js'
-import { TOOL_GROUPS, ALL_ACTIONS, STANDARD_ACTIONS, isKnownAction, computeAllowlist, computeAdminOnly, DEFAULT_ADMIN_ONLY, actionLabel, enabledGroups } from '../toolcatalog.js'
+import { TOOL_GROUPS, ALL_ACTIONS, STANDARD_ACTIONS, isKnownAction, computeAllowlist, computeAdminOnly, DEFAULT_ADMIN_ONLY, actionLabel, actionDefaultPrompt, enabledGroups } from '../toolcatalog.js'
 import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage,
-  isAddressed, chatHeader, textOfMessage, buildPlatformPrompt,
+  isAddressed, chatHeader, textOfMessage, buildPlatformPrompt, buildSecurityPrompt,
   ratioReached, ChatBridge, isPoke, pokeTarget, pokeText,
   messageSegments, isContentlessMessage,
 } from '../bridge.js'
@@ -68,20 +68,31 @@ t('an unknown reply mode falls back to stream', normalizeConfig({ replyMode: 'bu
 t('a non-string reply mode falls back to stream', normalizeConfig({ replyMode: 3 }).value.replyMode === 'stream')
 
 // 管理员是单个 QQ 号，存放在访问控制页
-t('admin user id defaults to empty', DEFAULTS.adminUserId === '')
+t('the shipped default does not bake an admin QQ', DEFAULTS.adminUserId === '')
 t('admin user id is a string field', FIELD_KINDS.adminUserId === 'string')
 t('admin user id is trimmed', normalizeConfig({ adminUserId: ' 12345 ' }).value.adminUserId === '12345')
 t('a numeric admin id is stored as a string', normalizeConfig({ adminUserId: 12345 }).value.adminUserId === '12345')
 t('a non-numeric admin id is dropped', normalizeConfig({ adminUserId: 'abc' }).value.adminUserId === '')
 t('admin user id is not on the settings groups', !FIELD_GROUPS.some((group) => group.fields.includes('adminUserId')))
 
+// 当前部署「设置菜单」固化为插件携带默认值（密钥与机器人账号除外）
+t('the carried connection defaults', DEFAULTS.host === '0.0.0.0' && DEFAULTS.port === 8645)
+t('the carried access defaults', DEFAULTS.requireMention === false && DEFAULTS.denyFrom.length === 0 && DEFAULTS.adminUserId === '')
+t('the carried session defaults', DEFAULTS.workspacePath === '/workspace/QQ' && DEFAULTS.sessionPermission === 'workspace-write')
+t('the carried tool defaults', DEFAULTS.onebotToolDisabled.join(',') === 'send_private_msg,send_group_msg,send_msg'
+  && DEFAULTS.toolAdminOnly.includes('set_group_ban') && !DEFAULTS.toolAdminOnly.includes('send_message'))
+t('secrets, identity and QQ lists stay empty in the shipped defaults', DEFAULTS.accessToken === '' && DEFAULTS.botQQ === ''
+  && DEFAULTS.adminUserId === '' && DEFAULTS.denyFrom.length === 0 && DEFAULTS.denyGroups.length === 0
+  && DEFAULTS.allowFrom.length === 0 && DEFAULTS.allowGroups.length === 0)
+t('the carried poke default', DEFAULTS.pokeBack === true)
+
 // 上下文压缩比例：0-1（也可用百分数），0 表示回复前不检查
-t('compact ratio defaults to 0.8', DEFAULTS.compactRatio === 0.8)
+t('compact ratio defaults to 0.2', DEFAULTS.compactRatio === 0.2)
 t('compact ratio is on the session settings group', FIELD_GROUPS.find((group) => group.id === 'session').fields.includes('compactRatio'))
 t('a fraction compact ratio is kept', normalizeConfig({ compactRatio: 0.5 }).value.compactRatio === 0.5)
 t('a percentage compact ratio becomes a fraction', normalizeConfig({ compactRatio: 80 }).value.compactRatio === 0.8)
 t('zero disables the pre-reply check', normalizeConfig({ compactRatio: 0 }).value.compactRatio === 0)
-t('an out-of-range compact ratio falls back', normalizeConfig({ compactRatio: 200 }).value.compactRatio === 0.8)
+t('an out-of-range compact ratio falls back', normalizeConfig({ compactRatio: 200 }).value.compactRatio === DEFAULTS.compactRatio)
 t('ratioReached compares consumed over window', ratioReached(0.8, 800, 1000) === true && ratioReached(0.8, 799, 1000) === false)
 t('ratioReached is false when disabled or unmeasured', ratioReached(0, 999, 1000) === false && ratioReached(0.8, undefined, 1000) === false && ratioReached(0.8, 800, 0) === false)
 
@@ -170,7 +181,7 @@ t('forward view omits host and port', !forwardVisible.includes('host') && !forwa
 const path = '/tmp/onebot-mini-unit.json'
 rmSync(path, { force: true })
 const store = new ConfigStore(path)
-t('absent file yields defaults', store.read().port === 8643)
+t('absent file yields defaults', store.read().port === DEFAULTS.port)
 const wrote = await store.write({ mode: 'forward', accessToken: 'tk', port: 9999, workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write' })
 t('valid write succeeds', wrote.ok === true, JSON.stringify(wrote.problems))
 t('write reaches disk', JSON.parse(readFileSync(path, 'utf8')).port === 9999)
@@ -179,7 +190,7 @@ t('snapshot returns the real token', snap.config.accessToken === 'tk')
 t('snapshot marks the token field as secret', snap.secretFields.includes('accessToken'))
 writeFileSync(path, 'not json', 'utf8')
 const corrupt = new ConfigStore(path)
-t('corrupt file degrades to defaults', corrupt.read().port === 8643)
+t('corrupt file degrades to defaults', corrupt.read().port === DEFAULTS.port)
 t('invalid write is refused', (await corrupt.write({ port: 0 })).ok === false)
 t('write without a workspace is refused', (await new ConfigStore('/tmp/onebot-mini-nw.json').write({ mode: 'forward', accessToken: 'tk', workspacePath: '', sessionPermission: 'workspace-write' })).ok === false)
 
@@ -311,9 +322,10 @@ t('a valid action prompt override is kept', promptNorm.send_group_msg === '自�
 t('unknown, blank and non-string prompt overrides are dropped', !('bogus_action' in promptNorm) && !('get_login_info' in promptNorm) && !('send_private_msg' in promptNorm))
 t('the default action override map is empty', JSON.stringify(DEFAULTS.actionPrompts) === '{}')
 {
-  const overridden = buildPlatformPrompt({ ...DEFAULTS, actionPrompts: { send_group_msg: '只发纯文本，禁止 CQ 码。' } })
-  t('an action prompt override replaces the built-in text', overridden.includes('send_group_msg：只发纯文本，禁止 CQ 码。'))
-  t('an untouched action keeps its built-in text', overridden.includes('send_private_msg：功能：发送私聊消息'))
+  const overridden = buildPlatformPrompt({ ...DEFAULTS, onebotToolDisabled: [], toolAdminOnly: [], actionPrompts: { send_group_msg: '只发纯文本，禁止 CQ 码。' } })
+  t('the channel prompt lists an action by name + annotation, not its override detail', overridden.includes('send_group_msg：发送群消息') && !overridden.includes('只发纯文本，禁止 CQ 码。'))
+  t('the channel prompt points the model at get_action_doc', overridden.includes('get_action_doc') && overridden.includes('params={"name":"动作名"}'))
+  t('the channel prompt no longer dumps parameter blocks', !overridden.includes('group_id（数字，必填）') && !overridden.includes('用法：onebot_call(action="send_group_msg"'))
 }
 t('unknown action is not in the catalog', isKnownAction('definitely_not_real') === false)
 t('a missing config enables every action', computeAllowlist({})?.size === ALL_ACTIONS.length)
@@ -428,7 +440,7 @@ const dirPath = await safeUnlink('/tmp')
 t('the tmp root itself is refused', dirPath.ok === false)
 
 // --- 可编辑的通道提示词
-import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, replyModeParagraph, adminParagraph, renderPrompt, PROMPT_PLACEHOLDERS, PROMPT_DEFS, renderToolCallPrompt } from '../prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, LEGACY_CHANNEL_PROMPT_V3, DEFAULT_SECURITY_PROMPT, DEFAULT_ADMIN_PROMPT, LEGACY_ADMIN_PROMPT, DEFAULT_MEDIA_PROMPT, LEGACY_MEDIA_PROMPT, replyModeParagraph, adminParagraph, securityParagraph, renderPrompt, PROMPT_PLACEHOLDERS, PROMPT_DEFS, renderToolCallPrompt } from '../prompt.js'
 t('the default prompt documents its placeholders', PROMPT_PLACEHOLDERS.every((p) => DEFAULT_CHANNEL_PROMPT.includes(p)))
 t('renderPrompt fills a placeholder', renderPrompt('x {actions} y', { actions: 'Z' }).includes('x Z y'))
 t('renderPrompt drops an empty placeholder line', !renderPrompt('a\n{media}\nb', { media: '' }).includes('{media}'))
@@ -442,32 +454,50 @@ t('the default build prompts streaming', buildPlatformPrompt(DEFAULTS).includes(
 t('an explicit final mode prompts one message', buildPlatformPrompt({ ...DEFAULTS, replyMode: 'final' }).includes('只产生一条'))
 t('the old shipped prompt is migrated to the new placeholder', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
 t('the replyMode-only prompt is migrated too', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT_V2 }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
+t('the admin-if-not-poke prompt is migrated too', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT_V3 }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
+t('the migrated channel prompt injects the built-in poke guidance', buildPlatformPrompt(normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT_V3 }).value).includes('## 戳一戳'))
 t('an edited prompt is not migrated', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT + ' (edited)' }).value.channelPrompt.endsWith('(edited)'))
 // 管理员身份注入到模型提示词
 t('the default channel prompt carries the admin placeholder', DEFAULT_CHANNEL_PROMPT.includes('{admin}'))
 t('no admin paragraph when unset', adminParagraph('') === '')
 t('the admin paragraph names the admin QQ', adminParagraph('12345').includes('12345') && adminParagraph('12345').includes('优先'))
 t('the build injects the admin QQ', buildPlatformPrompt({ ...DEFAULTS, adminUserId: '12345' }).includes('管理员是 QQ 12345'))
-t('no admin line without an administrator', !buildPlatformPrompt(DEFAULTS).includes('管理员是 QQ'))
+t('no admin line without an administrator', !buildPlatformPrompt({ ...DEFAULTS, adminUserId: '' }).includes('管理员是 QQ'))
 t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
 t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
-t('the prompt registry covers channel, reply mode, admin, prefix, media, tools, actions, inbound, the tool call and pokes',
-  PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,replyModeStreamPrompt,replyModeFinalPrompt,adminPrompt,senderPrefixPrompt,mediaPrompt,toolsPrompt,inboundPrompt,toolCallPrompt,pokePrompt')
+t('the prompt registry covers channel, security, reply mode, admin, prefix, media, tools and inbound (tool call and poke are built-in)',
+  PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,securityPrompt,replyModeStreamPrompt,replyModeFinalPrompt,adminPrompt,senderPrefixPrompt,mediaPrompt,toolsPrompt,inboundPrompt')
+t('tool-call and poke text are built-in, not separate prompt entries', !PROMPT_DEFS.some((d) => d.field === 'toolCallPrompt' || d.field === 'pokePrompt'))
 t('every registered prompt has a config default', PROMPT_DEFS.every((d) => typeof DEFAULTS[d.field] === 'string' && DEFAULTS[d.field] !== ''))
 t('every registered prompt has a label key', PROMPT_DEFS.every((d) => typeof d.labelKey === 'string' && d.labelKey !== ''))
-const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', mediaPrompt: '' }).value
+const blankAll = normalizeConfig({ channelPrompt: '', mediaPrompt: '' }).value
 t('every blank prompt returns to its default', PROMPT_DEFS.every((d) => blankAll[d.field] === DEFAULTS[d.field]))
 t('the tool-call prompt adds the enabled note when actions are allowed', renderToolCallPrompt('X {enabledNote}', new Set(['a'])).includes('仅接受在 OneBot-Mini 设置中已启用的动作'))
 t('the tool-call prompt drops the note when the tool is off', !renderToolCallPrompt('X {enabledNote}', null).includes('仅接受'))
 t('the tool-call prompt falls back when empty', renderToolCallPrompt('', null).startsWith('执行一个动作'))
 t('the tool-call prompt no longer mentions a gateway', !/网关|NapCat/.test(renderToolCallPrompt('', null)))
+// 安全/权限/隐私规则：按本插件真实字段与工具改写，可编辑并可迁移
+{
+  const sec = securityParagraph()
+  t('the security prompt maps the policy to OneBot-Mini fields',
+    sec.includes('actor_qq') && sec.includes('adminUserId') && sec.includes('onebotToolDisabled') && sec.includes('allowFrom') && sec.includes('denyGroups') && sec.includes('onebot_call'))
+  t('the security prompt states current-session-only replies', sec.includes('只在当前会话回复') && sec.includes('chatType / chatId'))
+  t('the security prompt says group owner/admin is not bot admin', sec.includes('群主/群管理员不等于机器人管理员'))
+  t('buildSecurityPrompt injects the security text', buildSecurityPrompt({ ...DEFAULTS }).includes('身份验证'))
+  t('a blank security prompt falls back to the default', normalizeConfig({ securityPrompt: '   ' }).value.securityPrompt === DEFAULT_SECURITY_PROMPT)
+  t('an edited security prompt is kept', normalizeConfig({ securityPrompt: '自定义规则' }).value.securityPrompt === '自定义规则')
+  t('the legacy admin prompt is migrated to the safer default', normalizeConfig({ adminPrompt: LEGACY_ADMIN_PROMPT }).value.adminPrompt === DEFAULT_ADMIN_PROMPT)
+  t('the legacy media prompt is migrated to current-session-only', normalizeConfig({ mediaPrompt: LEGACY_MEDIA_PROMPT }).value.mediaPrompt === DEFAULT_MEDIA_PROMPT && DEFAULT_MEDIA_PROMPT.includes('只能在当前会话发送'))
+  t('admins are told they cannot override platform rules', DEFAULT_ADMIN_PROMPT.includes('不能绕过平台安全规则'))
+}
 // 通道提示词把每个已启用动作连同中文注解交给模型，
 // 且不含网关专属措辞——模型靠名字 + 注解发现工具。
 {
-  const prompt = buildPlatformPrompt(DEFAULTS)
+  const prompt = buildPlatformPrompt({ ...DEFAULTS, onebotToolDisabled: [], toolAdminOnly: [] })
   t('the channel prompt lists every catalog action by name', ALL_ACTIONS.every((name) => prompt.includes(name)))
-  t('the channel prompt documents each action with its function', prompt.includes('fetch_ptt_text：功能：获取一条语音消息的转文字结果') && prompt.includes('send_group_msg：功能：发送群消息'))
-  t('the channel prompt carries parameter names and usage', prompt.includes('group_id（数字，必填）') && prompt.includes('用法：onebot_call(action="send_group_msg"'))
+  t('the channel prompt annotates each action in Chinese only', prompt.includes('fetch_ptt_text：获取语音转文字结果') && prompt.includes('send_group_msg：发送群消息'))
+  t('the channel prompt does not dump parameter details', !prompt.includes('group_id（数字，必填）') && !prompt.includes('用法：onebot_call(action="send_group_msg"'))
+  t('the channel prompt teaches the get_action_doc lookup', prompt.includes('get_action_doc') && prompt.includes('详细说明'))
   t('the channel prompt has no gateway/NapCat wording', !/网关|NapCat/.test(prompt))
 }
 
@@ -598,7 +628,7 @@ t('an absent payload becomes null (lossless JSON)', nullOut.ok === true && nullO
 import { mediaParagraph } from '../prompt.js'
 const mediaText = mediaParagraph()
 t('the media paragraph requires the send_message action', mediaText.includes('必须') && mediaText.includes('send_message'))
-t('the media paragraph forbids claiming no permission', mediaText.includes('不要回复说你没有权限'))
+t('the media paragraph forbids inventing permission excuses', mediaText.includes('不要凭空捏造'))
 t('the media paragraph forbids the admin excuse', mediaText.includes('绝不要让用户把你设为管理员'))
 t('the media paragraph requires listing first', mediaText.includes('list_files'))
 
@@ -710,6 +740,37 @@ function makeToolDef({ adminUserId, adminOnly, sender }) {
   const { def, calls } = makeToolDef({ adminUserId: '', adminOnly: ['set_group_ban'], sender: () => '20002' })
   const denied = await def.execute({ action: 'set_group_ban', params: { group_id: 1 } })
   t('with no administrator set, an admin-only action is refused for everyone', denied.ok === false && calls.length === 0, JSON.stringify(denied))
+}
+
+// --- get_action_doc：按动作名取详细说明（渐进式披露）
+{
+  let def
+  const forwarded = []
+  const overrides = { send_group_msg: '只发纯文本，禁止 CQ 码。' }
+  registerTools(
+    { tools: { register: (d) => { def = d; return () => {} } } },
+    {
+      connection: { call: async (action, params) => { forwarded.push([action, params]); return {} } },
+      allow: new Set(['get_action_doc', 'send_group_msg', 'set_group_ban']),
+      chatId: 'private:1', deleteSentMedia: false, prompts: {}, recordLog: () => {},
+      adminOnly: new Set(['set_group_ban']), adminUserId: '10001', senderOf: () => '20002',
+      actionPromptOf: (name) => overrides[name] ?? actionDefaultPrompt(name),
+    },
+  )
+  t('the catalog includes the get_action_doc local action', isKnownAction('get_action_doc') && ALL_ACTIONS.includes('get_action_doc'))
+  const overriddenDoc = await def.execute({ action: 'get_action_doc', params: { name: 'send_group_msg' } })
+  t('get_action_doc returns the operator override', overriddenDoc.ok === true && overriddenDoc.data.doc === '只发纯文本，禁止 CQ 码。', JSON.stringify(overriddenDoc))
+  t('get_action_doc also reports the Chinese label and admin-only flag', overriddenDoc.data.label === '发送群消息' && overriddenDoc.data.admin_only === false)
+  const defaultDoc = await def.execute({ action: 'get_action_doc', params: { name: 'set_group_ban' } })
+  t('get_action_doc returns the built-in parameter docs', defaultDoc.ok === true && defaultDoc.data.doc.includes('group_id（数字，必填）') && defaultDoc.data.doc.includes('禁言秒数'), JSON.stringify(defaultDoc))
+  t('get_action_doc marks an admin-only action', defaultDoc.data.admin_only === true)
+  t('get_action_doc never reaches the gateway', forwarded.length === 0)
+  const unknownDoc = await def.execute({ action: 'get_action_doc', params: { name: 'definitely_not_real' } })
+  t('get_action_doc refuses an unknown action', unknownDoc.ok === false && unknownDoc.error.includes('not offered'))
+  const disabledDoc = await def.execute({ action: 'get_action_doc', params: { name: 'delete_msg' } })
+  t('get_action_doc refuses a switched-off action', disabledDoc.ok === false && disabledDoc.error.includes('switched off'))
+  const missingName = await def.execute({ action: 'get_action_doc', params: {} })
+  t('get_action_doc requires the action name', missingName.ok === false && missingName.error.includes('params.name'))
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)
