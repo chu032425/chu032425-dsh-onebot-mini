@@ -604,6 +604,33 @@ QQ 空间的「修改说说权限 / 设置访问限制」、账号资料的「�
 | `api.js` | 浏览器侧 JSON 路由 |
 | `lib/client.js` | 浏览器侧面板（九个标签页） |
 
+## 提交前脱敏（必读）
+
+本插件运行时会接触真实账号与聊天数据。**每次 commit / push / 打包前都必须先脱敏**，避免真实 QQ 号、群号、昵称、令牌进入 git 历史或分发包。注意：敏感信息一旦进入历史，只删当前文件并不够，必须重写历史并强推（必要时删除并重建仓库，旧 SHA 才会失效）。
+
+### 绝不能提交
+- 真实 QQ 号、群号、QID、手机号、邮箱、昵称等身份信息（包含代码、测试夹具、注释、README 示例）。
+- `accessToken`、Cookie、CSRF、`rkey` / `clientkey`、密码、私钥或任何令牌。
+- `~/.dsh/profiles/<profile>/onebot-mini.json`（真实配置）与 `onebot-mini.log.jsonl`（聊天记录与号码）。
+- 本机绝对路径、内网地址等可定位个人或机器的信息。
+
+### 提交前检查清单
+1. `config.js` 的 `DEFAULTS` 中 `accessToken`、`botQQ`、`adminUserId`、`denyFrom`、`allowFrom`、`allowGroups`、`denyGroups` 必须为空。
+2. 示例统一用假号（如 `2000001`）和通用地址（`0.0.0.0` / `127.0.0.1`）。
+3. 分发包用 `npm pack`（自动排除 `.git`、`node_modules`）；不要用 `tar` 直接打包整个目录。
+4. 提交前跑扫描，确认无命中（真实账号请只在本地核对，**不要写进仓库**）：
+   ```sh
+   # 明显密钥
+   git grep -niE 'password|passwd|secret|access[_-]?token|ghp_|github_pat_|BEGIN (RSA|OPENSSH|PRIVATE)'
+   # 长数字（可能是 QQ / 群号 / 手机号），人工确认；测试夹具必须是假号
+   git grep -noE '[0-9]{6,12}' | sort -u
+   # 逐条核对你已知的真实账号（示例：值放在本地终端里，勿提交）
+   # git grep -nE '<你已知的账号1>|<你已知的账号2>'
+   ```
+5. 若敏感值已进入历史：用 `git filter-repo` / `git filter-branch` 重写全部历史后再强推；旧提交若已被公开，最稳妥是删除并重建仓库或联系平台清理缓存。
+
+> 落库前先 `git status` 自查，并让上面的扫描全部通过，再 `git add` / `git commit`。
+
 ## 卸载
 
 ```sh
