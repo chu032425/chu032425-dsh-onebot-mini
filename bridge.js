@@ -5,10 +5,10 @@
  * flattened to text and handed to the chat's agent as one follow-up turn.
  *
  * Outbound: how the assistant's text reaches the chat depends on `replyMode`.
- *  - `final` (default): text blocks are buffered and sent once the turn ends, so
- *    a multi-step turn produces one QQ message instead of one per step.
- *  - `stream`: each assistant message is sent as soon as it is produced, so the
- *    chat sees the answer unfold step by step ("say it when you think it").
+ *  - `stream` (default): each assistant message is sent as soon as it is
+ *    produced, so the chat sees the answer unfold step by step.
+ *  - `final`: text blocks are buffered and sent once the turn ends, so a
+ *    multi-step turn produces one QQ message instead of one per step.
  * `turn/end` releases any leftover buffer and the turn's inbound files.
  *
  * The session id is derived from the chat id, so a restart resumes the same
@@ -1093,13 +1093,13 @@ export class ChatBridge {
     if (event.type === 'assistant/message') {
       const text = textOfMessage(event.data?.message)
       if (text === '') return
-      // `stream` sends each message the moment it appears; `final` collects it
-      // and lets `turn/end` send the whole answer as one message.
-      if (this.config.replyMode === 'stream') {
+      // `stream` (the default) sends each message the moment it appears;
+      // `final` collects it and lets `turn/end` send the whole answer at once.
+      if (this.config.replyMode === 'final') {
+        this.buffers.set(chatId, (this.buffers.get(chatId) ?? '') + text)
+      } else {
         this.sentThisTurn.add(chatId)
         this.enqueueStream(chatId, chat, text)
-      } else {
-        this.buffers.set(chatId, (this.buffers.get(chatId) ?? '') + text)
       }
       return
     }

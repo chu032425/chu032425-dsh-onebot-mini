@@ -81,10 +81,10 @@ export const DEFAULTS = Object.freeze({
   // Messages never wait for a quiet window any more.
   privateAutoInterject: true,
   // How the assistant's answer reaches the chat:
+  //  - stream (default): send each assistant message the moment it appears;
   //  - final: buffer every text block and send one QQ message when the turn ends
-  //    (a multi-step turn does not spam the chat);
-  //  - stream: send each assistant message the moment it appears.
-  replyMode: 'final',
+  //    (a multi-step turn does not spam the chat).
+  replyMode: 'stream',
   // Legacy keys kept only so an older config file still loads.
   debounceMs: 0,
   debounceMaxMs: 0,

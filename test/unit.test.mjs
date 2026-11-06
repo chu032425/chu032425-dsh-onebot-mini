@@ -58,12 +58,12 @@ t('debounce config is gone; only the interject switch remains', !('privateDeboun
 t('no group reply config remains', !('groupDebounceMs' in DEFAULTS) && !('groupAutoInterject' in DEFAULTS))
 t('the reply group holds the send mode then the interject switch', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'reply').fields) === '["replyMode","privateAutoInterject"]')
 
-// reply mode: final (buffer, one message) or stream (send as it goes)
-t('reply mode defaults to final', DEFAULTS.replyMode === 'final')
+// reply mode: stream (send as it goes, default) or final (buffer, one message)
+t('reply mode defaults to stream', DEFAULTS.replyMode === 'stream')
 t('reply mode is its own field kind', FIELD_KINDS.replyMode === 'replyMode')
-t('a valid reply mode is kept', normalizeConfig({ replyMode: 'stream' }).value.replyMode === 'stream')
-t('an unknown reply mode falls back to final', normalizeConfig({ replyMode: 'burst' }).value.replyMode === 'final')
-t('a non-string reply mode falls back to final', normalizeConfig({ replyMode: 3 }).value.replyMode === 'final')
+t('a valid reply mode is kept', normalizeConfig({ replyMode: 'final' }).value.replyMode === 'final')
+t('an unknown reply mode falls back to stream', normalizeConfig({ replyMode: 'burst' }).value.replyMode === 'stream')
+t('a non-string reply mode falls back to stream', normalizeConfig({ replyMode: 3 }).value.replyMode === 'stream')
 
 // delete-inbound-media mirrors delete-sent-media and defaults on
 t('the inbound-delete switch defaults on', DEFAULTS.deleteInboundMedia === true)

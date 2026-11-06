@@ -28,6 +28,9 @@ const baseConfig = {
   senderPrefix: true, titleEqualsId: true, logCapacity: 200,
   logMessagePreview: true, logToFile: false, sendTimeoutMs: 5000,
   sessionPrefix: 'onebot', sessionPermission: 'workspace-write', agentModel: '',
+  // The buffering/notice assertions below exercise `final`; the stream block
+  // flips it to `stream` explicitly.
+  replyMode: 'final',
 }
 
 // ---- preset / permission / plan-mode stubs (record what the bridge calls)
