@@ -13,7 +13,7 @@ import { preview } from './logbus.js'
 const BACKOFF_MS = [2000, 5000, 10000, 30000, 60000]
 
 /** 动作被拒：网关回了 `status: failed` 或非零 retcode。 */
-export class OneBotActionError extends Error {
+class OneBotActionError extends Error {
   constructor(message, { retcode } = {}) {
     super(message)
     this.name = 'OneBotActionError'
@@ -22,7 +22,7 @@ export class OneBotActionError extends Error {
 }
 
 /** 动作没能完成：链路已断或响应超时。 */
-export class OneBotTransportError extends Error {
+class OneBotTransportError extends Error {
   constructor(message) {
     super(message)
     this.name = 'OneBotTransportError'

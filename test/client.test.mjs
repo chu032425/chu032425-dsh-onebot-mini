@@ -1,7 +1,7 @@
 /**
- * Browser-half checks without a real browser: the module loader contract,
- * slot registrations, dictionary parity, and that both pages render.
- * Run with `node test/client.test.mjs`.
+ * 不依赖真实浏览器的浏览器半边检查：模块加载器契约、
+ * slot 注册、词典对称性，以及两个页面都能渲染。
+ * 用 `node test/client.test.mjs` 运行。
  */
 import { readFileSync } from 'node:fs'
 import { FIELD_GROUPS } from '../config.js'
@@ -13,7 +13,7 @@ const src = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 let captured
 globalThis.window = { __ModuleLoader__: { load: (def) => { captured = def } } }
 
-// Minimal DOM head, enough for the stylesheet effect.
+// 最小 DOM 头，够样式表副作用用。
 const injected = []
 globalThis.document = {
   getElementById: (id) => injected.find((node) => node.id === id) ?? null,
@@ -21,7 +21,7 @@ globalThis.document = {
   head: { appendChild: (node) => { injected.push(node); return node } },
 }
 
-// Enough of React to build a tree; hooks return their initial value.
+// 够搭出一棵 React 树；hook 直接返回初始值。
 const React = {
   createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
   useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
@@ -102,16 +102,16 @@ t('pane has a mounted page', pane.children.filter(Boolean).length >= 1)
 const icon = slots.find((s) => s.options.name === 'sidebar.panellist').render({})
 t('sidebar icon is an svg', icon.type === 'svg')
 
-// Localized names for the well-known preset/permission values must exist in
-// both dictionaries, so a Chinese UI never shows raw ids like "read-only".
+// 常见 preset/权限取值必须在中英两份词典里都有本地化名，
+// 这样中文界面永远不会露出 "read-only" 这类原始 id。
 for (const key of ['presetNameStandard', 'presetNamePtc', 'presetNameMinimal', 'presetNameCordis',
   'permReadOnly', 'permWorkspaceWrite', 'permDangerFullAccess', 'permAuto']) {
   t('localized name present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 t('session mode is gone', !('fieldSessionMode' in zh) && !('modePlan' in zh))
 
-// The onebot_call action picker must have copy in both languages, so the section
-// never falls back to a raw dictionary key in either UI.
+// onebot_call 的动作选择器必须中英双语都有文案，
+// 这样任何一边的界面都不会回退成裸词典键。
 for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
   'toolGroupLocal', 'toolGroupMessage', 'toolGroupMedia', 'toolGroupGroup', 'toolGroupQuery', 'toolGroupInteraction',
   'toolGroupRequest', 'toolGroupProfile', 'toolGroupQzone',
@@ -121,12 +121,12 @@ for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
 }
 t('every catalog action ships a default prompt for the tools page', TOOL_GROUPS.every((group) => group.actions.every((action) => typeof action.defaultPrompt === 'string' && action.defaultPrompt !== '')))
 
-// Every catalogued action carries its annotation in the catalog itself, so the
-// list never shows a bare action id without an explanation next to it.
+// 每个目录动作的注解都放在目录自身里，
+// 列表里不会出现光秃秃的动作 id 而旁边没有说明。
 t('the catalog supplies action annotations', TOOL_GROUPS.every((group) => group.actions.every((action) => /[\u4e00-\u9fa5]/.test(action.zh)))),
 t('the tools page renders every catalog group', TOOL_GROUPS.length === 9)
-// Every catalog group must have localized copy, so pruning the catalog cannot
-// leave a group rendering its raw id.
+// 每个目录分组都必须有本地化文案，这样裁剪目录
+// 也不会让某个分组渲染出原始 id。
 for (const group of TOOL_GROUPS) {
   const key = 'toolGroup' + group.id.charAt(0).toUpperCase() + group.id.slice(1)
   t('group label present: ' + group.id, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
@@ -136,8 +136,8 @@ for (const key of ['toolBadgeStandard', 'toolBadgeExtension', 'toolBadgeLocal'])
 }
 t('every catalog action is classifiable for the badge', TOOL_GROUPS.every((group) => group.actions.every((action) => action.standard === true || action.standard === false)))
 
-// The friend row shows the remark as its name, so the trailing hint must be the
-// nickname; labelling it "remark" would describe the wrong field.
+// 好友行把备注当作名字显示，所以行尾提示必须是昵称；
+// 标成“备注”会指向错误的字段。
 t('the friend row labels its hint as the nickname', zh.contactsNickname === '昵称' && en.contactsNickname === 'Nickname')
 t('the swapped remark label is gone', !('contactsRemark' in zh) && !('contactsRemark' in en))
 for (const key of ['fieldImageCacheMaxKb', 'fieldImageCacheTotalMb', 'fieldImageShowMaxMb']) {

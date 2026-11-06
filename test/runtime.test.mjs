@@ -1,8 +1,8 @@
 /**
- * Transport and bridge behaviour against local doubles: real WebSocket
- * handshake and auth, action roundtrip, log redaction, inbound gating,
- * turn buffering, resume and allowlist.
- * Run with `node test/runtime.test.mjs`.
+ * 针对本地替身的传输与桥行为：真实 WebSocket
+ * 握手与鉴权、动作往返、日志脱敏、入站放行、
+ * 回合缓冲、续接与白名单。
+ * 用 `node test/runtime.test.mjs` 运行。
  */
 import { createServer } from 'node:http'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
@@ -28,12 +28,12 @@ const baseConfig = {
   senderPrefix: true, titleEqualsId: true, logCapacity: 200,
   logMessagePreview: true, logToFile: false, sendTimeoutMs: 5000,
   sessionPrefix: 'onebot', sessionPermission: 'workspace-write', agentModel: '',
-  // The buffering/notice assertions below exercise `final`; the stream block
-  // flips it to `stream` explicitly.
+  // 下面关于缓冲与提示的断言走 `final`；stream 那段会
+  // 显式切到 `stream`。
   replyMode: 'final',
 }
 
-// ---- preset / permission / plan-mode stubs (record what the bridge calls)
+// ---- preset / 权限 / plan 模式的桩（记录桥调了什么）
 const calls = { mounted: [], permissionSet: [] }
 const agentPresets = {
   async resolve(id) {
@@ -45,7 +45,7 @@ const agentPresets = {
 }
 const permissionPresets = { set: (session, name) => { calls.permissionSet.push(name) } }
 
-// ---------------------------------------------------------------- transport
+// ---------------------------------------------------------------- 传输
 const port = 18650
 const log = new LogBus({ capacity: 200 })
 const conn = new OneBotConnection({ config: { ...baseConfig, port }, log })
@@ -68,23 +68,23 @@ const bad = await dial('wrong')
 let good2
 t('wrong token is rejected', bad.ok === false)
 
-// self id is learned from a meta event
+// 自身 id 从 meta 事件学到
 good.ws.send(JSON.stringify({ post_type: 'meta_event', meta_event_type: 'lifecycle', self_id: 10001 }))
 await wait(150)
 t('self id learned from meta event', conn.selfId === '10001')
 
-// pushed message reaches the event handler
+// 推来的消息到达事件处理器
 good.ws.send(JSON.stringify({ post_type: 'message', message_type: 'private', user_id: 2, message_id: 1, message: [], sender: {} }))
 await wait(150)
 t('pushed event is dispatched', events.some((f) => f.post_type === 'message'))
 
-// action roundtrip: the gateway echoes our echo
+// 动作往返：网关把我们的 echo 原样回显
 good.ws.addEventListener('message', (event) => {
   const frame = JSON.parse(event.data)
   good.ws.send(JSON.stringify({ echo: frame.echo, status: 'ok', retcode: 0, data: { message_id: 777 } }))
 })
-// Record every frame the plugin writes over the socket, so the test can prove
-// actions travel on the WebSocket rather than through some HTTP side channel.
+// 记录插件经套接字写出的每一帧，好让测试证明
+// 动作走 WebSocket，而不是某条 HTTP 旁路。
 const written = []
 good.ws.addEventListener('message', (event) => {
   written.push(event.data)
@@ -101,19 +101,19 @@ t('action was logged as send then recv',
   log.snapshot(0, 500).entries.some((e) => e.kind === 'send' && e.action === 'send_private_msg')
   && log.snapshot(0, 500).entries.some((e) => e.kind === 'recv' && e.retcode === 0))
 
-// a failed action rejects with the gateway's wording
+// 失败的动作按网关的措辞拒绝
 good.ws.send(JSON.stringify({ echo: 'missing', status: 'failed', retcode: 100, wording: 'bad' }))
 await wait(100)
 t('token never reaches the log', !JSON.stringify(log.snapshot(0, 500)).includes('test-token'))
 
-// an action with no link rejects instead of hanging
+// 链路已断的动作直接拒绝，不会挂住
 good.ws.close()
 await wait(250)
 t('link loss flips to offline', conn.state === 'offline')
 let rejected = false
 try { await conn.call('send_private_msg', {}) } catch { rejected = true }
 t('call without a link rejects', rejected)
-// the learned account is reported to the Host so it can be persisted
+// 学到的账号上报给 Host，好让它落盘
 const learnedIds = []
 conn.onLearnSelfId = (id) => learnedIds.push(id)
 good2 = await dial('test-token')
@@ -125,7 +125,7 @@ await wait(150)
 
 await conn.stop()
 
-// busy port must not throw out of start() silently
+// 端口被占不能从 start() 里静默吞掉
 const blocker = createServer(() => {})
 await new Promise((resolve) => blocker.listen(18651, '127.0.0.1', resolve))
 const log2 = new LogBus({ capacity: 50 })
@@ -137,7 +137,7 @@ t('busy port is logged', log2.snapshot(0, 50).entries.some((e) => e.kind === 'er
 await busy.stop()
 await new Promise((resolve) => blocker.close(resolve))
 
-// ---------------------------------------------------------------- bridge
+// ---------------------------------------------------------------- 桥
 const sent = []
 const toolDefs = []
 const transport = {
@@ -163,8 +163,8 @@ const agents = {
     createdOptions.push(options.agentOptions)
     const session = { id: options.sessionId }
     const agent = { session, followups: [], followup(m) { this.followups.push(m) } }
-    // The real factory runs the setup callback during creation; the mount and
-    // prompt registration only happen there.
+    // 真实工厂在创建时就跑 setup 回调；preset 挂载与
+    // 提示词注册只在那里发生。
     if (typeof options.setup === 'function') {
       await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: (def) => { toolDefs.push(def); return () => {} } } })
     }
@@ -197,7 +197,7 @@ const workspaceRegistry = {
 const ctx = {
   on: (name, cb) => { if (name === 'session/event') sessionEvent = cb; return () => {} },
   agents,
-  // The Host's default-model owner; a fresh agent must start on it.
+  // Host 的默认模型归属；新 agent 必须从它起步。
   get: (name) => (name === 'agentDefaultModel'
     ? { currentSelection: () => ({ provider: 'localhost', model: 'group/never-stuck' }) }
     : undefined),
@@ -231,9 +231,9 @@ t('the preset is actually mounted', calls.mounted.length > 0)
 t('onebot_call is registered by default', toolDefs.some((def) => def.name === 'onebot_call'))
 t('only one tool is registered (local actions ride on onebot_call)', toolDefs.map((def) => def.name).join(',') === 'onebot_call')
 
-// A voice message: the bridge only downloads it and hands the agent the path plus
-// the gateway message id. The code itself never calls the fetch_ptt_text extension;
-// the prompt tells the model it may call it through onebot_call.
+// 一条语音消息：桥只下载它，把路径和网关消息 id 交给 agent。
+// 代码自身绝不调用 fetch_ptt_text 扩展；
+// 由提示词告诉模型可以通过 onebot_call 去调。
 {
   const sttDir = mkdtempSync(pathJoin(tmpdir(), 'onebot-voice-rt-'))
   const prevCall = transport.call
@@ -257,7 +257,7 @@ t('only one tool is registered (local actions ride on onebot_call)', toolDefs.ma
   rmSync(sttDir, { recursive: true, force: true })
 }
 
-// the channel prompt advertises exactly the enabled actions
+// 通道提示词只宣传已启用的动作
 const { buildPlatformPrompt } = await import('../bridge.js')
 const promptAll = buildPlatformPrompt(baseConfig)
 t('the prompt lists the enabled actions', promptAll.includes('send_group_msg：功能：发送群消息') && promptAll.includes('set_group_ban：功能：禁言群成员'))
@@ -270,14 +270,14 @@ t('the prompt teaches the reply media markers', promptAll.includes('[[image:/abs
 t('the prompt names the one plugin tool', promptAll.includes('onebot_call'))
 t('the prompt says QQ actions must use this tool', promptAll.includes('都必须通过 onebot_call 完成') && promptAll.includes('不要使用任何其他以 qq_ 开头的工具'))
 
-// the prompt comes from config, so it can be edited without a rebuild
+// 提示词来自配置，所以不重新构建也能改
 const customPrompt = buildPlatformPrompt({ ...baseConfig, channelPrompt: 'MY PROMPT\n{actions}' })
 t('a custom prompt template is used', customPrompt.trim().startsWith('MY PROMPT'))
 t('the actions placeholder expands into the enabled list', customPrompt.includes('send_group_msg：功能：发送群消息'))
 const plainPrompt = buildPlatformPrompt({ ...baseConfig, channelPrompt: 'JUST TEXT' })
 t('a template without placeholders is used as-is', plainPrompt.trim() === 'JUST TEXT')
 t('the prompt omits the local actions when the tool is off', !promptOff.includes('send_message'))
-// an explicit provider::model in config wins over the deployment default
+// 配置里显式的 provider::model 胜过部署默认值
 const bridgeModel = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', agentModel: 'localhost::group/never-stuck' },
   connection: transport, log,
@@ -310,7 +310,7 @@ await bridge.handleInbound(inbound({
 }))
 t('duplicate message id is skipped', groupChat.agent.followups.length === before)
 
-// outbound: text is buffered and sent once when the turn ends
+// 出站：文本先缓冲，回合结束时一次性发出
 sessionEvent({ id: chat.sessionId }, { type: 'turn/start', data: { turn: 1 } })
 sessionEvent({ id: chat.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第一段' }, { type: 'reasoning', text: '内部' }, { type: 'text', text: '第二段' }] } } })
 t('nothing is sent mid-turn', sent.length === 0)
@@ -319,8 +319,8 @@ await wait(50)
 t('one message is sent at turn end', sent.length === 1)
 t('only text blocks are joined', sent[0] === '第一段\n第二段')
 
-// `stream` mode: each assistant message is sent the moment it appears, and the
-// turn end does not re-send it
+// `stream` 模式：每条助手消息一出现就发，
+// 回合结束不会重复发
 bridge.config.replyMode = 'stream'
 const streamBase = sent.length
 sessionEvent({ id: chat.sessionId }, { type: 'turn/start', data: { turn: 90 } })
@@ -333,12 +333,12 @@ t('stream mode sends each message separately', sent.length === streamBase + 2 &&
 await sessionEvent({ id: chat.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
 await wait(40)
 t('stream mode does not send the answer again at turn end', sent.length === streamBase + 2, JSON.stringify(sent.slice(streamBase)))
-// restore final mode and drop the streamed sends so the index-based assertions
-// below keep applying to the final-mode turns that follow
+// 恢复 final 模式并丢掉已流式发出的记录，让下面基于下标的断言
+// 继续适用于后续 final 模式的回合
 bridge.config.replyMode = 'final'
 sent.length = streamBase
 
-// a message queued mid-turn must not wipe the running turn's buffer
+// 回合中途排队进来的消息不能冲掉进行中回合的缓冲
 sessionEvent({ id: chat.sessionId }, { type: 'turn/start', data: { turn: 2 } })
 sessionEvent({ id: chat.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'T2' }] } } })
 await bridge.handleInbound(inbound({ message_id: 4, message: [{ type: 'text', data: { text: '排队' } }] }))
@@ -346,17 +346,17 @@ sessionEvent({ id: chat.sessionId }, { type: 'turn/end', data: { reason: { kind:
 await wait(50)
 t('queued message preserves the running turn text', sent[1] === 'T2', JSON.stringify(sent[1]))
 
-// an errored turn with no text still reports something
+// 出错且没有文本的回合仍然要给出提示
 sessionEvent({ id: chat.sessionId }, { type: 'turn/start', data: { turn: 3 } })
 sessionEvent({ id: chat.sessionId }, { type: 'turn/end', data: { reason: { kind: 'error', error: { message: '模型出错' } } } })
 await wait(50)
 t('errored turn sends a notice', sent.length === 3 && sent[2].startsWith('⚠️'))
 
-// events from other sessions are ignored
+// 来自其它会话的事件被忽略
 sessionEvent({ id: 'web-session' }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'x' }] } } })
 t('foreign sessions are ignored', sent.length === 3)
 
-// a configured preset that no longer exists falls back to the deployment default
+// 配置的 preset 已不存在时回退到部署默认值
 calls.mounted.length = 0
 const bridgeGone = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', agentPreset: 'deleted-preset' },
@@ -371,7 +371,7 @@ await bridgeGone.handleInbound(inbound({ user_id: 66666, message_id: 66 }))
 t('deleted preset falls back to the default mount', calls.mounted.includes('default'), JSON.stringify(calls.mounted))
 await bridgeGone.stop()
 
-// a workspace that already exists is not recreated
+// 已存在的工作区不会被重建
 workspaceCalls.existing.push('/workspace/QQ')
 const bridgeExisting = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: transport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
 const beforeCreate = workspaceCalls.created.length
@@ -379,15 +379,15 @@ bridgeExisting.start()
 await bridgeExisting.handleInbound(inbound({ user_id: 77777, message_id: 77 }))
 t('existing workspace is reused, not recreated', workspaceCalls.created.length === beforeCreate, JSON.stringify(workspaceCalls.created))
 
-// a workspace deleted later is recreated on the next message, even though the chat exists
-workspaceCalls.existing.length = 0   // registry no longer resolves it = deleted
+// 之后被删掉的工作区在下一封消息时重建，即便 chat 还在
+workspaceCalls.existing.length = 0   // registry 不再解析它 = 已删除
 workspaceCalls.created.length = 0
 bridgeExisting.reconfigure({ ...baseConfig, workspacePath: '/workspace/QQ' })
 await bridgeExisting.handleInbound(inbound({ user_id: 77777, message_id: 78 }))
 t('deleted workspace is recreated on the next message', workspaceCalls.created.includes('/workspace/QQ'), JSON.stringify(workspaceCalls.created))
 await bridgeExisting.stop()
 
-// restart resumes the same session instead of creating a new one
+// 重启会续接同一会话，而不是新建一个
 await bridge.stop()
 resumeIds.push(chat.sessionId)
 const bridge2 = new ChatBridge({ ctx, config: baseConfig, connection: transport, log, describeError: String })
@@ -395,7 +395,7 @@ bridge2.start()
 await bridge2.handleInbound(inbound({ message_id: 9 }))
 t('restart resumes the same session', bridge2.chats.get('private:20002').sessionId === chat.sessionId)
 
-// a session already live elsewhere (opened in the Web UI) is reused, not recreated
+// 已在别处活着（在 Web UI 里打开过）的会话会被复用，不重建
 await bridge2.stop()
 const liveSessionId = 'onebot-private-20002'
 liveAgent = { session: { id: liveSessionId }, followups: [], followup(m) { this.followups.push(m) } }
@@ -408,14 +408,14 @@ t('reused agent receives the message', liveAgent.followups.length === 1)
 await bridge3.stop()
 t('stopping does not dispose a borrowed agent', liveAgent.session !== undefined)
 
-// allowlist blocks a chat that is not listed
+// 白名单挡掉未列出的 chat
 const bridge4 = new ChatBridge({ ctx, config: { ...baseConfig, allowFrom: ['99999'] }, connection: transport, log, describeError: String })
 bridge4.start()
 await bridge4.handleInbound(inbound({ message_id: 10 }))
 t('allowlist blocks the chat', bridge4.chats.has('private:20002') === false)
 await bridge4.stop()
 
-// blacklists: deny wins over allow, and an allowlist still restricts
+// 黑名单：拒绝优先于允许，而白名单依然起限制作用
 const bridgeDeny = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', denyFrom: ['20002'] },
   connection: transport, log, getWorkspaceRegistry: () => workspaceRegistry,
@@ -452,7 +452,7 @@ await bridgeGroupDeny.handleInbound(inbound({ message_type: 'group', group_id: 8
 t('a blacklisted group is refused', bridgeGroupDeny.chats.has('group:888') === false)
 await bridgeGroupDeny.stop()
 
-// the onebot_call tool obeys the settings allowlist
+// onebot_call 工具服从设置里的白名单
 const bridgeOff = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', onebotToolEnabled: false },
   connection: transport, log, getWorkspaceRegistry: () => workspaceRegistry,
@@ -480,9 +480,9 @@ const allowedCall = await banTool.execute({ action: 'send_group_msg', params: {}
 t('an enabled action is relayed', allowedCall.ok === true)
 await bridgeBan.stop()
 
-// ---------------------------------------------------------------- contacts route
-// The contacts route must normalize both gateway shapes (a bare array and a
-// `{ list }` wrapper) and must degrade one section instead of failing the page.
+// ---------------------------------------------------------------- 联系人路由
+// 联系人路由必须同时归一化网关的两种形状（裸数组和
+// `{ list }` 包装），且某一段失败时降级而不是整页失败。
 const { registerRoutes } = await import('../api.js')
 const routes = new Map()
 const routeCtx = {
@@ -530,7 +530,7 @@ t('group carries its member count', contacts.body.groups.items[0].memberCount ==
 t('a whitespace-only nickname is trimmed to empty', contacts.body.friends.items[1].name === '小红' && contacts.body.friends.items[1].nickname === '小红')
 t('the bot account is reported', contacts.body.selfId === '2000002')
 
-// offline: the page still renders, with both sections marked unavailable
+// 离线：页面照样渲染，两个区段都标为不可用
 const offlineRoute = await (async () => {
   const res = fakeRes()
   const disposeOffline = registerRoutes(routeCtx, {
@@ -542,7 +542,7 @@ const offlineRoute = await (async () => {
 })()
 t('offline contacts route still answers 200', offlineRoute.status === 200)
 t('offline reports both sections unavailable', offlineRoute.body.friends.available === false && offlineRoute.body.groups.available === false)
-// the members and friend routes: normalization, refusal and offline handling
+// 成员与好友路由：归一化、拒绝与离线处理
 const memberConnection = {
   state: 'online',
   selfId: '2000002',
@@ -586,7 +586,7 @@ t('friend detail carries the profile', friendDetail.body.nickname === '小明' &
 t('friend detail reports presence from nc_get_user_status', friendDetail.body.online === true && friendDetail.body.status === 10)
 t('the bot status is kept separate from the contact status', friendDetail.body.botOnline === true)
 
-// a gateway without nc_get_user_status leaves the presence unknown, not offline
+// 没有 nc_get_user_status 的网关让在线状态未知，而不是离线
 const noStatusConnection = { state: 'online', selfId: '1', call: async (action) => {
   if (action === 'get_stranger_info') return { nickname: '小红' }
   throw new Error('unsupported action: ' + action)
@@ -611,7 +611,7 @@ const offlineExtra = await (async () => {
   return JSON.parse(res.body)
 })()
 t('members route degrades when offline', offlineExtra.available === false && offlineExtra.error === 'not connected')
-// the Qzone route: three sections, both list shapes, per-section degradation
+// Qzone 路由：三个区段、两种列表形状、逐段降级
 const qzoneConnection = {
   state: 'online',
   selfId: '2000002',
@@ -624,7 +624,7 @@ const qzoneConnection = {
       ] }
     }
     if (action === 'get_qzone_feeds') {
-      // the native shape is a bare array
+      // 原生形状就是裸数组
       return [{ tid: 'b1', user_id: '123', content: '好友动态', time: 1700000100 }]
     }
     throw new Error('unsupported action: ' + action)
@@ -644,7 +644,7 @@ t('a private post is flagged', qzone.posts.items[1].private === true)
 t('qzone feeds normalize a bare array', qzone.feeds.items.length === 1 && qzone.feeds.items[0].userId === '123')
 t('the feed post carries its text', qzone.feeds.items[0].content === '好友动态')
 
-// one unsupported section must not blank the others
+// 一个区段不支持，不能把其它区段也清空
 const partialConnection = {
   state: 'online', selfId: '1',
   call: async (action) => {
@@ -662,13 +662,13 @@ t('a supported section still renders when another fails', partial.profile.availa
 t('the failing section reports why', partial.posts.available === false && partial.posts.error.includes('not available'))
 disposePartial()
 
-// what= selects a subset, so the page can refresh one section
+// what= 选取子集，好让页面只刷新某一段
 const listOnlyRes = fakeRes()
 await routes.get('/onebot-mini/api/qzone')({ method: 'GET', url: '/onebot-mini/api/qzone?what=list', headers: {} }, listOnlyRes)
 const listOnly = JSON.parse(listOnlyRes.body)
 t('what=list skips the other sections', listOnly.profile.available === false && listOnly.feeds.available === false)
 
-// the page size is clamped so a big space cannot stall the panel
+// 页大小被夹住，大空间也拖不死面板
 const seenNums = []
 const capConnection = {
   state: 'online', selfId: '1',
@@ -692,7 +692,7 @@ t('an invalid page size falls back to the default', listNums.includes(10))
 t('the feed page size follows the same cap', feedCounts.every((count) => count <= 20))
 disposeCap()
 
-// target_uin passes through, so the page can read a friend's space
+// target_uin 透传，页面因此能读好友的空间
 const seenParams = []
 const targetConnection = {
   state: 'online', selfId: '1',
@@ -713,7 +713,7 @@ t('target_uin reaches the gateway', seenParams.some((call) => call.params?.targe
 t("a friend's space profile renders", targeted.profile.name === '幻想净土')
 t("a friend's posts render", targeted.posts.items.length === 1 && targeted.posts.items[0].content === '好友说说')
 
-// a QQ permission code becomes a stable marker instead of a raw message
+// QQ 权限码变成稳定标记，而不是原始报文
 const forbiddenConnection = {
   state: 'online', selfId: '1',
   call: async (action) => {
@@ -749,7 +749,7 @@ const odd = JSON.parse(oddRes.body)
 t('an unexpected error is not mislabelled as forbidden', odd.profile.error !== 'forbidden' && odd.profile.error.includes('unexpected'))
 disposeOdd()
 disposeTarget()
-// the profile route: the bot's own details by default, a friend's on request
+// 资料路由：默认是机器人自己的资料，请求时给好友的
 const profileConnection = {
   state: 'online',
   selfId: '2000002',
@@ -793,7 +793,7 @@ t("a friend's profile renders its own fields", friendProfile.nickname === '好�
 t('a friend presence comes from nc_get_user_status', friendProfile.online === true)
 t('a friend profile does not read the login info', true)
 
-// a gateway that answers nothing still returns a usable shape
+// 什么都答不出的网关也要返回可用的形状
 const emptyConnection = { state: 'online', selfId: '1', call: async () => { throw new Error('unsupported') } }
 const disposeEmpty = registerRoutes(routeCtx, {
   store: contactStore, log, getConnection: () => emptyConnection, applyConfig: async () => {},
@@ -813,8 +813,8 @@ t('the profile route degrades when offline', JSON.parse(offlineProfileRes.body).
 disposeOfflineProfile()
 disposeProfileRoutes()
 
-// the image route refuses anything that is not a known image host, and always
-// requires a url
+// 图片路由拒绝任何非已知图床的地址，并且
+// 永远要求带 url
 const disposeImg = registerRoutes(routeCtx, {
   store: { snapshot: () => ({ config: baseConfig }), read: () => ({ ...baseConfig, imageCacheMaxKb: 1024, imageCacheTotalMb: 100 }) },
   log, getConnection: () => ({ state: 'online', selfId: '1', call: async () => ({}) }), applyConfig: async () => {},
@@ -830,7 +830,7 @@ await routes.get('/onebot-mini/api/image')({ method: 'POST', url: '/onebot-mini/
 t('the image route rejects POST', postMethodRes.statusCode === 405)
 disposeImg()
 
-// the send-media route validates its input and relays a real segment
+// 发媒体路由校验输入并真发一个媒体段
 const mediaCalls = []
 const mediaConnection = { state: 'online', selfId: '1', call: async (action, params) => { mediaCalls.push({ action, params }); return { message_id: 42 } } }
 const disposeMedia = registerRoutes(routeCtx, {
@@ -855,8 +855,8 @@ const noSource = await postJson('/onebot-mini/api/send-media', { chatType: 'grou
 t('a missing source is refused', noSource.status === 400)
 disposeMedia()
 
-// the source file is removed only after a successful send, and only when the
-// setting allows it
+// 只有发送成功后源文件才删除，且仅当
+// 设置允许时
 const fsDel = await import('node:fs')
 const delFile = '/tmp/onebot-send-del-' + process.pid + '.txt'
 fsDel.writeFileSync(delFile, 'x')
@@ -883,8 +883,8 @@ t('the source is kept when the setting is off', fsDel.existsSync(keepFile))
 disposeKeep()
 try { fsDel.unlinkSync(keepFile) } catch {}
 
-// an image over the cache cap is streamed through, not refused: the route serves
-// the bytes with a "not cached" marker, and nothing is written to disk
+// 超过缓存上限的图片是流式转发，不是拒绝：路由照发
+// 字节并打上“未缓存”标记，磁盘上什么都不写
 const { fetchIntoCache } = await import('../imagecache.js')
 const overflowDir = profileCacheRoot()
 const pathExists = (p) => existsSync(p)
@@ -898,7 +898,7 @@ disposeQzone()
 disposeExtra()
 disposeRoutes()
 
-// a reply carrying a media marker goes out as one message with a media segment
+// 带媒体标记的回复作为一条消息带媒体段发出
 const mediaSent = []
 const mediaTransport = {
   selfId: '10001', state: 'online',
@@ -906,8 +906,8 @@ const mediaTransport = {
   sendMessage: async (chat, message) => { mediaSent.push(message); return { message_id: 1 } },
   call: async () => ({}),
 }
-// A fixture created by the test itself: /tmp is wiped between runs, so a
-// hard-coded path would make this test flaky.
+// 测试自建的夹具：/tmp 会在每次运行间被清掉，
+// 写死路径会让这个测试变得不稳定。
 const fsMod = await import('node:fs')
 const mediaFixture = '/tmp/onebot-reply-fixture-' + process.pid + '.png'
 fsMod.writeFileSync(mediaFixture, Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'))
@@ -925,7 +925,7 @@ t('the media reply keeps the text around the image', sentSegments[0]?.data.text 
 t('the image travel as base64', sentSegments[1]?.type === 'image' && String(sentSegments[1]?.data.file).startsWith('base64://'))
 await bridgeMedia.stop()
 
-// a marker with a missing file degrades to text, the reply still goes out
+// 文件缺失的标记降级为文本，回复照样发出
 const notes = []
 const degradeTransport = { selfId: '1', state: 'online', sendText: async () => ({ message_id: 1 }), sendMessage: async (chat, message) => { notes.push(message); return { message_id: 1 } }, call: async () => ({}) }
 const bridgeDegrade = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: degradeTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
@@ -942,7 +942,7 @@ t('the missing media is reported inline without paths', degradeMsg.some((seg) =>
   && !degradeMsg.some((seg) => String(seg.data.text).includes('ENOENT')))
 await bridgeDegrade.stop()
 
-// an incoming image is downloaded to the plugin cache dir and the turn carries its path
+// 入站图片下载到插件缓存目录，回合里带着它的路径
 const fsInbound = await import('node:fs')
 const inboundWs = '/tmp/onebot-inbound-ws-' + process.pid
 const inboundTransport = { selfId: '1', state: 'online', sendText: async () => ({ message_id: 1 }), sendMessage: async () => ({ message_id: 1 }), call: async () => ({}) }
@@ -956,8 +956,8 @@ await bridgeInbound.handleInbound(inbound({
 const chatInbound = bridgeInbound.chats.get('private:31003')
 const inboundText = (chatInbound.agent.followups[0].content ?? []).filter((block) => block.type === 'text').map((block) => block.text).join('')
 t('an inbound image turn carries a local path', /\[图片: \/tmp\/onebot-inbound-ws-\d+\/private-31003\/.+\.png\]/.test(inboundText), inboundText)
-// A card-only message (QQ mini-program json segment) must still reach the agent
-// instead of being flattened to '' and dropped.
+// 只有卡片的消息（QQ 小程序 json 段）也必须到达 agent，
+// 而不是被压平成 '' 然后丢掉。
 await bridgeInbound.handleInbound(inbound({
   user_id: 31006,
   message_id: 315,
@@ -967,8 +967,8 @@ const chatCard = bridgeInbound.chats.get('private:31006')
 const cardText = (chatCard?.agent.followups[0]?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text).join('')
 t('a json card message reaches the agent', cardText.includes('[卡片'), cardText)
 
-// An unseen segment type must still get an answer: a "cannot handle" notice, not
-// silence, and without spinning up an agent turn.
+// 未知段类型也必须得到回应：“处理不了”的提示，而不是
+// 沉默，并且不要为此起一个 agent 回合。
 const unknownSent = []
 const unknownTransport = { selfId: '1', state: 'online', sendText: async (chat, text) => { unknownSent.push(text); return { message_id: 1 } }, sendMessage: async () => ({ message_id: 1 }), call: async () => ({}) }
 const bridgeUnknown = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: unknownTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
@@ -980,8 +980,8 @@ await bridgeUnknown.stop()
 await bridgeInbound.stop()
 fsInbound.rmSync(inboundWs, { recursive: true, force: true })
 
-// deleteInboundMedia: the downloaded source is removed only after the turn that
-// read it has ended, and only when the setting is on.
+// deleteInboundMedia：下载的源文件只在读过它的那个回合
+// 结束后才删除，且仅当设置开启。
 const inboundPng = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').toString('base64')
 const mediaOnly = [{ type: 'image', data: { file: 'base64://' + inboundPng } }]
 const delInboundWs = '/tmp/onebot-inbound-del-' + process.pid
@@ -1015,7 +1015,7 @@ t('the incoming file is kept after the turn when disabled', keepInboundPath !== 
 await bridgeKeepInbound.stop()
 fsInbound.rmSync(keepInboundWs, { recursive: true, force: true })
 
-// the cache route returns an inventory (read-only; clears are covered by unit tests)
+// 缓存路由返回清单（只读；清理由单元测试覆盖）
 const disposeCacheRoutes = registerRoutes(routeCtx, {
   store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {},
 })
@@ -1032,7 +1032,7 @@ const cachePostRes = fakeRes()
 await routes.get('/onebot-mini/api/cache/clear')({ method: 'GET', url: '/onebot-mini/api/cache/clear', headers: {} }, cachePostRes)
 t('the cache clear route rejects GET', cachePostRes.statusCode === 405)
 
-// the state route exposes the prompt registry so the page can render each one
+// 状态路由暴露提示词注册表，好让页面逐个渲染
 const disposeState = registerRoutes(routeCtx, {
   store: contactStore, log, getConnection: () => undefined, applyConfig: async () => {},
 })
@@ -1045,10 +1045,10 @@ t('each prompt def names its config field', stateBody.promptDefs.every((d) => ty
 t('each prompt def carries its default', stateBody.promptDefs.every((d) => typeof d.default === 'string' && d.default !== ''))
 disposeState()
 
-// ---------------------------------------------------------------- debounce + interject
+// ---------------------------------------------------------------- 防抖 + 插话
 const flatTransport = { selfId: '1', state: 'online', sendText: async () => ({ message_id: 1 }), sendMessage: async () => ({ message_id: 1 }), call: async () => ({}) }
 
-// debounce merges consecutive messages into one turn
+// 防抖把连续消息合并成一个回合
 const debounceAgents = {
   get: () => undefined,
   async create(options) {
@@ -1069,7 +1069,7 @@ t('no debounce means the first message is its own turn', String(debounceChat.age
 t('the second message is a separate turn', String(debounceChat.agent.followups[1].content[0].text).includes('第二句'))
 await bridgeDebounce.stop()
 
-// while running, a STEER verdict steers instead of queueing
+// 运行中时，STEER 判定会转向而不是排队
 const steerCalls = []
 const sessionFor = (userId) => 'onebot-private-' + userId
 const runningAgent = (id) => ({
@@ -1099,7 +1099,7 @@ await wait(150)
 t('a STEER verdict steers the running turn', steerCalls.length === 1)
 await bridgeSteer.stop()
 
-// a failing judge falls back to follow-up, never steer
+// 判定器失败则回退到跟进，绝不转向
 const fellBack = []
 const fallbackAgent = (id) => ({ session: { id }, status: 'running', steer() { throw new Error('no steer') }, followup(m) { fellBack.push(m) } })
 const fallbackCtx = {
@@ -1133,7 +1133,7 @@ await wait(100)
 t('自动插话关闭时改为排队', offQueued.length === 1)
 await bridgeNoSteer.stop()
 
-// ---------------------------------------------------------------- group debounce per speaker
+// ---------------------------------------------------------------- 群聊防抖按发言人
 const groupDeliveries = []
 const groupAgents = {
   get: () => undefined,
@@ -1156,7 +1156,7 @@ const groupMsg = (userId, text, messageId) => ({
   message: [{ type: 'text', data: { text } }], sender: { card: 'U' + userId }, time: 1700000000,
 })
 
-// groups deliver each message on arrival: no debounce, no per-speaker merge
+// 群聊每条消息到达即投递：不防抖、不按发言人合并
 await bridgeGroup.handleInbound(groupMsg(111, '第一句', 501))
 await bridgeGroup.handleInbound(groupMsg(111, '第二句', 502))
 await bridgeGroup.handleInbound(groupMsg(222, '另一个人', 503))
@@ -1168,8 +1168,8 @@ t('both deliveries keep the speaker prefix', groupDeliveries.every((d) => d.star
 
 await bridgeGroup.stop()
 
-// a continuing speaker must not starve later speakers forever: the window has a
-// hard deadline even when the same person keeps talking
+// 一直说话的发言人不能把后面的人永久饿死：
+// 即使同一个人说个不停，窗口也有硬截止时间
 const floodDelivered = []
 const floodAgents = {
   get: () => undefined,
@@ -1188,7 +1188,7 @@ const bridgeFlood = new ChatBridge({
 })
 bridgeFlood.start()
 const floodMsg = (uid, text, messageId) => ({ post_type: 'message', message_type: 'group', group_id: 999, user_id: uid, message_id: messageId, message: [{ type: 'text', data: { text } }], sender: { card: 'U' + uid }, time: 1700000000 })
-// one speaker keeps talking faster than the window, so the cap forces flushes
+// 一个发言人说个不停、比窗口还快，上限会强制冲刷
 for (let i = 1; i <= 6; i++) await bridgeFlood.handleInbound(floodMsg(111, 'F' + i, 600 + i))
 await wait(500)
 const floodText = floodDelivered.join('|')

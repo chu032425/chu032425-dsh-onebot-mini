@@ -1,6 +1,6 @@
 /**
- * Self-contained checks: pure functions, config store, log ring, wire protocol.
- * Run with `node test/unit.test.mjs`. No test framework, no dependencies.
+ * 自包含检查：纯函数、配置存储、日志环形缓冲、帧协议。
+ * 用 `node test/unit.test.mjs` 运行。无测试框架、无依赖。
  */
 import { rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
@@ -23,7 +23,7 @@ const t = (name, cond, extra = '') => {
   else { fail += 1; console.log('FAIL ' + name + (extra ? ' :: ' + extra : '')) }
 }
 
-// --- wire: RFC 6455 accept sample, frame roundtrip, masked decode, partial buffer
+// --- 帧协议：RFC 6455 accept 样例、帧往返、掩码解码、半截缓冲
 t('acceptKey RFC sample', acceptKey('dGhlIHNhbXBsZSBub25jZQ==') === 's3pPLMBiTxaQ9kYGzzhZRbK+xOo=')
 const text = JSON.stringify({ action: 'send_msg', params: { a: 1 } })
 const rt = takeFrame(Buffer.from(encodeText(text)))
@@ -43,7 +43,7 @@ t('masked client frame decodes', masked !== undefined && masked.data.toString('u
 t('partial buffer returns undefined', takeFrame(Buffer.from([0x81])) === undefined)
 t('control frame is two bytes', encodeControl(0x8).length === 2)
 
-// --- config
+// --- 配置
 const needsToken = normalizeConfig({ mode: 'reverse', accessToken: '', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write' })
 t('reverse without token is rejected', needsToken.problems.some((p) => p.includes('accessToken')))
 const clamped = normalizeConfig({ port: 99999 })
@@ -59,14 +59,14 @@ t('dead debounce fields are gone; only the interject switch remains', !('debounc
 t('no group reply config remains', !('groupDebounceMs' in DEFAULTS) && !('groupAutoInterject' in DEFAULTS))
 t('the reply group holds the send mode then the interject switch', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'reply').fields) === '["replyMode","privateAutoInterject"]')
 
-// reply mode: stream (send as it goes, default) or final (buffer, one message)
+// 回复模式：stream（边说边发，默认）或 final（缓冲后合成一条）
 t('reply mode defaults to stream', DEFAULTS.replyMode === 'stream')
 t('reply mode is its own field kind', FIELD_KINDS.replyMode === 'replyMode')
 t('a valid reply mode is kept', normalizeConfig({ replyMode: 'final' }).value.replyMode === 'final')
 t('an unknown reply mode falls back to stream', normalizeConfig({ replyMode: 'burst' }).value.replyMode === 'stream')
 t('a non-string reply mode falls back to stream', normalizeConfig({ replyMode: 3 }).value.replyMode === 'stream')
 
-// the administrator is a single QQ number stored on the access page
+// 管理员是单个 QQ 号，存放在访问控制页
 t('admin user id defaults to empty', DEFAULTS.adminUserId === '')
 t('admin user id is a string field', FIELD_KINDS.adminUserId === 'string')
 t('admin user id is trimmed', normalizeConfig({ adminUserId: ' 12345 ' }).value.adminUserId === '12345')
@@ -74,7 +74,7 @@ t('a numeric admin id is stored as a string', normalizeConfig({ adminUserId: 123
 t('a non-numeric admin id is dropped', normalizeConfig({ adminUserId: 'abc' }).value.adminUserId === '')
 t('admin user id is not on the settings groups', !FIELD_GROUPS.some((group) => group.fields.includes('adminUserId')))
 
-// context-compaction ratio: 0-1 (or a percentage), 0 disables the pre-reply check
+// 上下文压缩比例：0-1（也可用百分数），0 表示回复前不检查
 t('compact ratio defaults to 0.8', DEFAULTS.compactRatio === 0.8)
 t('compact ratio is on the session settings group', FIELD_GROUPS.find((group) => group.id === 'session').fields.includes('compactRatio'))
 t('a fraction compact ratio is kept', normalizeConfig({ compactRatio: 0.5 }).value.compactRatio === 0.5)
@@ -84,7 +84,7 @@ t('an out-of-range compact ratio falls back', normalizeConfig({ compactRatio: 20
 t('ratioReached compares consumed over window', ratioReached(0.8, 800, 1000) === true && ratioReached(0.8, 799, 1000) === false)
 t('ratioReached is false when disabled or unmeasured', ratioReached(0, 999, 1000) === false && ratioReached(0.8, undefined, 1000) === false && ratioReached(0.8, 800, 0) === false)
 
-// maybeCompact calls the live compaction service only when the ratio is reached
+// 只有比例达标时 maybeCompact 才调用在线压缩服务
 {
   const compactionCalls = []
   const meter = { contextPressure: () => ({ pressureTokens: 900, contextWindow: 1000 }) }
@@ -102,7 +102,7 @@ t('ratioReached is false when disabled or unmeasured', ratioReached(0, 999, 1000
   const off = new ChatBridge({ ctx: mkCtx(), config: { ...DEFAULTS, compactRatio: 0 }, connection: {}, log })
   await off.maybeCompact('private:1', { agent })
   t('maybeCompact is disabled by ratio 0', compactionCalls.length === 1)
-  // a busy agent (compaction throws) must not reject the caller
+  // agent 忙（压缩抛错）也不能让调用方收到异常
   const busyCompaction = { compactNow: async () => { throw new Error('busy') } }
   const busyCtx = { on: () => () => {}, get: (name) => (name === 'tokenMeter' ? meter : name === 'compaction' ? busyCompaction : undefined) }
   const busyBridge = new ChatBridge({ ctx: busyCtx, config: { ...DEFAULTS, compactRatio: 0.8 }, connection: {}, log })
@@ -111,15 +111,15 @@ t('ratioReached is false when disabled or unmeasured', ratioReached(0, 999, 1000
   t('a compaction failure never blocks the answer', threw === false)
 }
 
-// delete-inbound-media mirrors delete-sent-media and defaults on
+// 删除入站媒体与删除已发媒体一致，默认开启
 t('the inbound-delete switch defaults on', DEFAULTS.deleteInboundMedia === true)
 t('the inbound-delete switch is a boolean field', FIELD_KINDS.deleteInboundMedia === 'boolean')
 t('the media group orders inbound delete before sent delete', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'media').fields) === '["inboundMedia","inboundMediaMaxMb","deleteInboundMedia","deleteSentMedia"]')
 t('a non-boolean inbound-delete falls back to the default', normalizeConfig({ deleteInboundMedia: 'no' }).value.deleteInboundMedia === true)
 t('an explicit false inbound-delete is kept', normalizeConfig({ deleteInboundMedia: false }).value.deleteInboundMedia === false)
 
-// voice: code only downloads and annotates the message id. It makes NO non-standard
-// call itself — the prompt guides the model to call onebot_call's fetch_ptt_text.
+// 语音：代码只下载并标注消息 ID，自身绝不发起非标准调用——
+// 由提示词引导模型去调 onebot_call 的 fetch_ptt_text。
 t('sttEnabled is not a config field', DEFAULTS.sttEnabled === undefined && FIELD_KINDS.sttEnabled === undefined)
 t('ffmpegPath is not a config field', DEFAULTS.ffmpegPath === undefined && FIELD_KINDS.ffmpegPath === undefined)
 {
@@ -139,7 +139,7 @@ t('ffmpegPath is not a config field', DEFAULTS.ffmpegPath === undefined && FIELD
   rmSync(dir, { recursive: true, force: true })
 }
 
-// session prefix: lowercase-letter start, safe alphabet, default on rejection
+// 会话前缀：小写字母开头、安全字符集，不合格时回退默认值
 t('session prefix default', DEFAULTS.sessionPrefix === 'onebot')
 t('session prefix accepts lowercase', normalizeConfig({ sessionPrefix: 'qq-bot' }).value.sessionPrefix === 'qq-bot')
 t('session prefix rejects uppercase start', normalizeConfig({ sessionPrefix: 'QQ' }).value.sessionPrefix === 'onebot')
@@ -148,11 +148,11 @@ t('session prefix rejects CJK', normalizeConfig({ sessionPrefix: '我的QQ' }).v
 t('session prefix rejects spaces', normalizeConfig({ sessionPrefix: 'a b' }).value.sessionPrefix === 'onebot')
 t('session prefix empty means default', normalizeConfig({ sessionPrefix: '' }).value.sessionPrefix === 'onebot')
 
-// workspacePath is required
+// workspacePath 为必填项
 t('workspace is required', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '' }).problems.some((p) => p.includes('workspacePath')))
 t('workspace accepted when set', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write' }).problems.length === 0)
 
-// mode-scoped fields: the form shows only the current mode's connection inputs
+// 按模式区分的字段：表单只显示当前模式的连接输入
 t('host and port belong to reverse', MODE_FIELDS.host === 'reverse' && MODE_FIELDS.port === 'reverse')
 t('url belongs to forward', MODE_FIELDS.url === 'forward')
 t('mode and token belong to both modes', MODE_FIELDS.mode === undefined && MODE_FIELDS.accessToken === undefined)
@@ -182,7 +182,7 @@ t('corrupt file degrades to defaults', corrupt.read().port === 8643)
 t('invalid write is refused', (await corrupt.write({ port: 0 })).ok === false)
 t('write without a workspace is refused', (await new ConfigStore('/tmp/onebot-mini-nw.json').write({ mode: 'forward', accessToken: 'tk', workspacePath: '', sessionPermission: 'workspace-write' })).ok === false)
 
-// --- log ring
+// --- 日志环形缓冲
 const log = new LogBus({ capacity: 50 })
 for (let i = 0; i < 80; i += 1) log.record('event', { i })
 const s1 = log.snapshot(0, 200)
@@ -196,7 +196,7 @@ t('preview truncates by code point', preview('a'.repeat(100), 10) === 'aaaaaaaaa
 const cyclic = {}; cyclic.self = cyclic
 t('cyclic value does not throw', typeof redact(cyclic) === 'object')
 
-// --- bridge pure functions
+// --- 桥的纯函数
 t('chat id private', chatIdOf('private', 123) === 'private:123')
 t('chat id group', chatIdOf('group', 456) === 'group:456')
 t('chat id splits back', JSON.stringify(splitChatId('group:456')) === '{"kind":"group","id":"456"}')
@@ -221,17 +221,17 @@ t('prefix can be disabled', speakerPrefix({ sender: { card: 'x' } }, 'group', fa
 t('only text blocks are joined', textOfMessage({ content: [{ type: 'text', text: 'a' }, { type: 'reasoning', text: 'secret' }, { type: 'text', text: 'b' }] }) === 'a\nb')
 t('empty content yields empty text', textOfMessage({ content: [] }) === '')
 
-// --- onebot_call tool catalog and allowlist
+// --- onebot_call 工具目录与白名单
 const groupOf = (name) => TOOL_GROUPS.find((group) => group.actions.some((action) => action.name === name))
 t('catalog groups the send actions', groupOf('send_group_msg')?.id === 'message')
 t('catalog covers the NapCat core actions', ['set_group_ban', 'send_poke', 'delete_msg', 'nc_get_user_status', 'send_qzone_msg']
   .every((name) => isKnownAction(name)))
 t('dangerous actions stay out of the catalog', ['get_credentials', 'get_csrf_token', 'get_cookies', 'set_restart', 'bot_exit', 'send_packet', 'clean_cache', 'ocr_image']
   .every((name) => !isKnownAction(name)))
-// Pruned at the operator's request: the whole group album family, the Qzone
-// permission pair, the custom online status, everything but the two request
-// handlers, the read markers and forwards, the extended group/recent-session
-// queries, the bulk kick / admin / todo trio, and the group-file management set.
+// 按运营方要求裁剪：整组群相册、Qzone 权限对、自定义在线状态，
+// 以及除两个请求处理之外的全部接口、已读标记与转发、
+// 扩展的群与最近会话查询、批量踢人 / 管理 / 待办三件套，
+// 还有群文件管理整组。
 t('pruned actions stay out of the catalog', [
   'get_qun_album_list', 'get_group_album_media_list', 'upload_image_to_qun_album', 'upload_images_to_qun_album',
   'upload_video_to_qun_album', 'do_group_album_comment', 'del_group_album_media', 'set_group_album_media_like',
@@ -259,20 +259,20 @@ t('the capture cap is clamped low', normalizeConfig({ imageShowMaxMb: 0 }).value
 t('a valid image display cap is kept', normalizeConfig({ imageShowMaxMb: 8 }).value.imageShowMaxMb === 8)
 t('enabledGroups only lists groups with enabled actions', JSON.stringify(enabledGroups(new Set(['set_group_ban'])).map((g) => g.id)) === '["group"]')
 t('all actions flatten from the groups', ALL_ACTIONS.length === TOOL_GROUPS.reduce((sum, group) => sum + group.actions.length, 0))
-// standard vs extension classification (the tools page badges each row)
+// 标准与扩展分类（工具页给每一行打徽标）
 t('every action carries a boolean standard flag', TOOL_GROUPS.every((group) => group.actions.every((action) => typeof action.standard === 'boolean')))
 t('the standard set has 31 OneBot 11 actions', STANDARD_ACTIONS.size === 31)
 t('the standard flag matches the STANDARD_ACTIONS set', TOOL_GROUPS.every((group) => group.actions.every((action) => action.standard === STANDARD_ACTIONS.has(action.name))))
 t('fetch_ptt_text is marked as an extension', TOOL_GROUPS.find((g) => g.id === 'interaction').actions.find((a) => a.name === 'fetch_ptt_text').standard === false)
 t('send_msg is marked standard', TOOL_GROUPS.find((g) => g.id === 'message').actions.find((a) => a.name === 'send_msg').standard === true)
-// every action ships a structured doc + a generated default prompt
+// 每个动作都附带结构化文档与生成的默认提示词
 t('every catalogued action ships a default prompt', TOOL_GROUPS.every((group) => group.actions.every((action) => typeof action.defaultPrompt === 'string' && action.defaultPrompt.length > 0)))
 t('every catalogued action ships a params array', TOOL_GROUPS.every((group) => group.actions.every((action) => Array.isArray(action.params))))
 t('every documented parameter has a name, type, required flag and description', TOOL_GROUPS.every((group) => group.actions.every((action) => action.params.every((p) => typeof p.name === 'string' && p.name !== '' && typeof p.type === 'string' && typeof p.required === 'boolean' && typeof p.desc === 'string' && p.desc !== ''))))
 t('a documented action names its params and type labels', TOOL_GROUPS.find((g) => g.id === 'message').actions.find((a) => a.name === 'send_group_msg').defaultPrompt.includes('group_id（数字，必填）'))
 t('a no-arg action says so', TOOL_GROUPS.find((g) => g.id === 'query').actions.find((a) => a.name === 'get_login_info').defaultPrompt.includes('无需参数'))
 t('fetch_ptt_text documents its message_id parameter', TOOL_GROUPS.find((g) => g.id === 'interaction').actions.find((a) => a.name === 'fetch_ptt_text').defaultPrompt.includes('message_id'))
-// per-action prompt overrides live in config and are validated
+// 单动作提示词覆盖存在配置里并会被校验
 const promptNorm = normalizeConfig({ actionPrompts: { send_group_msg: '自定义群发说明', bogus_action: 'x', get_login_info: '   ', send_private_msg: 42 } }).value.actionPrompts
 t('a valid action prompt override is kept', promptNorm.send_group_msg === '自定义群发说明')
 t('unknown, blank and non-string prompt overrides are dropped', !('bogus_action' in promptNorm) && !('get_login_info' in promptNorm) && !('send_private_msg' in promptNorm))
@@ -292,7 +292,7 @@ const filteredDisabled = normalizeConfig({ onebotToolDisabled: ['set_group_ban',
 t('unknown and duplicate disabled actions are dropped', JSON.stringify(filteredDisabled) === '["set_group_ban"]', JSON.stringify(filteredDisabled))
 t('snapshot ships the tool catalog', Array.isArray(snap.toolCatalog) && snap.toolCatalog.length === TOOL_GROUPS.length)
 
-// --- image cache: url allow-list and account folders
+// --- 图片缓存：URL 白名单与账号目录
 import { isAllowedImageUrl } from '../imagecache.js'
 import { accountDir, profileCacheRoot } from '../cachepaths.js'
 t('a qzone image host is allowed', isAllowedImageUrl('http://photomaz.photo.store.qq.com/psc?/abc/b&bo=x'))
@@ -307,7 +307,7 @@ t('an account folder keeps only digits under QQ/', accountDir({}, '2000002').end
 t('the account folder follows the configured workspace', accountDir({ workspacePath: '/workspace/QQ' }, '2000002') === '/workspace/QQ/onebot-mini-cache/QQ/2000002')
 t('a hostile account id cannot escape the cache root', !accountDir({}, '../etc').includes('..'))
 
-// --- media segments
+// --- 媒体段
 import { buildSegment, MEDIA_KINDS, readFileAsBase64, MAX_MEDIA_BYTES, safeUnlink, mediaFailureNotice } from '../media.js'
 t('an image segment uses base64 when given base64', JSON.stringify(buildSegment('image', { base64: 'AAA' })) === '{"type":"image","data":{"file":"base64://AAA"}}')
 t('a segment uses the url when given a url', JSON.stringify(buildSegment('image', { url: 'http://x/y.png' })) === '{"type":"image","data":{"file":"http://x/y.png"}}')
@@ -315,14 +315,14 @@ t('a file segment carries its name', JSON.stringify(buildSegment('file', { url: 
 t('media kinds cover image, record, video and file', JSON.stringify(MEDIA_KINDS) === '["image","record","video","file"]')
 t('the media ceiling is 20 MB', MAX_MEDIA_BYTES === 20 * 1024 * 1024)
 
-// the unified send wrapper: text, media, or both in one send_msg call
+// 统一发送封装：文本、媒体，或两者合在一次 send_msg 调用
 {
   const { sendMedia, buildMessageSegments, sendMsgParams } = await import('../media.js')
   const textOnly = buildMessageSegments({ text: '你好' })
   t('text alone becomes one text segment', JSON.stringify(textOnly) === '[{"type":"text","data":{"text":"你好"}}]')
   const mixed = buildMessageSegments({ text: '看这张', kind: 'image', url: 'http://x/a.png' })
   t('text and an image mix into one ordered list', mixed.length === 2 && mixed[0].type === 'text' && mixed[1].type === 'image')
-  // the six documented combinations; only an image may share a message with text
+  // 文档化的六种组合；只有图片能与文本共处一条消息
   for (const [label, kind, withText, expected] of [
     ['纯文字', '', true, ['text']],
     ['纯图片', 'image', false, ['image']],
@@ -335,7 +335,7 @@ t('the media ceiling is 20 MB', MAX_MEDIA_BYTES === 20 * 1024 * 1024)
     const built = buildMessageSegments(opts)
     t('combination builds ' + label, JSON.stringify(built.map((seg) => seg.type)) === JSON.stringify(expected), JSON.stringify(built.map((seg) => seg.type)))
   }
-  // text with a voice clip / video / file is refused, not silently mixed
+  // 文本配语音 / 视频 / 文件会被拒绝，而不是悄悄混发
   {
     const refuseConn = { call: async () => ({ message_id: 1 }) }
     for (const kind of ['record', 'video', 'file']) {
@@ -358,7 +358,7 @@ t('the media ceiling is 20 MB', MAX_MEDIA_BYTES === 20 * 1024 * 1024)
   t('an empty message is refused', empty.ok === false)
 }
 
-// reply markers: only an image shares a message with text; the rest split out
+// 回复标记：只有图片与文本同条，其余单独拆开
 {
   const { groupReplySegments } = await import('../media.js')
   const seg = (type) => ({ type, data: {} })
@@ -378,11 +378,11 @@ t('a local file is read into base64', readBack.ok === true && typeof readBack.ba
 const missingFile = await readFileAsBase64('/tmp/definitely-not-here-xyz')
 t('a missing file is reported', missingFile.ok === false && missingFile.reason !== '')
 
-// the chat-facing notice must be short and free of paths or errno text
+// 面向聊天窗口的提示必须简短，不含路径或 errno 文本
 t('the media failure notice hides the path', !mediaFailureNotice('image').includes('/') && !mediaFailureNotice('image').includes('ENOENT'))
 t('the media failure notice names the kind', mediaFailureNotice('image').includes('图片') && mediaFailureNotice('file').includes('文件'))
 
-// safe deletion: only inside the allowed roots, never a directory, never a root
+// 安全删除：只允许白名单根目录内，绝不删目录、绝不删根本身
 const victim = '/tmp/onebot-unlink-' + process.pid + '.txt'
 writeFileSync(victim, 'bye', 'utf8')
 const unlinked = await safeUnlink(victim)
@@ -394,13 +394,13 @@ t('a root directory is refused', rootDir.ok === false)
 const dirPath = await safeUnlink('/tmp')
 t('the tmp root itself is refused', dirPath.ok === false)
 
-// --- the editable channel prompt
+// --- 可编辑的通道提示词
 import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, replyModeParagraph, adminParagraph, renderPrompt, PROMPT_PLACEHOLDERS, PROMPT_DEFS, renderToolCallPrompt } from '../prompt.js'
 t('the default prompt documents its placeholders', PROMPT_PLACEHOLDERS.every((p) => DEFAULT_CHANNEL_PROMPT.includes(p)))
 t('renderPrompt fills a placeholder', renderPrompt('x {actions} y', { actions: 'Z' }).includes('x Z y'))
 t('renderPrompt drops an empty placeholder line', !renderPrompt('a\n{media}\nb', { media: '' }).includes('{media}'))
 t('an unknown placeholder is left alone', renderPrompt('keep {unknown}', {}).includes('{unknown}'))
-// the reply-delivery sentence follows replyMode instead of being hardcoded
+// 回复投递那句跟随 replyMode，而不是写死
 t('the stream paragraph says replies stream segment by segment', replyModeParagraph('stream').includes('实时发出'))
 t('the final paragraph says one message per turn', replyModeParagraph('final').includes('只产生一条'))
 t('the default channel prompt carries the replyMode placeholder', DEFAULT_CHANNEL_PROMPT.includes('{replyMode}'))
@@ -410,7 +410,7 @@ t('an explicit final mode prompts one message', buildPlatformPrompt({ ...DEFAULT
 t('the old shipped prompt is migrated to the new placeholder', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
 t('the replyMode-only prompt is migrated too', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT_V2 }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
 t('an edited prompt is not migrated', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT + ' (edited)' }).value.channelPrompt.endsWith('(edited)'))
-// the administrator identity is injected into the model prompt
+// 管理员身份注入到模型提示词
 t('the default channel prompt carries the admin placeholder', DEFAULT_CHANNEL_PROMPT.includes('{admin}'))
 t('no admin paragraph when unset', adminParagraph('') === '')
 t('the admin paragraph names the admin QQ', adminParagraph('12345').includes('12345') && adminParagraph('12345').includes('优先'))
@@ -428,8 +428,8 @@ t('the tool-call prompt adds the enabled note when actions are allowed', renderT
 t('the tool-call prompt drops the note when the tool is off', !renderToolCallPrompt('X {enabledNote}', null).includes('仅接受'))
 t('the tool-call prompt falls back when empty', renderToolCallPrompt('', null).startsWith('执行一个动作'))
 t('the tool-call prompt no longer mentions a gateway', !/网关|NapCat/.test(renderToolCallPrompt('', null)))
-// the channel prompt hands the model every enabled action with its Chinese annotation,
-// and carries no gateway-specific wording — the model discovers tools by name + annotation.
+// 通道提示词把每个已启用动作连同中文注解交给模型，
+// 且不含网关专属措辞——模型靠名字 + 注解发现工具。
 {
   const prompt = buildPlatformPrompt(DEFAULTS)
   t('the channel prompt lists every catalog action by name', ALL_ACTIONS.every((name) => prompt.includes(name)))
@@ -438,7 +438,7 @@ t('the tool-call prompt no longer mentions a gateway', !/网关|NapCat/.test(ren
   t('the channel prompt has no gateway/NapCat wording', !/网关|NapCat/.test(prompt))
 }
 
-// --- cache inventory and manual clearing (against a throwaway profile)
+// --- 缓存清单与手动清理（针对一次性 profile）
 import { inventory, clearCache } from '../cacheinfo.js'
 const prevHome = process.env.DSH_HOME
 const prevProfile = process.env.DSH_PROFILE
@@ -449,7 +449,7 @@ rmSync('/tmp/onebot-cache-test-home', { recursive: true, force: true })
 mkdirSync(profDir, { recursive: true })
 writeFileSync(pathJoin(profDir, 'onebot-mini.json'), '{"mode":"reverse"}', 'utf8')
 writeFileSync(pathJoin(profDir, 'onebot-mini.log.jsonl'), '{"a":1}\n{"a":2}\n', 'utf8')
-// Follow the cache convention: <base>/QQ/<account>/ (here base falls back to the profile).
+// 遵循缓存约定：<base>/QQ/<account>/（此处 base 回退到 profile）。
 const cacheCfg = {}
 const acctDir = pathJoin(profDir, 'onebot-mini-cache', 'QQ', '123')
 mkdirSync(acctDir, { recursive: true })
@@ -484,9 +484,9 @@ rmSync('/tmp/onebot-cache-test-home', { recursive: true, force: true })
 if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome
 if (prevProfile === undefined) delete process.env.DSH_PROFILE; else process.env.DSH_PROFILE = prevProfile
 
-// --- transport facade contract
-// The bridge calls `sendMessage` for every reply. A facade that only exposes
-// `sendText` silently breaks every reply, so both must be present.
+// --- 传输门面契约
+// 桥的每次回复都调用 `sendMessage`。只暴露
+// `sendText` 的门面会静默打断所有回复，所以两者都必须存在。
 import { readFileSync as readSrc } from 'node:fs'
 const indexSrc = readSrc(new URL('../index.js', import.meta.url), 'utf8')
 const facadeBlock = indexSrc.slice(indexSrc.indexOf('const transport = {'), indexSrc.indexOf('const getWorkspaceRegistry'))
@@ -497,9 +497,9 @@ t('the transport facade exposes status', facadeBlock.includes('status:'))
 t('the connection exposes sendMessage', (await import('../connection.js')).OneBotConnection.prototype.sendMessage !== undefined)
 t('the connection exposes sendText', (await import('../connection.js')).OneBotConnection.prototype.sendText !== undefined)
 
-// A tool result may only contain fields its output schema declares: an extra
-// field is rejected by the harness and the model sees an error even though the
-// action succeeded. sendMedia must therefore return exactly { ok, data, error }.
+// 工具结果只能包含输出 schema 声明的字段：多出的字段会被
+// harness 拒绝，动作明明成功模型却看到报错。所以
+// sendMedia 必须只返回 { ok, data, error }。
 import { readFileSync as readTools } from 'node:fs'
 const toolsSrc = readTools(new URL('../tools.js', import.meta.url), 'utf8')
 const schemaBlock = toolsSrc.slice(toolsSrc.indexOf('const OUTPUT_SCHEMA'), toolsSrc.indexOf('required:', toolsSrc.indexOf('const OUTPUT_SCHEMA')))
@@ -509,8 +509,8 @@ const sendSrc = (await import('../media.js')).sendMedia.toString()
 t('sendMedia returns only ok/data', !sendSrc.includes('source:') && sendSrc.includes('return { ok: true, data }'))
 t('sendMedia still reports cleanup through a hook', sendSrc.includes('onCleanup'))
 
-// OneBot returns an array for list actions; the tool output must not force an
-// object, or the harness rejects the whole call ("value.data must be an object").
+// OneBot 的列表动作返回数组；工具输出不能强制为对象，
+// 否则 harness 会拒绝整次调用（报“value.data 必须是对象”）。
 const { registerTools } = await import('../tools.js')
 const captureTool = (call) => {
   let def
@@ -531,7 +531,7 @@ const nullTool = captureTool(async () => undefined)
 const nullOut = await nullTool.execute({ action: 'get_group_member_list', params: {} })
 t('an absent payload becomes null (lossless JSON)', nullOut.ok === true && nullOut.data === null)
 
-// --- local actions ride on onebot_call instead of separate tools
+// --- 本地动作搭在 onebot_call 上，而不是另立工具
 {
   const registered = []
   const connection = { call: async (action) => { registered.push(action); return {} } }
@@ -550,8 +550,8 @@ t('an absent payload becomes null (lossless JSON)', nullOut.ok === true && nullO
   t('list_files runs locally and never hits the transport', listed.ok === true && listed.data.count === 1 && !registered.includes('list_files'))
   const refused = await tool.execute({ action: 'set_group_ban', params: {} })
   t('a switched-off action is refused and points at the tools page', refused.ok === false && refused.error.includes('switched off'))
-  // A pruned action is not in the catalog at all, so the refusal must not tell
-  // the model to go enable it in the settings.
+  // 被裁剪的动作根本不在目录里，所以拒绝时不能
+  // 让模型去设置里把它打开。
   const pruned = await tool.execute({ action: 'get_qun_album_list', params: {} })
   t('a pruned action is refused as not offered', pruned.ok === false
     && pruned.error.includes('not offered by this plugin') && !pruned.error.includes('switched off'))
@@ -561,7 +561,7 @@ t('an absent payload becomes null (lossless JSON)', nullOut.ok === true && nullO
   rmSync(dir, { recursive: true, force: true })
 }
 
-// --- media prompt forbids the permission hallucination
+// --- 媒体提示词禁止权限幻觉
 import { mediaParagraph } from '../prompt.js'
 const mediaText = mediaParagraph()
 t('the media paragraph requires the send_message action', mediaText.includes('必须') && mediaText.includes('send_message'))
@@ -569,7 +569,7 @@ t('the media paragraph forbids claiming no permission', mediaText.includes('不�
 t('the media paragraph forbids the admin excuse', mediaText.includes('绝不要让用户把你设为管理员'))
 t('the media paragraph requires listing first', mediaText.includes('list_files'))
 
-// --- incoming media: placeholders become readable local paths
+// --- 入站媒体：占位符变成可读的本地路径
 import {
   inboxRoot, chatFolder, safeFileName, extensionFor, sourceFromData, sourceFromResponse,
   mediaPlaceholder, buildInboundText, unescapeCq, sniffImageExtension,
@@ -596,8 +596,8 @@ t('the known-type set covers cards and media', ['json', 'xml', 'image', 'record'
 t('image magic bytes pick the extension', sniffImageExtension(Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')) === 'png'
   && sniffImageExtension(Buffer.from('ffd8ffe0', 'hex')) === 'jpg')
 
-// buildInboundText downloads a base64 image and rewrites the placeholder to a
-// readable path (no network: the source is inline base64).
+// buildInboundText 下载 base64 图片并把占位符改写为可读路径
+// （不走网络：来源就是内联 base64）。
 const tmpInboxBase = '/tmp/onebot-inbound-test-' + process.pid
 const inboundConfig = { inboundDir: tmpInboxBase, inboundMediaMaxMb: 5 }
 const fakeConnection = { call: async () => ({}) }
@@ -620,7 +620,7 @@ t('an inbound image is saved and referenced by path', /\[图片: \/tmp\/onebot-i
 t('the saved image file exists', built.saved.length === 1 && existsSync(built.saved[0].path))
 rmSync(tmpInboxBase, { recursive: true, force: true })
 
-// a media segment with no usable source degrades to the bare placeholder
+// 没有可用来源的媒体段降级为裸占位符
 const missing = await buildInboundText({
   segments: [{ type: 'image', data: {} }],
   chatId: 'private:43', chat: { kind: 'private', id: '43' },
