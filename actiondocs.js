@@ -528,7 +528,7 @@ export const ACTION_DOCS = Object.freeze({
       P('chatType', 'enum', false, '"private" 私聊 或 "group" 群聊；省略则用当前会话'),
       P('chatId', 'string', false, '目标 QQ 号或群号；省略则用当前会话'),
     ],
-    summary: '向 QQ 会话发送一条消息，支持纯文字、纯图片、纯语音、纯视频、纯文件，以及文字+图片、文字+语音、文字+视频、文字+文件',
+    summary: '向 QQ 会话发送一条消息，支持六种组合：纯文字、纯图片、文字+图片、纯语音、纯视频、纯文件',
     note: '六种组合：'
       + '①纯文字 params={"text":"..."}；'
       + '②纯图片 params={"kind":"image","path":"/绝对/路径.png"}；'
