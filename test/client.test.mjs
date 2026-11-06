@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs'
 import { FIELD_GROUPS } from '../config.js'
 import { TOOL_GROUPS } from '../toolcatalog.js'
+import { PROMPT_DEFS } from '../prompt.js'
 
 const src = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
@@ -156,9 +157,18 @@ for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsReset', 'promptsSa
   'promptDefChannel', 'promptDefChannelHint', 'promptDefInbound', 'promptDefInboundHint',
   'promptDefToolCall', 'promptDefToolCallHint',
   'promptDefToolMedia', 'promptDefToolMediaHint', 'promptDefInterject', 'promptDefInterjectHint',
-  'promptsPlaceholders', 'promptsNoPlaceholders']) {
+  'promptsPlaceholders', 'promptsNoPlaceholders',
+  'phReplyMode', 'phAdmin', 'phSenderPrefix', 'phMedia', 'phTools', 'phActions', 'phInbound', 'phEnabledNote']) {
   t('prompt copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
+const phKeyOf = (token) => {
+  const inner = String(token ?? '').replace(/[{}]/g, '')
+  return 'ph' + inner.charAt(0).toUpperCase() + inner.slice(1)
+}
+t('every prompt placeholder ships a localized explanation',
+  PROMPT_DEFS.every((def) => (Array.isArray(def.placeholders) ? def.placeholders : [])
+    .every((token) => typeof zh[phKeyOf(token)] === 'string' && zh[phKeyOf(token)] !== ''
+      && typeof en[phKeyOf(token)] === 'string' && en[phKeyOf(token)] !== '')))
 for (const key of ['fieldInboundMedia', 'hintInboundMedia', 'fieldInboundMediaMaxMb', 'hintInboundMediaMaxMb', 'fieldDeleteInboundMedia', 'hintDeleteInboundMedia']) {
   t('inbound media label present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
