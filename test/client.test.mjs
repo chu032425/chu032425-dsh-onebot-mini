@@ -161,7 +161,6 @@ for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsReset', 'promptsSa
   'promptDefReplyModeStream', 'promptDefReplyModeStreamHint', 'promptDefReplyModeFinal', 'promptDefReplyModeFinalHint',
   'promptDefAdmin', 'promptDefAdminHint', 'promptDefSenderPrefix', 'promptDefSenderPrefixHint',
   'promptDefMedia', 'promptDefMediaHint', 'promptDefTools', 'promptDefToolsHint',
-  'promptDefActions', 'promptDefActionsHint',
   'promptDefToolCall', 'promptDefToolCallHint',
   'promptDefToolMedia', 'promptDefToolMediaHint', 'promptDefInterject', 'promptDefInterjectHint',
   'promptsPlaceholders', 'promptsNoPlaceholders', 'promptsCollapseHint', 'promptsDirtyMark',

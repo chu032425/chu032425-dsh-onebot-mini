@@ -18,7 +18,7 @@
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, GROUP_LABELS } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, actionsParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes } from './inbound.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
@@ -1380,7 +1380,7 @@ export function buildPlatformPrompt(config) {
     const overrides = config?.actionPrompts !== null && typeof config?.actionPrompts === 'object' && !Array.isArray(config.actionPrompts)
       ? config.actionPrompts
       : {}
-    const lines = [actionsParagraph(config?.actionsPrompt)]
+    const lines = []
     // Advertise exactly what the operator left enabled, with each action's own
     // prompt (built-in doc or the operator's override), so the model never wastes
     // a turn on an action that would be refused and knows the parameters.

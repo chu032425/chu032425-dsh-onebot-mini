@@ -140,13 +140,12 @@ export function mediaParagraph(template) {
   return custom !== '' ? custom : DEFAULT_MEDIA_PROMPT
 }
 
-/** 默认：工具清单段落（工具启用时注入）。 */
+/** 默认：工具清单段落（工具启用时注入；逐工具用法见各自的工具定义）。 */
 export const DEFAULT_TOOLS_PROMPT = [
   '## 本插件提供的工具（所有 QQ 相关操作都必须使用这些工具）',
-  '- onebot_call：执行任意 OneBot 11 动作（发消息、群管理、查询、互动、QQ 空间、群相册等）。把动作名放进 action，参数放进 params。',
-  '- onebot_send_media：向当前 QQ 会话发送图片、语音、视频或文件；可直接传本机文件路径（自动内联字节）或 URL。',
-  '- onebot_list_files：列出宿主机某个目录下的文件，发本地文件前先用它确认真实文件名。',
+  '- 本插件注册了 onebot_call、onebot_send_media、onebot_list_files 三个工具；各自的用途与参数见对应的工具定义。',
   '- 所有 QQ 相关操作（发消息、发图片/语音/视频/文件、群管理、查询等）都必须通过上述工具完成；不要使用任何其他以 qq_ 开头的工具或第三方 QQ 工具。如果工具报错，请如实转述错误，不要声称没有权限。',
+  '- 调用 onebot_call 时动作名放 action、参数放 params，且只接受已启用的动作；下面按分组列出当前可用的动作。',
 ].join('\n')
 
 /**
@@ -163,19 +162,6 @@ export function toolsParagraph(allow, template) {
   if (!(allow instanceof Set)) return ''
   const custom = String(template ?? '').trim()
   return custom !== '' ? custom : DEFAULT_TOOLS_PROMPT
-}
-
-/** 默认：动作清单前的说明（工具启用时注入，具体动作列表在代码里生成）。 */
-export const DEFAULT_ACTIONS_PROMPT = '- 除纯文本回复外的任何操作，都要调用 onebot_call 工具，并在 action 填 OneBot 动作名、params 填参数。下面只接受已启用的动作，其他一律拒绝。每条动作都写明了功能、参数和用法。'
-
-/**
- * 动作清单前的说明（可被提示词页覆盖）。
- * @param template - 覆盖文本；为空则用默认。
- * @returns 该段落。
- */
-export function actionsParagraph(template) {
-  const custom = String(template ?? '').trim()
-  return custom !== '' ? custom : DEFAULT_ACTIONS_PROMPT
 }
 
 /** 频道模板声明的占位符。 */
@@ -210,8 +196,8 @@ export function inboundParagraph(template) {
  *
  * `{enabledNote}` 在工具有效时展开为「只接受已启用动作」的说明，关闭时展开为空。
  */
-export const DEFAULT_TOOL_CALL_PROMPT = '执行一个 OneBot 11 动作，例如 send_private_msg、send_group_msg、'
-  + 'get_group_info、set_group_ban。用它发送图片、文件或任何非纯文本消息。不确定用哪个动作时，按动作名称与中文注释自行挑选。动作结果以 JSON 返回。{enabledNote}'
+export const DEFAULT_TOOL_CALL_PROMPT = '执行一个 OneBot 11 动作：把动作名放进 action，参数放进 params。'
+  + '不确定用哪个动作时，按动作名称与中文注释自行挑选。动作结果以 JSON 返回。{enabledNote}'
 
 /** `onebot_send_media` 工具的默认描述。 */
 export const DEFAULT_TOOL_MEDIA_PROMPT = '向当前 QQ 会话发送图片、语音、视频或文件。'
@@ -242,7 +228,6 @@ export const PROMPT_DEFS = Object.freeze([
   Object.freeze({ id: 'senderPrefix', field: 'senderPrefixPrompt', labelKey: 'promptDefSenderPrefix', placeholders: Object.freeze([]), default: DEFAULT_SENDER_PREFIX_PROMPT }),
   Object.freeze({ id: 'media', field: 'mediaPrompt', labelKey: 'promptDefMedia', placeholders: Object.freeze([]), default: DEFAULT_MEDIA_PROMPT }),
   Object.freeze({ id: 'tools', field: 'toolsPrompt', labelKey: 'promptDefTools', placeholders: Object.freeze([]), default: DEFAULT_TOOLS_PROMPT }),
-  Object.freeze({ id: 'actions', field: 'actionsPrompt', labelKey: 'promptDefActions', placeholders: Object.freeze([]), default: DEFAULT_ACTIONS_PROMPT }),
   Object.freeze({ id: 'inbound', field: 'inboundPrompt', labelKey: 'promptDefInbound', placeholders: Object.freeze([]), default: DEFAULT_INBOUND_PROMPT }),
   Object.freeze({ id: 'toolCall', field: 'toolCallPrompt', labelKey: 'promptDefToolCall', placeholders: Object.freeze(['{enabledNote}']), default: DEFAULT_TOOL_CALL_PROMPT }),
   Object.freeze({ id: 'toolMedia', field: 'toolMediaPrompt', labelKey: 'promptDefToolMedia', placeholders: Object.freeze([]), default: DEFAULT_TOOL_MEDIA_PROMPT }),
