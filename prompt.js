@@ -111,8 +111,12 @@ export function adminParagraph(adminUserId, template) {
   return base.replace(/\{adminId\}/g, id)
 }
 
-/** 默认：群聊发言人前缀说明。 */
-export const DEFAULT_SENDER_PREFIX_PROMPT = '- 群消息会带有 [HH:MM 昵称(QQ)] 前缀，以便区分不同发言人。'
+/** 旧版：群聊发言人前缀说明（只有时间与昵称，没有会话和发送者 QQ）。 */
+export const LEGACY_SENDER_PREFIX_PROMPT = '- 群消息会带有 [HH:MM 昵称(QQ)] 前缀，以便区分不同发言人。'
+
+/** 默认：会话 + 发送者抬头说明。抬头由插件从消息帧里解析好再交给模型，
+ * 群聊/私聊都带，模型不必自己从有没有前缀去猜会话和发言人。 */
+export const DEFAULT_SENDER_PREFIX_PROMPT = '- 每条消息开头都会带一个「会话 + 发送者」抬头：群聊形如 [群聊 2000003 · 21:18 昵称(QQ号·群主/管理员/成员)]，私聊形如 [私聊 2000001 · 21:18 昵称(QQ号)]。抬头里的会话就是你要回复的会话，抬头里的人就是这条消息的发送者。'
 
 /**
  * 群聊发言人前缀段落（可被提示词页覆盖）。

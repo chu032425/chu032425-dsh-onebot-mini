@@ -17,7 +17,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_INBOUND_PROMPT, DEFAULT_POKE_PROMPT, PROMPT_DEFS } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, LEGACY_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_INBOUND_PROMPT, DEFAULT_POKE_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** DSH 主目录：先看 `$DSH_HOME`，再看 `~/.dsh`。 */
 export function dshHome() {
@@ -298,6 +298,12 @@ export function normalizeConfig(raw) {
   // `{replyMode}` 但还没有 `{admin}`。运营者改过的提示词绝不动。
   if (value.channelPrompt === LEGACY_CHANNEL_PROMPT || value.channelPrompt === LEGACY_CHANNEL_PROMPT_V2) {
     value.channelPrompt = DEFAULT_CHANNEL_PROMPT
+  }
+
+  // 旧版发言人前缀说明只提「[HH:MM 昵称(QQ)]」，而抬头现在同时解析出会话和
+  // 发送者。仍等于旧默认的升级到新文案，运营者改过的保持原样。
+  if (value.senderPrefixPrompt === LEGACY_SENDER_PREFIX_PROMPT) {
+    value.senderPrefixPrompt = DEFAULT_SENDER_PREFIX_PROMPT
   }
 
   const rawPrefix = String(value.sessionPrefix ?? '').trim()

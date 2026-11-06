@@ -221,20 +221,42 @@ export function pokeText(frame, botId, chatKind) {
   return self ? '[戳一戳] 你戳了对方' : '[戳一戳] ' + name + '(' + poker + ') 戳了你'
 }
 
-/** 给群消息加上发言人前缀，让模型能区分参与者。私聊不需要前缀。
+/** 群成员角色的人类可读标签。 */
+function roleLabel(role) {
+  const value = String(role ?? '').trim()
+  if (value === 'owner') return '群主'
+  if (value === 'admin') return '管理员'
+  if (value === 'member') return '成员'
+  return ''
+}
+
+/** 从消息帧里解析出「会话 + 发送者」抬头，给模型一个确定的事实，而不是让它从
+ * 有没有前缀去猜。会话身份（群聊/私聊 + 群号/QQ）和发送者 QQ 永远带上；昵称、
+ * 角色、时间随 `senderPrefix` 开关，关掉时只留 id，避免暴露昵称。
  * @param frame - 消息事件。
  * @param chatKind - `private` 或 `group`。
- * @param enabled - 前缀是否配置为开。
- * @returns 前缀（可能为空）。 */
-export function speakerPrefix(frame, chatKind, enabled) {
-  if (!enabled || chatKind !== 'group') return ''
-  const sender = frame.sender !== null && typeof frame.sender === 'object' ? frame.sender : {}
+ * @param senderPrefixEnabled - 是否附带昵称/角色/时间。
+ * @returns 抬头文本，如 `[群聊 2000003 · 21:18 示例昵称(2000001·管理员)] `。 */
+export function chatHeader(frame, chatKind, senderPrefixEnabled) {
+  const groupId = String(frame?.group_id ?? '')
+  const userId = String(frame?.user_id ?? '')
+  const session = chatKind === 'group'
+    ? '群聊 ' + (groupId !== '' ? groupId : '(未知群)')
+    : '私聊 ' + (userId !== '' ? userId : '(未知)')
+  if (!senderPrefixEnabled) {
+    // 开关关掉只是不暴露昵称，会话身份和发送者 id 仍然给足，模型才不会失明。
+    return chatKind === 'group' && userId !== ''
+      ? '[' + session + ' · ' + userId + '] '
+      : '[' + session + '] '
+  }
+  const sender = frame?.sender !== null && typeof frame?.sender === 'object' ? frame.sender : {}
   const name = String(sender.card || sender.nickname || 'unknown')
-  const id = String(frame.user_id ?? '')
-  const clock = new Date(typeof frame.time === 'number' ? frame.time * 1000 : Date.now())
+  const role = chatKind === 'group' ? roleLabel(sender.role) : ''
+  const who = name + '(' + userId + (role !== '' ? '·' + role : '') + ')'
+  const clock = new Date(typeof frame?.time === 'number' ? frame.time * 1000 : Date.now())
   const hh = String(clock.getHours()).padStart(2, '0')
   const mm = String(clock.getMinutes()).padStart(2, '0')
-  return '[' + hh + ':' + mm + ' ' + name + '(' + id + ')] '
+  return '[' + session + ' · ' + hh + ':' + mm + ' ' + who + '] '
 }
 
 /** 解析一个 `provider::model` 配置串。
@@ -507,7 +529,7 @@ export class ChatBridge {
       return
     }
 
-    const text = speakerPrefix(frame, chat.kind, this.config.senderPrefix) + body
+    const text = chatHeader(frame, chat.kind, this.config.senderPrefix) + body
     await this.dispatch(chatId, chat, text, frame, savedPaths)
   }
 

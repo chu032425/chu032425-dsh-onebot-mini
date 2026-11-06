@@ -301,7 +301,7 @@ await bridge.handleInbound(inbound({
 }))
 const groupChat = bridge.chats.get('group:888')
 t('mentioned group message is handled', groupChat !== undefined)
-t('group text carries the speaker prefix', /^\[\d\d:\d\d 小明\(20002\)\] /.test(groupChat.agent.followups[0].content[0].text))
+t('group text carries the session and speaker header', /^\[群聊 888 · \d\d:\d\d 小明\(20002\)\] /.test(groupChat.agent.followups[0].content[0].text))
 
 const before = groupChat.agent.followups.length
 await bridge.handleInbound(inbound({

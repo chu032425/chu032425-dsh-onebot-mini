@@ -11,7 +11,7 @@ import { TOOL_GROUPS, ALL_ACTIONS, STANDARD_ACTIONS, isKnownAction, computeAllow
 import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage,
-  isAddressed, speakerPrefix, textOfMessage, buildPlatformPrompt,
+  isAddressed, chatHeader, textOfMessage, buildPlatformPrompt,
   ratioReached, ChatBridge, isPoke, pokeTarget, pokeText,
   messageSegments, isContentlessMessage,
 } from '../bridge.js'
@@ -239,9 +239,14 @@ t('mention via segment', isAddressed({ message: [{ type: 'at', data: { qq: '1000
 t('mention for another user', isAddressed({ message: [{ type: 'at', data: { qq: '999' } }] }, '10001') === false)
 t('unknown bot fails closed', isAddressed({ message: [{ type: 'at', data: { qq: '10001' } }] }, '') === false)
 t('mention via cq string', isAddressed({ message: '[CQ:at,qq=10001] hi' }, '10001') === true)
-t('group prefix has speaker', speakerPrefix({ sender: { card: '小明' }, user_id: 20002, time: 1700000000 }, 'group', true).startsWith('['))
-t('private prefix is empty', speakerPrefix({ sender: {} }, 'private', true) === '')
-t('prefix can be disabled', speakerPrefix({ sender: { card: 'x' } }, 'group', false) === '')
+const groupHeader = chatHeader({ group_id: 888, sender: { card: '小明', role: 'admin' }, user_id: 20002, time: 1700000000 }, 'group', true)
+t('group header names the session', groupHeader.startsWith('[群聊 888 · '))
+t('group header names the speaker and role', groupHeader.includes('小明(20002·管理员)]'))
+const privateHeader = chatHeader({ sender: { nickname: '小红' }, user_id: 20002, time: 1700000000 }, 'private', true)
+t('private header names the session', privateHeader.startsWith('[私聊 20002 · '))
+t('private header names the speaker', privateHeader.includes('小红(20002)]'))
+t('header keeps the session and id when the prefix is off', chatHeader({ group_id: 888, sender: { card: 'x' }, user_id: 20002 }, 'group', false) === '[群聊 888 · 20002] ')
+t('header falls back to the QQ id when there is no name', chatHeader({ user_id: 20002, time: 1700000000 }, 'private', true).includes('unknown(20002)]'))
 t('only text blocks are joined', textOfMessage({ content: [{ type: 'text', text: 'a' }, { type: 'reasoning', text: 'secret' }, { type: 'text', text: 'b' }] }) === 'a\nb')
 t('empty content yields empty text', textOfMessage({ content: [] }) === '')
 
