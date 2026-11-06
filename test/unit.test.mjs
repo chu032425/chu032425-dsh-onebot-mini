@@ -13,6 +13,7 @@ import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage,
   isAddressed, speakerPrefix, textOfMessage, buildPlatformPrompt,
   ratioReached, ChatBridge, isPoke, pokeTarget, pokeText,
+  messageSegments, isContentlessMessage,
 } from '../bridge.js'
 import { tmpdir } from 'node:os'
 
@@ -208,6 +209,14 @@ t('flatten keeps at-all', flattenMessage([{ type: 'at', data: { qq: 'all' } }]) 
 t('a json mini-program card becomes a labelled placeholder', flattenMessage([{ type: 'json', data: { data: JSON.stringify({ prompt: '[QQ小程序]', desc: '某小程序' }) } }]) === '[卡片: QQ小程序]')
 t('a card-only message is not flattened to empty', flattenMessage([{ type: 'json', data: {} }]).startsWith('[卡片'))
 t('an unknown segment yields nothing to the model', flattenMessage([{ type: 'markdown', data: {} }]) === '')
+
+// --- 空消息事件（网关在对方接收/下载文件后补发，不是用户输入）
+t('an empty segment array is contentless', isContentlessMessage({ message: [], raw_message: '' }) === true)
+t('a missing message field is contentless', isContentlessMessage({ raw_message: '' }) === true)
+t('a message with one segment is not contentless', isContentlessMessage({ message: [{ type: 'text', data: { text: 'hi' } }] }) === false)
+t('a segment-less frame still exposes raw_message', messageSegments({ raw_message: 'hi' }) === 'hi')
+t('message segments prefer the array', Array.isArray(messageSegments({ message: [{ type: 'text', data: { text: 'x' } }], raw_message: 'y' })) === true)
+t('an empty message exposes no segments', messageSegments({ message: [] }).length === 0)
 
 // --- 戳一戳事件（通知类，不是消息）
 const pokeFrame = (extra = {}) => ({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', user_id: 2000001, target_id: 2000002, group_id: 2000003, ...extra })

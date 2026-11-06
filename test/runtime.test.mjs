@@ -976,6 +976,18 @@ bridgeUnknown.start()
 await bridgeUnknown.handleInbound(inbound({ user_id: 31007, message_id: 316, message: [{ type: 'markdown', data: { content: 'x' } }] }))
 t('an unsupported message still gets a reply', unknownSent.length === 1 && unknownSent[0].includes('暂时不能处理'), JSON.stringify(unknownSent))
 t('an unsupported message does not create an agent turn', bridgeUnknown.chats.get('private:31007') === undefined)
+
+// 网关在对方接收/下载文件后会补发一个 message: [] 的空事件。
+// 它不是用户输入：不许回「暂时不能处理」，也不许起 agent 回合。
+const emptySent = []
+const emptyTransport = { selfId: '1', state: 'online', sendText: async (chat, text) => { emptySent.push(text); return { message_id: 1 } }, sendMessage: async () => ({ message_id: 1 }), call: async () => ({}) }
+const bridgeEmpty = new ChatBridge({ ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ' }, connection: emptyTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+bridgeEmpty.start()
+await bridgeEmpty.handleInbound(inbound({ user_id: 31008, message_id: 317, message: [] }))
+t('an empty message event gets no reply at all', emptySent.length === 0, JSON.stringify(emptySent))
+t('an empty message event does not create an agent turn', bridgeEmpty.chats.get('private:31008') === undefined)
+t('an empty message event is logged as ignored', log.entries.some((entry) => String(entry.note ?? '').includes('contentless message event ignored')))
+await bridgeEmpty.stop()
 await bridgeUnknown.stop()
 await bridgeInbound.stop()
 fsInbound.rmSync(inboundWs, { recursive: true, force: true })

@@ -61,6 +61,33 @@ export function ratioReached(threshold, used, window) {
   return consumed / capacity >= limit
 }
 
+/** 取出一个消息事件里的消息段。
+ * 优先用 `message`；个别网关只给 `raw_message`（CQ 字符串），此时退回它。
+ * @param frame - 消息事件帧。
+ * @returns 段数组、CQ 字符串，或空数组。
+ */
+export function messageSegments(frame) {
+  const message = frame !== null && typeof frame === 'object' ? frame.message : undefined
+  if (Array.isArray(message)) return message
+  if (typeof message === 'string' && message !== '') return message
+  const raw = frame !== null && typeof frame === 'object' ? frame.raw_message : undefined
+  if (typeof raw === 'string' && raw.trim() !== '') return raw
+  return []
+}
+
+/** 一条消息事件是否完全不含内容。
+ *
+ * 网关会在对方接收/下载文件之后补发一个 `message: []`、`raw_message: ''` 的
+ * 空消息事件：它只是传输副产物，不是用户输入。把它当成「看不透的消息」回
+ * 「暂时不能处理」只会在聊天里刷屏，所以这种情况要静默忽略。
+ * @param frame - 消息事件帧。
+ * @returns 没有任何消息段时为 true。
+ */
+export function isContentlessMessage(frame) {
+  const segments = messageSegments(frame)
+  return Array.isArray(segments) ? segments.length === 0 : String(segments).trim() === ''
+}
+
 /** 把 OneBot 消息段摊平成模型可读的文本。
  * 非文本段变成方括号占位符：模型因此知道来了图片或语音，而插件不必下载任何东西。
  * @param segments - `message` 字段（段数组或 CQ 字符串）。
@@ -427,6 +454,15 @@ export class ChatBridge {
       return
     }
 
+    // 对方接收/下载文件后，网关会补发一个不含任何消息段的空事件。
+    // 它不是用户输入，静默记一笔即可，绝不能回「暂时不能处理」。
+    if (isContentlessMessage(frame)) {
+      this.log.record('bridge', { note: 'contentless message event ignored', chatId, messageId })
+      return
+    }
+
+    const segments = messageSegments(frame)
+
     // 入站媒体会下载到本地收件箱并改写成可读路径，模型因此能用 read_image 看图、
     // 用 read 读文件。关掉后降级为不指名的裸占位符。
     let body
@@ -434,7 +470,7 @@ export class ChatBridge {
     let savedPaths = []
     if (this.config.inboundMedia !== false) {
       const outcome = await buildInboundText({
-        segments: frame.message,
+        segments,
         chatId,
         chat,
         connection: this.connection,
@@ -452,16 +488,21 @@ export class ChatBridge {
           .filter((path) => typeof path === 'string' && path !== '')
       }
     } else {
-      body = flattenMessage(frame.message)
+      body = flattenMessage(segments)
     }
     // 绝不能让聊天无人应答：一条消息若什么都变不成模型输入（没见过的段类型、
     // 只有一个回复标记、空文本），就明确回一句「暂时不能处理」而不是沉默。
     if (body === '') {
-      const unknown = unknownSegmentTypes(frame.message)
+      const unknown = unknownSegmentTypes(segments)
+      // 把真实段类型也记下来：只记「未知类型」的话，遇到「全是已知类型但拼不出
+      // 文字」的消息就完全看不出收到的是什么了。
+      const types = Array.isArray(segments)
+        ? segments.map((segment) => String(segment?.type ?? '')).filter((type) => type !== '')
+        : []
       const notice = unknown.length > 0
         ? '暂时不能处理这种消息（' + unknown.join('/') + '）'
         : '暂时不能处理这条消息'
-      this.log.record('bridge', { note: 'unsupported message; sending notice', chatId, kinds: unknown.join(',') })
+      this.log.record('bridge', { note: 'unsupported message; sending notice', chatId, kinds: unknown.join(','), types: types.join(',') })
       await this.sendNotice(chatId, chat, notice)
       return
     }
