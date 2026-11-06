@@ -65,6 +65,14 @@ t('a valid reply mode is kept', normalizeConfig({ replyMode: 'final' }).value.re
 t('an unknown reply mode falls back to stream', normalizeConfig({ replyMode: 'burst' }).value.replyMode === 'stream')
 t('a non-string reply mode falls back to stream', normalizeConfig({ replyMode: 3 }).value.replyMode === 'stream')
 
+// the administrator is a single QQ number stored on the access page
+t('admin user id defaults to empty', DEFAULTS.adminUserId === '')
+t('admin user id is a string field', FIELD_KINDS.adminUserId === 'string')
+t('admin user id is trimmed', normalizeConfig({ adminUserId: ' 12345 ' }).value.adminUserId === '12345')
+t('a numeric admin id is stored as a string', normalizeConfig({ adminUserId: 12345 }).value.adminUserId === '12345')
+t('a non-numeric admin id is dropped', normalizeConfig({ adminUserId: 'abc' }).value.adminUserId === '')
+t('admin user id is not on the settings groups', !FIELD_GROUPS.some((group) => group.fields.includes('adminUserId')))
+
 // delete-inbound-media mirrors delete-sent-media and defaults on
 t('the inbound-delete switch defaults on', DEFAULTS.deleteInboundMedia === true)
 t('the inbound-delete switch is a boolean field', FIELD_KINDS.deleteInboundMedia === 'boolean')

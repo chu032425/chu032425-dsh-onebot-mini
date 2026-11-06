@@ -86,6 +86,7 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `requireMention` | `true` | 群聊需 @ 机器人才响应（`botQQ` 未知时 fail-closed） |
 | `allowFrom` / `allowGroups` | `[]` | 白名单；空=不限制。在左侧「访问控制」菜单里用下拉选择 |
 | `denyFrom` / `denyGroups` | `[]` | 黑名单；**优先级高于白名单**，命中的会话一律拒绝 |
+| `adminUserId` | 空 | 管理员 QQ 号（单个）；在「访问控制」页从好友中选一位，留空=不设管理员 |
 | `workspacePath` | **必填** | 会话工作区；设置页从现有工作区下拉选择，被删除时自动重建 |
 | `agentPreset` | 空 | 会话使用的 agent 预设；设置页从现有预设下拉选择，留空=部署默认，被删除/损坏时自动回退默认 |
 | `agentModel` | 空 | 会话使用的模型；设置页从部署的 provider/model 目录下拉选择，留空=部署默认 |
@@ -194,6 +195,9 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | 私聊黑名单 `denyFrom` | 名单内好友一律拒绝 |
 | 群聊白名单 `allowGroups` | 只接收名单内群；空=全部放行 |
 | 群聊黑名单 `denyGroups` | 名单内群一律拒绝 |
+
+此外有一项**管理员** `adminUserId`：从好友里挑选**一位**作为管理员（也可手动填 QQ 号），
+留空表示不设管理员。
 
 判定顺序是**先黑后白**：黑名单命中直接拒绝，然后白名单非空时只放行名单内的会话。
 设置页里只留「群聊需 @ 才回复」一个开关，四个名单都搬到这个独立菜单。

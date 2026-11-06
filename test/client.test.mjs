@@ -184,7 +184,8 @@ for (const key of ['qzoneTitle', 'qzoneProfile', 'qzonePosts', 'qzoneFeeds', 'qz
   t('qzone copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 for (const key of ['accessTitle', 'accessPrivateAllow', 'accessPrivateDeny', 'accessGroupAllow', 'accessGroupDeny',
-  'accessChooseFriend', 'accessChooseGroup', 'accessEmpty', 'accessNote']) {
+  'accessChooseFriend', 'accessChooseGroup', 'accessEmpty', 'accessNote',
+  'accessAdmin', 'accessAdminHint', 'accessAdminChoose', 'accessAdminNone', 'accessAdminClear', 'accessAdminManual']) {
   t('access copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 for (const key of ['membersTitle', 'membersLoading', 'membersFailed', 'membersRoleOwner', 'membersRoleAdmin',

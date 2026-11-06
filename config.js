@@ -59,6 +59,9 @@ export const DEFAULTS = Object.freeze({
   denyFrom: [],
   allowGroups: [],
   denyGroups: [],
+  // The one account treated as the bot's administrator: a QQ number picked from
+  // the friend list on the Access page. Empty means no administrator is set.
+  adminUserId: '',
   workspacePath: '',
   agentPreset: '',
   senderPrefix: true,
@@ -120,6 +123,7 @@ export const FIELD_KINDS = Object.freeze({
   denyFrom: 'stringList',
   allowGroups: 'stringList',
   denyGroups: 'stringList',
+  adminUserId: 'string',
   workspacePath: 'workspace',
   agentPreset: 'agentPreset',
   senderPrefix: 'boolean',
@@ -271,6 +275,11 @@ export function normalizeConfig(raw) {
   // cannot smuggle junk into the config.
   const rawDisabled = Array.isArray(value.onebotToolDisabled) ? value.onebotToolDisabled : []
   value.onebotToolDisabled = [...new Set(rawDisabled.filter((action) => isKnownAction(action)))]
+
+  // The administrator is one QQ number: trim it and drop anything non-numeric so
+  // a stray space or a pasted nickname cannot become a bogus id.
+  const rawAdmin = String(value.adminUserId ?? '').trim()
+  value.adminUserId = /^\d*$/.test(rawAdmin) ? rawAdmin : ''
 
   // The session prefix becomes part of a filesystem-backed session id, so it is
   // flattened to the same safe alphabet the chat body already uses. A value that
