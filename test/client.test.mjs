@@ -114,7 +114,7 @@ t('session mode is gone', !('fieldSessionMode' in zh) && !('modePlan' in zh))
 // never falls back to a raw dictionary key in either UI.
 for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
   'toolGroupLocal', 'toolGroupMessage', 'toolGroupMedia', 'toolGroupGroup', 'toolGroupQuery', 'toolGroupInteraction',
-  'toolGroupRequest', 'toolGroupProfile', 'toolGroupQzone', 'toolGroupAlbum',
+  'toolGroupRequest', 'toolGroupProfile', 'toolGroupQzone',
   'toolActionsHint', 'toolGroupsHint', 'toolNoteAuto', 'toolTotal', 'toolSearchPlaceholder', 'toolNoMatch',
   'toolPromptSummary', 'toolPromptHint', 'toolPromptReset', 'toolPromptCustom']) {
   t('tool config copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
@@ -124,7 +124,13 @@ t('every catalog action ships a default prompt for the tools page', TOOL_GROUPS.
 // Every catalogued action carries its annotation in the catalog itself, so the
 // list never shows a bare action id without an explanation next to it.
 t('the catalog supplies action annotations', TOOL_GROUPS.every((group) => group.actions.every((action) => /[\u4e00-\u9fa5]/.test(action.zh)))),
-t('the tools page renders every catalog group', TOOL_GROUPS.length === 10)
+t('the tools page renders every catalog group', TOOL_GROUPS.length === 9)
+// Every catalog group must have localized copy, so pruning the catalog cannot
+// leave a group rendering its raw id.
+for (const group of TOOL_GROUPS) {
+  const key = 'toolGroup' + group.id.charAt(0).toUpperCase() + group.id.slice(1)
+  t('group label present: ' + group.id, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
 for (const key of ['toolBadgeStandard', 'toolBadgeExtension', 'toolBadgeLocal']) {
   t('tool kind badge copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }

@@ -232,6 +232,27 @@ t('catalog covers the NapCat core actions', ['set_group_ban', 'send_poke', 'dele
   .every((name) => isKnownAction(name)))
 t('dangerous actions stay out of the catalog', ['get_credentials', 'get_csrf_token', 'get_cookies', 'set_restart', 'bot_exit', 'send_packet', 'clean_cache', 'ocr_image']
   .every((name) => !isKnownAction(name)))
+// Pruned at the operator's request: the whole group album family, the Qzone
+// permission pair, the custom online status, everything but the two request
+// handlers, the read markers and forwards, the extended group/recent-session
+// queries, the bulk kick / admin / todo trio, and the group-file management set.
+t('pruned actions stay out of the catalog', [
+  'get_qun_album_list', 'get_group_album_media_list', 'upload_image_to_qun_album', 'upload_images_to_qun_album',
+  'upload_video_to_qun_album', 'do_group_album_comment', 'del_group_album_media', 'set_group_album_media_like',
+  'cancel_group_album_media_like', 'set_qzone_msg_right', 'set_qzone_ban', 'set_diy_online_status',
+  'get_doubt_friends_add_request', 'set_doubt_friends_add_request', 'get_group_ignore_add_request',
+  'set_group_add_option', 'set_group_member_invite_policy', 'set_group_member_permissions',
+  'set_group_new_member_history_visibility', 'mark_msg_as_read', 'mark_group_msg_as_read',
+  'mark_private_msg_as_read', 'send_forward_msg', 'send_group_forward_msg', 'send_private_forward_msg',
+  'forward_group_single_msg', 'forward_friend_single_msg', 'get_group_info_ex', 'get_recent_contact',
+  'set_group_kick_members', 'set_group_admin', 'set_group_todo', 'complete_group_todo', 'cancel_group_todo',
+  'upload_group_file', 'upload_private_file', 'get_group_file_url', 'get_private_file_url',
+  'get_group_root_files', 'get_group_files_by_folder', 'get_group_file_system_info', 'create_group_file_folder',
+  'delete_group_folder', 'delete_group_file', 'move_group_file', 'rename_group_file',
+].every((name) => !isKnownAction(name)))
+t('the two request handlers survived the pruning', isKnownAction('set_friend_add_request') && isKnownAction('set_group_add_request'))
+t('mark everything as read survived the pruning', isKnownAction('_mark_all_as_read'))
+t('the catalog has no group album section', TOOL_GROUPS.every((group) => group.id !== 'album'))
 t('every catalogued action carries a Chinese annotation', TOOL_GROUPS.every((group) => group.actions.every((action) => /[\u4e00-\u9fa5]/.test(action.zh))))
 t('every catalogued action carries an English annotation', TOOL_GROUPS.every((group) => group.actions.every((action) => action.en !== '')))
 t('no duplicate action names', ALL_ACTIONS.length === new Set(ALL_ACTIONS).size)
@@ -244,7 +265,7 @@ t('enabledGroups only lists groups with enabled actions', JSON.stringify(enabled
 t('all actions flatten from the groups', ALL_ACTIONS.length === TOOL_GROUPS.reduce((sum, group) => sum + group.actions.length, 0))
 // standard vs extension classification (the tools page badges each row)
 t('every action carries a boolean standard flag', TOOL_GROUPS.every((group) => group.actions.every((action) => typeof action.standard === 'boolean')))
-t('the standard set has 40 OneBot 11 actions', STANDARD_ACTIONS.size === 40)
+t('the standard set has 31 OneBot 11 actions', STANDARD_ACTIONS.size === 31)
 t('the standard flag matches the STANDARD_ACTIONS set', TOOL_GROUPS.every((group) => group.actions.every((action) => action.standard === STANDARD_ACTIONS.has(action.name))))
 t('fetch_ptt_text is marked as an extension', TOOL_GROUPS.find((g) => g.id === 'interaction').actions.find((a) => a.name === 'fetch_ptt_text').standard === false)
 t('send_msg is marked standard', TOOL_GROUPS.find((g) => g.id === 'message').actions.find((a) => a.name === 'send_msg').standard === true)
@@ -531,7 +552,12 @@ t('an absent payload becomes null (lossless JSON)', nullOut.ok === true && nullO
   const listed = await tool.execute({ action: 'list_files', params: { dir } })
   t('list_files runs locally and never hits the transport', listed.ok === true && listed.data.count === 1 && !registered.includes('list_files'))
   const refused = await tool.execute({ action: 'set_group_ban', params: {} })
-  t('a disabled action is still refused', refused.ok === false && refused.error.includes('disabled'))
+  t('a switched-off action is refused and points at the tools page', refused.ok === false && refused.error.includes('switched off'))
+  // A pruned action is not in the catalog at all, so the refusal must not tell
+  // the model to go enable it in the settings.
+  const pruned = await tool.execute({ action: 'get_qun_album_list', params: {} })
+  t('a pruned action is refused as not offered', pruned.ok === false
+    && pruned.error.includes('not offered by this plugin') && !pruned.error.includes('switched off'))
   const unknownLocal = await tool.execute({ action: 'send_message', params: { text: 'hi', kind: 'image', url: 'http://x/y.png' } })
   t('send_message dispatches to the local handler', typeof unknownLocal.ok === 'boolean' && !registered.includes('send_message'))
   t('send_message is not marked concurrency safe', tool.isConcurrencySafe({ action: 'send_message' }) === false)

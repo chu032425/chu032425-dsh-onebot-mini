@@ -339,6 +339,10 @@ export async function resolveSegmentSource(connection, segment, chat) {
   }
 
   if (segment.type === 'file') {
+    // These two are transport calls made by the plugin itself, not catalogued
+    // tool actions: `get_group_file_url` / `get_private_file_url` stay out of
+    // the `onebot_call` allowlist on purpose, so pruning the catalog does not
+    // break inbound downloads and nothing here should be read as a tool name.
     try {
       if (chat.kind === 'group') {
         const response = await connection.call('get_group_file_url', {

@@ -68,21 +68,6 @@ export const ACTION_DOCS = Object.freeze({
   },
 
   // --- 媒体与文件 ---
-  upload_group_file: {
-    params: [
-      groupId,
-      P('file', 'string', true, '本机文件绝对路径，或 http(s) 链接'),
-      P('name', 'string', true, '在群里显示的文件名'),
-      P('folder', 'string', false, '目标文件夹 ID；不填则上传到根目录'),
-    ],
-  },
-  upload_private_file: {
-    params: [
-      userId,
-      P('file', 'string', true, '本机文件绝对路径，或 http(s) 链接'),
-      P('name', 'string', true, '显示的文件名'),
-    ],
-  },
   get_image: {
     params: [P('file', 'string', true, '图片文件名或本地路径，通常取自消息段的 file 字段')],
   },
@@ -103,51 +88,6 @@ export const ACTION_DOCS = Object.freeze({
       P('headers', 'object', false, '下载请求的自定义请求头'),
     ],
   },
-  get_group_file_url: {
-    params: [groupId, P('file_id', 'string', true, '群文件 ID')],
-  },
-  get_private_file_url: {
-    params: [userId, P('file_id', 'string', true, '私聊文件 ID')],
-  },
-  get_group_root_files: {
-    params: [groupId],
-  },
-  get_group_files_by_folder: {
-    params: [groupId, P('folder_id', 'string', true, '文件夹 ID')],
-  },
-  get_group_file_system_info: {
-    params: [groupId],
-  },
-  create_group_file_folder: {
-    params: [
-      groupId,
-      P('name', 'string', true, '新文件夹名称'),
-      P('parent_id', 'string', false, '父文件夹 ID；不填则在根目录创建'),
-    ],
-  },
-  delete_group_folder: {
-    params: [groupId, P('folder_id', 'string', true, '要删除的文件夹 ID')],
-  },
-  delete_group_file: {
-    params: [groupId, P('file_id', 'string', true, '要删除的群文件 ID')],
-  },
-  move_group_file: {
-    params: [
-      groupId,
-      P('file_id', 'string', true, '要移动的文件 ID'),
-      P('current_parent_directory', 'string', true, '文件当前所在文件夹 ID（根目录用空字符串）'),
-      P('target_parent_directory', 'string', true, '目标文件夹 ID（根目录用空字符串）'),
-    ],
-  },
-  rename_group_file: {
-    params: [
-      groupId,
-      P('file_id', 'string', true, '文件 ID'),
-      P('current_parent_directory', 'string', true, '文件所在文件夹 ID（根目录用空字符串）'),
-      P('new_name', 'string', true, '新的文件名'),
-    ],
-  },
-
   // --- 群管理 ---
   set_group_ban: {
     params: [groupId, userId, P('duration', 'number', true, '禁言秒数；0 表示解除禁言')],
@@ -155,18 +95,8 @@ export const ACTION_DOCS = Object.freeze({
   set_group_kick: {
     params: [groupId, userId, P('reject_add_request', 'boolean', false, '是否同时拒绝其再次加群申请')],
   },
-  set_group_kick_members: {
-    params: [
-      groupId,
-      P('user_id', 'array', true, '要踢出的 QQ 号数组'),
-      P('reject_add_request', 'boolean', false, '是否同时拒绝其再次加群申请'),
-    ],
-  },
   set_group_whole_ban: {
     params: [groupId, P('enable', 'boolean', true, 'true 全员禁言，false 解除')],
-  },
-  set_group_admin: {
-    params: [groupId, userId, P('enable', 'boolean', true, 'true 设为管理员，false 取消')],
   },
   set_group_card: {
     params: [groupId, userId, P('card', 'string', true, '新的群名片；空字符串表示清空')],
@@ -190,15 +120,6 @@ export const ACTION_DOCS = Object.freeze({
   },
   set_group_portrait: {
     params: [groupId, P('file', 'string', true, '新群头像的本机路径或 http(s) 链接')],
-  },
-  set_group_todo: {
-    params: [groupId, messageId],
-  },
-  complete_group_todo: {
-    params: [groupId, messageId],
-  },
-  cancel_group_todo: {
-    params: [groupId, messageId],
   },
   _send_group_notice: {
     params: [
@@ -226,9 +147,6 @@ export const ACTION_DOCS = Object.freeze({
     params: [groupId, noCache],
   },
   get_group_detail_info: {
-    params: [groupId],
-  },
-  get_group_info_ex: {
     params: [groupId],
   },
   get_group_share_link: {
@@ -262,10 +180,6 @@ export const ACTION_DOCS = Object.freeze({
   nc_get_user_status: {
     params: [userId],
   },
-  get_recent_contact: {
-    params: [P('count', 'number', false, '返回的最近会话数量')],
-  },
-
   // --- 互动与消息操作 ---
   send_poke: {
     params: [userId, P('group_id', 'number', false, '在群里戳时填群号')],
@@ -299,15 +213,6 @@ export const ACTION_DOCS = Object.freeze({
     params: [messageId],
     summary: '获取一条语音消息的转文字结果',
   },
-  mark_msg_as_read: {
-    params: [messageId],
-  },
-  mark_group_msg_as_read: {
-    params: [groupId],
-  },
-  mark_private_msg_as_read: {
-    params: [userId],
-  },
   _mark_all_as_read: { params: [] },
   get_group_msg_history: {
     params: [
@@ -326,27 +231,6 @@ export const ACTION_DOCS = Object.freeze({
   get_forward_msg: {
     params: [P('message_id', 'string', true, '合并转发消息的 ID')],
   },
-  send_forward_msg: {
-    params: [
-      P('messages', 'array', true, '合并转发的消息节点数组（每项含 type:"node" 与 data）'),
-      P('group_id', 'number', false, '发送到该群'),
-      P('user_id', 'number', false, '发送给该好友'),
-    ],
-    note: 'group_id 与 user_id 二选一，指定发送目标。',
-  },
-  send_group_forward_msg: {
-    params: [groupId, P('messages', 'array', true, '合并转发的消息节点数组')],
-  },
-  send_private_forward_msg: {
-    params: [userId, P('messages', 'array', true, '合并转发的消息节点数组')],
-  },
-  forward_group_single_msg: {
-    params: [groupId, P('message_id', 'number', true, '要转发的消息 ID')],
-  },
-  forward_friend_single_msg: {
-    params: [userId, P('message_id', 'number', true, '要转发的消息 ID')],
-  },
-
   // --- 请求处理 ---
   set_friend_add_request: {
     params: [
@@ -363,29 +247,6 @@ export const ACTION_DOCS = Object.freeze({
       P('reason', 'string', false, '拒绝理由'),
     ],
   },
-  get_doubt_friends_add_request: {
-    params: [P('count', 'number', false, '返回数量')],
-  },
-  set_doubt_friends_add_request: {
-    params: [
-      P('flag', 'string', true, '请求的 flag'),
-      P('approve', 'boolean', true, 'true 同意，false 拒绝'),
-    ],
-  },
-  get_group_ignore_add_request: { params: [] },
-  set_group_add_option: {
-    params: [groupId, P('option', 'object', true, '加群选项对象，包含 add_type 等字段')],
-  },
-  set_group_member_invite_policy: {
-    params: [groupId, P('policy', 'number', true, '邀请策略编号')],
-  },
-  set_group_member_permissions: {
-    params: [groupId, P('permissions', 'object', true, '成员功能权限对象')],
-  },
-  set_group_new_member_history_visibility: {
-    params: [groupId, P('visibility', 'number', true, '可见范围编号')],
-  },
-
   // --- 账号资料 ---
   set_friend_remark: {
     params: [userId, P('remark', 'string', true, '好友备注')],
@@ -410,14 +271,6 @@ export const ACTION_DOCS = Object.freeze({
       P('status', 'number', true, '在线状态编号'),
       P('ext_status', 'number', false, '扩展状态编号'),
       P('battery_status', 'number', false, '电量状态编号'),
-    ],
-  },
-  set_diy_online_status: {
-    params: [
-      P('face_id', 'number', true, '自定义状态图标 ID'),
-      P('face_type', 'number', true, '图标类型'),
-      P('wording', 'string', true, '状态文字'),
-      P('face_url', 'string', false, '自定义图标链接'),
     ],
   },
   set_input_status: {
@@ -461,61 +314,6 @@ export const ACTION_DOCS = Object.freeze({
   set_qzone_profile: {
     params: [P('profile', 'object', true, '要修改的 QQ 空间资料对象（昵称、签名等）')],
   },
-  set_qzone_msg_right: {
-    params: [P('tid', 'string', true, '说说的 tid'), P('right', 'number', true, '可见权限编号')],
-  },
-  set_qzone_ban: {
-    params: [P('target_qq', 'number', true, '目标 QQ 号'), P('duration', 'number', true, '限制时长秒数')],
-  },
-
-  // --- 群相册 ---
-  get_qun_album_list: {
-    params: [groupId],
-  },
-  get_group_album_media_list: {
-    params: [groupId, P('album_id', 'string', true, '相册 ID')],
-  },
-  upload_image_to_qun_album: {
-    params: [
-      groupId,
-      P('album_id', 'string', true, '相册 ID'),
-      P('file', 'string', true, '图片的本机路径或 http(s) 链接'),
-      P('name', 'string', false, '图片名称'),
-    ],
-  },
-  upload_images_to_qun_album: {
-    params: [
-      groupId,
-      P('album_id', 'string', true, '相册 ID'),
-      P('files', 'array', true, '图片路径或链接的数组'),
-    ],
-  },
-  upload_video_to_qun_album: {
-    params: [
-      groupId,
-      P('album_id', 'string', true, '相册 ID'),
-      P('file', 'string', true, '视频的本机路径或 http(s) 链接'),
-      P('name', 'string', false, '视频名称'),
-    ],
-  },
-  do_group_album_comment: {
-    params: [
-      groupId,
-      P('album_id', 'string', true, '相册 ID'),
-      P('lloc', 'string', true, '媒体在相册中的 lloc 标识'),
-      P('content', 'string', true, '评论内容'),
-    ],
-  },
-  del_group_album_media: {
-    params: [groupId, P('album_id', 'string', true, '相册 ID'), P('lloc', 'string', true, '媒体 lloc 标识')],
-  },
-  set_group_album_media_like: {
-    params: [groupId, P('album_id', 'string', true, '相册 ID'), P('lloc', 'string', true, '媒体 lloc 标识')],
-  },
-  cancel_group_album_media_like: {
-    params: [groupId, P('album_id', 'string', true, '相册 ID'), P('lloc', 'string', true, '媒体 lloc 标识')],
-  },
-
   // --- 本地工具（包装标准动作，不直接转发网关） ---
   send_message: {
     params: [

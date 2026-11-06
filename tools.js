@@ -15,6 +15,7 @@
  */
 
 import { DEFAULT_TOOL_CALL_PROMPT } from './prompt.js'
+import { isKnownAction } from './toolcatalog.js'
 
 /** The tool definition, minus the parts that need a live connection. */
 const PARAMETERS = Object.freeze({
@@ -167,7 +168,14 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
       if (action === '') throw new Error('onebot_call: action must not be empty')
       const params = args?.params !== null && typeof args?.params === 'object' ? args.params : {}
       if (allowed !== undefined && !allowed.has(action)) {
-        return { ok: false, error: 'action "' + action + '" is disabled in the OneBot-Mini settings' }
+        // Two different refusals, because the model's advice differs: an action
+        // the operator switched off can be turned back on in the tools page,
+        // while one that was pruned from the catalog does not exist here at all
+        // and must never be described to the user as "disabled".
+        const reason = isKnownAction(action)
+          ? 'is switched off in the OneBot-Mini tools page'
+          : 'is not offered by this plugin'
+        return { ok: false, error: 'action "' + action + '" ' + reason }
       }
       // Local actions never reach the gateway; they run in-process.
       if (LOCAL.has(action)) {
