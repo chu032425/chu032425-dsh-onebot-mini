@@ -155,7 +155,9 @@ export function isPoke(frame) {
   if (String(frame.notice_type ?? '') !== 'notify') return false
   const sub = String(frame.sub_type ?? '')
   if (sub !== '' && sub !== 'poke') return false
-  return String(frame.user_id ?? '') !== '' && String(frame.target_id ?? '') !== ''
+  // `target_id` 不是每台网关都给（实测有的只带 user_id / group_id），所以只要求
+  // 有戳人者；缺 target_id 时按「戳的是机器人」处理，否则整条事件会被漏掉。
+  return String(frame.user_id ?? '') !== ''
 }
 
 /**
@@ -343,9 +345,13 @@ export class ChatBridge {
     if (this.config.pokeEvents === false) return
     const { chatId, chat, poker, target } = pokeTarget(frame)
     const botId = this.connection.selfId
-    // 戳别人（而不是戳机器人）时不打扰模型：那只是群里的互动，没有要它回答的事。
-    const pokedMe = botId !== '' && target === botId
-    if (!pokedMe && !(chat.kind === 'private')) return
+    // 戳的是不是机器人。缺 `target_id` 的网关无法区分「戳我」与「戳别人」，按戳我
+    // 处理：宁可多答一句，也不要让真实的戳一戳被吞掉。
+    const pokedMe = target === '' || botId === '' || target === botId
+    // 戳别人的那次只是群里的互动，没有要模型回答的事，不打扰它。
+    if (!pokedMe && chat.kind === 'group') return
+    // 自己戳自己（机器人发起的那次）同样不必再答一遍。
+    if (botId !== '' && poker === botId) return
 
     const allow = chat.kind === 'private' ? this.config.allowFrom : this.config.allowGroups
     const deny = chat.kind === 'private' ? this.config.denyFrom : this.config.denyGroups
@@ -357,7 +363,7 @@ export class ChatBridge {
       this.log.record('bridge', { note: 'poke ignored: chat is not allowed', chatId, poker })
       return
     }
-    this.log.record('bridge', { note: 'poke received', chatId, poker, target })
+    this.log.record('bridge', { note: 'poke received', chatId, poker, target: target === '' ? '(unknown)' : target })
 
     // 反戳：只有运营方打开开关、且戳的确实是机器人时才戳回去，否则两个机器人
     // 会互相戳个没完。

@@ -1260,6 +1260,21 @@ await offPokeBridge.handleInbound(pokeFrame)
 await wait(150)
 t('关掉戳一戳后既不回复也不反戳', pokeFollowups.length === 0 && !pokeCalls.some(([action]) => action === 'send_poke'))
 
+// 实测有的网关只给 user_id / group_id，不带 target_id：这种也要认，并且按「戳我」处理
+pokeFollowups.length = 0
+pokeCalls.length = 0
+const barePokeBridge = new ChatBridge({
+  ctx: pokeCtx,
+  config: { ...baseConfig, workspacePath: '/workspace/QQ', pokeEvents: true, pokeBack: true },
+  connection: pokeTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
+})
+barePokeBridge.start()
+await barePokeBridge.handleInbound({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', group_id: 2000003, user_id: 2000001, sender: { card: '小明' } })
+await wait(200)
+t('没有 target_id 的戳一戳也会交给 agent', pokeFollowups.length === 1, String(pokeFollowups.length))
+t('没有 target_id 时仍然反戳', pokeCalls.some(([action]) => action === 'send_poke'))
+await barePokeBridge.stop()
+
 // 戳的是别人（不是机器人）时不打扰模型
 pokeFollowups.length = 0
 await offPokeBridge.stop()
