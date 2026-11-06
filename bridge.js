@@ -231,32 +231,33 @@ function roleLabel(role) {
 }
 
 /** 从消息帧里解析出「会话 + 发送者」抬头，给模型一个确定的事实，而不是让它从
- * 有没有前缀去猜。会话身份（群聊/私聊 + 群号/QQ）和发送者 QQ 永远带上；昵称、
- * 角色、时间随 `senderPrefix` 开关，关掉时只留 id，避免暴露昵称。
+ * 有没有前缀去猜。会话身份（群聊/私聊 + 群号/QQ）和**发送者 QQ** 永远带上；
+ * `senderPrefix` 只决定要不要再加昵称/群角色/时间，关掉也绝不会丢掉发送者 QQ。
  * @param frame - 消息事件。
  * @param chatKind - `private` 或 `group`。
  * @param senderPrefixEnabled - 是否附带昵称/角色/时间。
- * @returns 抬头文本，如 `[群聊 2000003 · 21:18 示例昵称(2000001·管理员)] `。 */
+ * @returns 抬头文本，如 `[群聊 2000003 · 21:18 · 发送者 2000001 示例昵称(群主)] `。 */
 export function chatHeader(frame, chatKind, senderPrefixEnabled) {
   const groupId = String(frame?.group_id ?? '')
   const userId = String(frame?.user_id ?? '')
   const session = chatKind === 'group'
     ? '群聊 ' + (groupId !== '' ? groupId : '(未知群)')
     : '私聊 ' + (userId !== '' ? userId : '(未知)')
+  // 发送者 QQ 是显式字段，任何时候都在，不会被会话号或昵称/群名片顶掉。
+  const senderId = userId !== '' ? userId : '(未知)'
   if (!senderPrefixEnabled) {
-    // 开关关掉只是不暴露昵称，会话身份和发送者 id 仍然给足，模型才不会失明。
-    return chatKind === 'group' && userId !== ''
-      ? '[' + session + ' · ' + userId + '] '
-      : '[' + session + '] '
+    return '[' + session + ' · 发送者 ' + senderId + '] '
   }
   const sender = frame?.sender !== null && typeof frame?.sender === 'object' ? frame.sender : {}
-  const name = String(sender.card || sender.nickname || 'unknown')
+  const name = String(sender.card || sender.nickname || '')
   const role = chatKind === 'group' ? roleLabel(sender.role) : ''
-  const who = name + '(' + userId + (role !== '' ? '·' + role : '') + ')'
   const clock = new Date(typeof frame?.time === 'number' ? frame.time * 1000 : Date.now())
   const hh = String(clock.getHours()).padStart(2, '0')
   const mm = String(clock.getMinutes()).padStart(2, '0')
-  return '[' + session + ' · ' + hh + ':' + mm + ' ' + who + '] '
+  let label = '发送者 ' + senderId
+  if (name !== '') label += ' ' + name + (role !== '' ? '(' + role + ')' : '')
+  else if (role !== '') label += '(' + role + ')'
+  return '[' + session + ' · ' + hh + ':' + mm + ' · ' + label + '] '
 }
 
 /** 解析一个 `provider::model` 配置串。
