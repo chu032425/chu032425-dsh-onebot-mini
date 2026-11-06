@@ -229,6 +229,7 @@ t('title is pinned to the id', titles[0] === chat.sessionId)
 t('message reaches the agent', chat.agent.followups.length === 1 && chat.agent.followups[0].role === 'user')
 t('the preset is actually mounted', calls.mounted.length > 0)
 t('onebot_call is registered by default', toolDefs.some((def) => def.name === 'onebot_call'))
+t('only one tool is registered (local actions ride on onebot_call)', toolDefs.map((def) => def.name).join(',') === 'onebot_call')
 
 // A voice message: the bridge only downloads it and hands the agent the path plus
 // the gateway message id. The code itself never calls the fetch_ptt_text extension;
@@ -264,10 +265,10 @@ const promptOff = buildPlatformPrompt({ ...baseConfig, onebotToolEnabled: false 
 t('the prompt says the tool is off', promptOff.includes('已关闭 onebot_call 工具') && !promptOff.includes('send_group_msg：'))
 const promptNoBan = buildPlatformPrompt({ ...baseConfig, onebotToolDisabled: ['set_group_ban'] })
 t('a disabled action is not advertised', !promptNoBan.includes('set_group_ban：') && promptNoBan.includes('send_group_msg：功能：发送群消息'))
-t('the prompt advertises the media tool', promptAll.includes('onebot_send_media'))
+t('the prompt advertises the local media action', promptAll.includes('send_media') && promptAll.includes('list_files'))
 t('the prompt teaches the reply media markers', promptAll.includes('[[image:/abs/path.png]]'))
-t('the prompt lists all three plugin tools', ['onebot_call', 'onebot_send_media', 'onebot_list_files'].every((name) => promptAll.includes(name)))
-t('the prompt says QQ actions must use these tools', promptAll.includes('都必须通过上述工具完成') && promptAll.includes('不要使用任何其他以 qq_ 开头的工具'))
+t('the prompt names the one plugin tool', promptAll.includes('onebot_call'))
+t('the prompt says QQ actions must use this tool', promptAll.includes('都必须通过 onebot_call 完成') && promptAll.includes('不要使用任何其他以 qq_ 开头的工具'))
 
 // the prompt comes from config, so it can be edited without a rebuild
 const customPrompt = buildPlatformPrompt({ ...baseConfig, channelPrompt: 'MY PROMPT\n{actions}' })
@@ -275,7 +276,7 @@ t('a custom prompt template is used', customPrompt.trim().startsWith('MY PROMPT'
 t('the actions placeholder expands into the enabled list', customPrompt.includes('send_group_msg：功能：发送群消息'))
 const plainPrompt = buildPlatformPrompt({ ...baseConfig, channelPrompt: 'JUST TEXT' })
 t('a template without placeholders is used as-is', plainPrompt.trim() === 'JUST TEXT')
-t('the prompt omits the media tool when the tool is off', !promptOff.includes('onebot_send_media'))
+t('the prompt omits the local actions when the tool is off', !promptOff.includes('send_media'))
 // an explicit provider::model in config wins over the deployment default
 const bridgeModel = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', agentModel: 'localhost::group/never-stuck' },

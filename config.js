@@ -19,7 +19,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_INTERJECT_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** The DSH home, honoring `$DSH_HOME` then `~/.dsh`. */
 export function dshHome() {
@@ -114,7 +114,6 @@ export const DEFAULTS = Object.freeze({
   toolsPrompt: DEFAULT_TOOLS_PROMPT,
   inboundPrompt: DEFAULT_INBOUND_PROMPT,
   toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
-  toolMediaPrompt: DEFAULT_TOOL_MEDIA_PROMPT,
   interjectPrompt: DEFAULT_INTERJECT_PROMPT,
   imageCacheMaxKb: 1024,
   imageCacheTotalMb: 100,
@@ -163,7 +162,6 @@ export const FIELD_KINDS = Object.freeze({
   toolsPrompt: 'text',
   inboundPrompt: 'text',
   toolCallPrompt: 'text',
-  toolMediaPrompt: 'text',
   interjectPrompt: 'text',
   privateAutoInterject: 'boolean',
   replyMode: 'replyMode',

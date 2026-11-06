@@ -18,7 +18,7 @@
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, GROUP_LABELS } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes } from './inbound.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
@@ -1051,9 +1051,6 @@ export class ChatBridge {
       deleteSentMedia: this.config.deleteSentMedia === true,
       prompts: {
         call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
-        media: String(this.config.toolMediaPrompt ?? '').trim() !== ''
-          ? String(this.config.toolMediaPrompt)
-          : DEFAULT_TOOL_MEDIA_PROMPT,
       },
       recordLog: (note) => this.log.record('bridge', { note }),
     })
@@ -1114,9 +1111,6 @@ export class ChatBridge {
           recordLog: (note) => this.log.record('bridge', { note, chatId }),
           prompts: {
             call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
-            media: String(this.config.toolMediaPrompt ?? '').trim() !== ''
-              ? String(this.config.toolMediaPrompt)
-              : DEFAULT_TOOL_MEDIA_PROMPT,
           },
         })
       }

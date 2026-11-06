@@ -515,6 +515,29 @@ export const ACTION_DOCS = Object.freeze({
   cancel_group_album_media_like: {
     params: [groupId, P('album_id', 'string', true, '相册 ID'), P('lloc', 'string', true, '媒体 lloc 标识')],
   },
+
+  // --- 本地工具（不经过网关，由插件自己实现） ---
+  send_media: {
+    params: [
+      P('kind', 'enum', true, '"image"、"record"、"video" 或 "file"'),
+      P('path', 'string', false, '本机文件绝对路径（插件会内联字节后发送）'),
+      P('url', 'string', false, '可直接下载的媒体 URL'),
+      P('base64', 'string', false, '原始 base64（不带 data: 前缀）'),
+      P('name', 'string', false, '显示名称，仅文件需要'),
+      P('chatType', 'enum', false, '"private" 或 "group"；默认当前会话'),
+      P('chatId', 'string', false, '目标 QQ 或群号；默认当前会话'),
+    ],
+    summary: '发送图片/语音/视频/文件到当前或其他 QQ 会话（本机路径会内联字节）',
+    note: 'kind 必填；path / url / base64 三选一。',
+  },
+  list_files: {
+    params: [
+      P('dir', 'string', true, '宿主机上的绝对目录路径，如 /workspace/QQ'),
+      P('filter', 'string', false, '可选的、不区分大小写的文件名子串过滤'),
+      P('limit', 'number', false, '最多返回多少条，默认 100，上限 500'),
+    ],
+    summary: '列出宿主机某个目录下的文件，发本地文件前用它确认真实文件名',
+  },
 })
 
 /**

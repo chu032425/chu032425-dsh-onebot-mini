@@ -2,7 +2,7 @@
  * Self-contained checks: pure functions, config store, log ring, wire protocol.
  * Run with `node test/unit.test.mjs`. No test framework, no dependencies.
  */
-import { rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
+import { rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { existsSync as readFileSyncExists } from 'node:fs'
 import { acceptKey, takeFrame, encodeText, encodeControl } from '../wire.js'
@@ -342,14 +342,14 @@ t('no admin line without an administrator', !buildPlatformPrompt(DEFAULTS).inclu
 t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
 t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
 t('the prompt registry covers channel, reply mode, admin, prefix, media, tools, actions, inbound, both tools and the interject judge',
-  PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,replyModeStreamPrompt,replyModeFinalPrompt,adminPrompt,senderPrefixPrompt,mediaPrompt,toolsPrompt,inboundPrompt,toolCallPrompt,toolMediaPrompt,interjectPrompt')
+  PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,replyModeStreamPrompt,replyModeFinalPrompt,adminPrompt,senderPrefixPrompt,mediaPrompt,toolsPrompt,inboundPrompt,toolCallPrompt,interjectPrompt')
 t('every registered prompt has a config default', PROMPT_DEFS.every((d) => typeof DEFAULTS[d.field] === 'string' && DEFAULTS[d.field] !== ''))
 t('every registered prompt has a label key', PROMPT_DEFS.every((d) => typeof d.labelKey === 'string' && d.labelKey !== ''))
-const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', toolMediaPrompt: '' }).value
+const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', mediaPrompt: '' }).value
 t('every blank prompt returns to its default', PROMPT_DEFS.every((d) => blankAll[d.field] === DEFAULTS[d.field]))
 t('the tool-call prompt adds the enabled note when actions are allowed', renderToolCallPrompt('X {enabledNote}', new Set(['a'])).includes('仅接受在 OneBot-Mini 设置中已启用的动作'))
 t('the tool-call prompt drops the note when the tool is off', !renderToolCallPrompt('X {enabledNote}', null).includes('仅接受'))
-t('the tool-call prompt falls back when empty', renderToolCallPrompt('', null).startsWith('执行一个 OneBot 11 动作'))
+t('the tool-call prompt falls back when empty', renderToolCallPrompt('', null).startsWith('执行一个动作'))
 t('the tool-call prompt no longer mentions a gateway', !/网关|NapCat/.test(renderToolCallPrompt('', null)))
 // the channel prompt hands the model every enabled action with its Chinese annotation,
 // and carries no gateway-specific wording — the model discovers tools by name + annotation.
@@ -454,13 +454,38 @@ const nullTool = captureTool(async () => undefined)
 const nullOut = await nullTool.execute({ action: 'get_group_member_list', params: {} })
 t('an absent payload becomes null (lossless JSON)', nullOut.ok === true && nullOut.data === null)
 
+// --- local actions ride on onebot_call instead of separate tools
+{
+  const registered = []
+  const connection = { call: async (action) => { registered.push(action); return {} } }
+  const { registerTools: reg } = await import('../tools.js')
+  const disposers = reg(
+    { tools: { register: (d) => { registered.push(d.name); return () => {} } } },
+    { connection, allow: new Set(['send_media', 'list_files', 'send_group_msg']), chatId: 'private:42', deleteSentMedia: false, prompts: {}, recordLog: () => {} },
+  )
+  t('exactly one tool is registered', disposers.length === 1 && registered.includes('onebot_call'))
+  const dir = mkdtempSync(pathJoin(tmpdir(), 'onebot-tools-'))
+  writeFileSync(pathJoin(dir, 'a.png'), 'x')
+  let tool
+  reg({ tools: { register: (d) => { tool = d; return () => {} } } },
+    { connection, allow: new Set(['send_media', 'list_files', 'send_group_msg']), chatId: 'private:42', deleteSentMedia: false, prompts: {}, recordLog: () => {} })
+  const listed = await tool.execute({ action: 'list_files', params: { dir } })
+  t('list_files runs locally and never hits the transport', listed.ok === true && listed.data.count === 1 && !registered.includes('list_files'))
+  const refused = await tool.execute({ action: 'set_group_ban', params: {} })
+  t('a disabled action is still refused', refused.ok === false && refused.error.includes('disabled'))
+  const unknownLocal = await tool.execute({ action: 'send_media', params: { kind: 'image', url: 'http://x/y.png' } })
+  t('send_media dispatches to the local handler', typeof unknownLocal.ok === 'boolean' && !registered.includes('send_media'))
+  t('send_media is not marked concurrency safe', tool.isConcurrencySafe({ action: 'send_media' }) === false)
+  rmSync(dir, { recursive: true, force: true })
+}
+
 // --- media prompt forbids the permission hallucination
 import { mediaParagraph } from '../prompt.js'
 const mediaText = mediaParagraph()
-t('the media paragraph requires calling the tool', mediaText.includes('必须') && mediaText.includes('onebot_send_media'))
+t('the media paragraph requires the send_media action', mediaText.includes('必须') && mediaText.includes('send_media'))
 t('the media paragraph forbids claiming no permission', mediaText.includes('不要回复说你没有权限'))
 t('the media paragraph forbids the admin excuse', mediaText.includes('绝不要让用户把你设为管理员'))
-t('the media paragraph requires listing first', mediaText.includes('onebot_list_files'))
+t('the media paragraph requires listing first', mediaText.includes('list_files'))
 
 // --- incoming media: placeholders become readable local paths
 import {

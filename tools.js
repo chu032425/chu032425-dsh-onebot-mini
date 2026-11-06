@@ -2,9 +2,11 @@
  * The OneBot tool exposed to a chat's agent.
  *
  * One generic escape hatch instead of one tool per action: the model passes the
- * OneBot action name and its params, and the transport relays it. That keeps
- * the plugin small while still covering images, files, group administration and
- * every other action a gateway offers.
+ * name of an OneBot action — or of a local action implemented inside this plugin
+ * — and its params. OneBot actions are relayed to the transport; local actions
+ * (send_media, list_files) run here. That keeps the model's tool list to a single
+ * entry while still covering media, files, group administration and every other
+ * action a gateway offers.
  *
  * `parameters` is raw JSON Schema, not a schema-builder spec: `ctx.tools.register`
  * takes a registry-ready definition, and only the `defineTool` helper compiles a
@@ -12,7 +14,7 @@
  * which a git-installed plugin cannot resolve.
  */
 
-import { DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT } from './prompt.js'
+import { DEFAULT_TOOL_CALL_PROMPT } from './prompt.js'
 
 /** The tool definition, minus the parts that need a live connection. */
 const PARAMETERS = Object.freeze({
@@ -20,12 +22,14 @@ const PARAMETERS = Object.freeze({
   properties: {
     action: {
       type: 'string',
-      description: 'OneBot 11 action name, e.g. send_private_msg, send_group_msg, get_group_info, set_group_ban.',
+      description: 'Action name: an OneBot 11 action (e.g. send_private_msg, send_group_msg, get_group_info, '
+        + 'set_group_ban) or a local action (send_media, list_files).',
     },
     params: {
       type: 'object',
       additionalProperties: true,
-      description: 'Action parameters, e.g. { user_id, message } or { group_id, message }. '
+      description: 'Action parameters, e.g. { user_id, message }, { group_id, message }, '
+        + 'or for local actions { kind, path } / { dir }. '
         + 'Message segments look like [{ "type": "text", "data": { "text": "hi" } }, '
         + '{ "type": "image", "data": { "file": "/path/to.png" } }].',
     },
@@ -52,15 +56,76 @@ const OUTPUT_SCHEMA = Object.freeze({
   additionalProperties: false,
 })
 
+/** Local actions implemented in this module instead of being relayed. */
+const LOCAL = new Set(['send_media', 'list_files'])
+
+/** List files in a host directory so the model can pick a real name. */
+async function runListFiles(params) {
+  const dir = String(params?.dir ?? '').trim()
+  if (dir === '') return { ok: false, error: 'dir must not be empty' }
+  const needle = String(params?.filter ?? '').trim().toLowerCase()
+  const limit = Math.max(1, Math.min(500, Math.trunc(Number(params?.limit ?? 100)) || 100))
+  try {
+    const { readdir, stat } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    const names = await readdir(dir)
+    const entries = []
+    for (const name of names.sort()) {
+      if (needle !== '' && !name.toLowerCase().includes(needle)) continue
+      if (entries.length >= limit) break
+      let isDirectory = false
+      let size = 0
+      try {
+        const info = await stat(join(dir, name))
+        isDirectory = info.isDirectory()
+        size = info.size
+      } catch {
+        continue
+      }
+      entries.push({ name, isDirectory, size })
+    }
+    return { ok: true, data: { dir, count: entries.length, entries } }
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) }
+  }
+}
+
+/**
+ * Send one media item through the gateway.
+ *
+ * A local path is inlined by `media.js`, which is the point of this local action:
+ * `onebot_call` to a raw send action can only reference a URL the gateway reads.
+ */
+async function runSendMedia(params, env) {
+  const chatType = String(params?.chatType ?? env.defaultType ?? '').trim()
+  const targetId = String(params?.chatId ?? env.defaultId ?? '').trim()
+  if (chatType === '' || targetId === '') {
+    return { ok: false, error: 'chatType and chatId are required (the current chat is not known)' }
+  }
+  const { sendMedia } = await import('./media.js')
+  return sendMedia(env.connection, {
+    onCleanup: (outcome) => { if (typeof env.recordLog === 'function') env.recordLog('media source ' + outcome) },
+    chatType,
+    chatId: targetId,
+    kind: params?.kind,
+    path: params?.path,
+    url: params?.url,
+    base64: params?.base64,
+    name: params?.name,
+    deleteSource: env.deleteSentMedia === true,
+  })
+}
+
 /**
  * Register the tool on one agent's context.
  *
  * `agentCtx.tools.register` ties the registration to that agent, so the tool
  * disappears when the agent is disposed.
  * @param agentCtx - the agent-scoped context from the setup callback.
- * @param options - the live `connection` facade and the allowed action set.
- *   `allow` is a Set of action names; an action outside it is refused instead
- *   of being relayed. The caller omits the tool entirely when nothing is allowed.
+ * @param options - the live `connection` facade, the allowed action set, the
+ *   current chat id, and logging. `allow` is a Set of action names; an action
+ *   outside it is refused instead of being relayed. The caller omits the tool
+ *   entirely when nothing is allowed.
  */
 export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia, prompts, recordLog }) {
   // Any context with a `tools` service works: an agent-scoped ctx registers for
@@ -77,9 +142,11 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
   }
   const disposers = []
   const allowed = allow instanceof Set ? allow : undefined
-  // The chat this agent serves, so a media send can default to it instead of
-  // making the model repeat the target on every call.
+  // The chat this agent serves, so a local send_media can default to it instead
+  // of making the model repeat the target on every call.
   const [defaultType, defaultId] = String(chatId ?? '').split(':')
+  const env = { connection, defaultType, defaultId, deleteSentMedia, recordLog }
+
   disposers.push(tools.register({
     name: 'onebot_call',
     // The description is a configurable prompt; the caller renders the dynamic
@@ -90,15 +157,25 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
       schema: OUTPUT_SCHEMA,
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
-    timeoutMs: 60000,
-    isConcurrencySafe: () => true,
+    // Media inlining can be slow; give every action the larger budget.
+    timeoutMs: 120000,
+    // A media send mutates the outside world and is not safe to overlap.
+    isConcurrencySafe: (args) => String(args?.action ?? '') !== 'send_media',
     async execute(args) {
       const action = String(args?.action ?? '').trim()
       if (action === '') throw new Error('onebot_call: action must not be empty')
+      const params = args?.params !== null && typeof args?.params === 'object' ? args.params : {}
       if (allowed !== undefined && !allowed.has(action)) {
         return { ok: false, error: 'action "' + action + '" is disabled in the OneBot-Mini settings' }
       }
-      const params = args?.params !== null && typeof args?.params === 'object' ? args.params : {}
+      // Local actions never reach the gateway; they run in-process.
+      if (LOCAL.has(action)) {
+        try {
+          return action === 'send_media' ? await runSendMedia(params, env) : await runListFiles(params)
+        } catch (error) {
+          return { ok: false, error: String(error?.message ?? error) }
+        }
+      }
       try {
         const data = await connection.call(action, params)
         // Pass the payload through verbatim (object, array or scalar); only map
@@ -108,108 +185,6 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
       } catch (error) {
         return { ok: false, error: String(error?.message ?? error) }
       }
-    },
-  }))
-
-  // A file-listing tool: the model has no way to see the disk, so without this it
-  // invents plausible filenames and the send fails. Listing is cheap and keeps
-  // guesses honest.
-  disposers.push(tools.register({
-    name: 'onebot_list_files',
-    description: 'List files in a directory on the DSH host, so you can pick a real file '
-      + 'before calling onebot_send_media. Returns names, sizes and whether each is a directory.',
-    parameters: {
-      type: 'object',
-      properties: {
-        dir: { type: 'string', description: 'Absolute directory path, e.g. /workspace/QQ.' },
-        filter: { type: 'string', description: 'Optional case-insensitive substring to match in file names.' },
-        limit: { type: 'number', description: 'Maximum entries to return (default 100).' },
-      },
-      required: ['dir'],
-      additionalProperties: false,
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
-    },
-    timeoutMs: 30000,
-    isConcurrencySafe: () => true,
-    async execute(args) {
-      const dir = String(args?.dir ?? '').trim()
-      if (dir === '') return { ok: false, error: 'dir must not be empty' }
-      const needle = String(args?.filter ?? '').trim().toLowerCase()
-      const limit = Math.max(1, Math.min(500, Math.trunc(Number(args?.limit ?? 100)) || 100))
-      try {
-        const { readdir, stat } = await import('node:fs/promises')
-        const { join } = await import('node:path')
-        const names = await readdir(dir)
-        const entries = []
-        for (const name of names.sort()) {
-          if (needle !== '' && !name.toLowerCase().includes(needle)) continue
-          if (entries.length >= limit) break
-          let isDirectory = false
-          let size = 0
-          try {
-            const info = await stat(join(dir, name))
-            isDirectory = info.isDirectory()
-            size = info.size
-          } catch {
-            continue
-          }
-          entries.push({ name, isDirectory, size })
-        }
-        return { ok: true, data: { dir, count: entries.length, entries } }
-      } catch (error) {
-        return { ok: false, error: String(error?.message ?? error) }
-      }
-    },
-  }))
-
-  // A dedicated media tool: `onebot_call` can send an image too, but only from a
-  // URL the gateway can read. This one also accepts a path on this host and
-  // inlines the bytes, which is what makes "reply with a local picture" work.
-  disposers.push(tools.register({
-    name: 'onebot_send_media',
-    description: (typeof prompts?.media === 'string' && prompts.media !== '') ? prompts.media : DEFAULT_TOOL_MEDIA_PROMPT,
-    parameters: {
-      type: 'object',
-      properties: {
-        kind: { type: 'string', enum: ['image', 'record', 'video', 'file'], description: 'Kind of media.' },
-        path: { type: 'string', description: 'Local file path on the DSH host.' },
-        url: { type: 'string', description: 'A URL the gateway can reach.' },
-        base64: { type: 'string', description: 'Raw base64 payload (no data: prefix).' },
-        name: { type: 'string', description: 'Display name, for a file.' },
-        chatType: { type: 'string', enum: ['private', 'group'], description: 'Defaults to the current chat.' },
-        chatId: { type: 'string', description: 'Target id; defaults to the current chat.' },
-      },
-      required: ['kind'],
-      additionalProperties: false,
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
-    },
-    timeoutMs: 120000,
-    isConcurrencySafe: () => false,
-    async execute(args) {
-      const chatType = String(args?.chatType ?? defaultType ?? '').trim()
-      const targetId = String(args?.chatId ?? defaultId ?? '').trim()
-      if (chatType === '' || targetId === '') {
-        return { ok: false, error: 'chatType and chatId are required (the current chat is not known)' }
-      }
-      const { sendMedia } = await import('./media.js')
-      const result = await sendMedia(connection, {
-        onCleanup: (outcome) => { if (typeof recordLog === 'function') recordLog('media source ' + outcome) },
-        chatType,
-        chatId: targetId,
-        kind: args?.kind,
-        path: args?.path,
-        url: args?.url,
-        base64: args?.base64,
-        name: args?.name,
-        deleteSource: deleteSentMedia === true,
-      })
-      return result
     },
   }))
   return disposers

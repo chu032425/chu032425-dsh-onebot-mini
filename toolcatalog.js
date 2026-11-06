@@ -50,12 +50,14 @@ const a = (name, zh, en) => Object.freeze({
   zh,
   en,
   standard: STANDARD_ACTIONS.has(name),
+  local: LOCAL_ACTIONS.has(name),
   params: ACTION_DOCS[name]?.params ?? Object.freeze([]),
   defaultPrompt: actionPrompt(name, zh),
 })
 
 /** Chinese labels for each action group, used in the channel prompt. */
 export const GROUP_LABELS = Object.freeze({
+  local: '本地工具（插件自带）',
   message: '发送消息',
   media: '媒体与文件',
   group: '群管理',
@@ -91,8 +93,20 @@ export const STANDARD_ACTIONS = Object.freeze(new Set([
   'set_friend_add_request', 'set_group_add_request',
 ]))
 
+/**
+ * Actions implemented inside this plugin instead of being relayed to the
+ * gateway. They share the one `onebot_call` tool: the tool dispatches these
+ * names to local handlers before falling back to the OneBot transport.
+ */
+export const LOCAL_ACTIONS = Object.freeze(new Set(['send_media', 'list_files']))
+
 /** The operator-facing grouping. Order is the order shown in the tools page. */
 export const TOOL_GROUPS = Object.freeze([
+  Object.freeze({ id: 'local', actions: Object.freeze([
+    a('send_media', '发送媒体（图片/语音/视频/文件）', 'Send image/voice/video/file'),
+    a('list_files', '列出本机目录文件', 'List host directory files'),
+  ]) }),
+
   Object.freeze({ id: 'message', actions: Object.freeze([
     a('send_private_msg', '发送私聊消息', 'Send a private message'),
     a('send_group_msg', '发送群消息', 'Send a group message'),

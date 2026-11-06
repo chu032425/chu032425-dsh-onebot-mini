@@ -113,7 +113,7 @@ t('session mode is gone', !('fieldSessionMode' in zh) && !('modePlan' in zh))
 // The onebot_call action picker must have copy in both languages, so the section
 // never falls back to a raw dictionary key in either UI.
 for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
-  'toolGroupMessage', 'toolGroupMedia', 'toolGroupGroup', 'toolGroupQuery', 'toolGroupInteraction',
+  'toolGroupLocal', 'toolGroupMessage', 'toolGroupMedia', 'toolGroupGroup', 'toolGroupQuery', 'toolGroupInteraction',
   'toolGroupRequest', 'toolGroupProfile', 'toolGroupQzone', 'toolGroupAlbum',
   'toolActionsHint', 'toolNoteAuto', 'toolTotal', 'toolSearchPlaceholder', 'toolNoMatch',
   'toolPromptSummary', 'toolPromptHint', 'toolPromptReset', 'toolPromptCustom']) {
@@ -124,8 +124,8 @@ t('every catalog action ships a default prompt for the tools page', TOOL_GROUPS.
 // Every catalogued action carries its annotation in the catalog itself, so the
 // list never shows a bare action id without an explanation next to it.
 t('the catalog supplies action annotations', TOOL_GROUPS.every((group) => group.actions.every((action) => /[\u4e00-\u9fa5]/.test(action.zh)))),
-t('the tools page renders every catalog group', TOOL_GROUPS.length === 9)
-for (const key of ['toolBadgeStandard', 'toolBadgeExtension']) {
+t('the tools page renders every catalog group', TOOL_GROUPS.length === 10)
+for (const key of ['toolBadgeStandard', 'toolBadgeExtension', 'toolBadgeLocal']) {
   t('tool kind badge copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 t('every catalog action is classifiable for the badge', TOOL_GROUPS.every((group) => group.actions.every((action) => action.standard === true || action.standard === false)))
@@ -162,7 +162,7 @@ for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsReset', 'promptsSa
   'promptDefAdmin', 'promptDefAdminHint', 'promptDefSenderPrefix', 'promptDefSenderPrefixHint',
   'promptDefMedia', 'promptDefMediaHint', 'promptDefTools', 'promptDefToolsHint',
   'promptDefToolCall', 'promptDefToolCallHint',
-  'promptDefToolMedia', 'promptDefToolMediaHint', 'promptDefInterject', 'promptDefInterjectHint',
+ 'promptDefInterject', 'promptDefInterjectHint',
   'promptsPlaceholders', 'promptsNoPlaceholders', 'promptsCollapseHint', 'promptsDirtyMark',
   'phReplyMode', 'phAdmin', 'phAdminId', 'phSenderPrefix', 'phMedia', 'phTools', 'phActions', 'phInbound', 'phEnabledNote']) {
   t('prompt copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
