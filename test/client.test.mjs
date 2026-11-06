@@ -155,12 +155,17 @@ t('cache menu label present', zh.tabCache === '缓存' && en.tabCache === 'Cache
 t('prompt menu label present', zh.tabPrompts === '提示词' && en.tabPrompts === 'Prompt')
 for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsReset', 'promptsSave', 'promptsSaved',
   'promptDefChannel', 'promptDefChannelHint', 'promptDefInbound', 'promptDefInboundHint',
+  'promptDefReplyModeStream', 'promptDefReplyModeStreamHint', 'promptDefReplyModeFinal', 'promptDefReplyModeFinalHint',
+  'promptDefAdmin', 'promptDefAdminHint', 'promptDefSenderPrefix', 'promptDefSenderPrefixHint',
+  'promptDefMedia', 'promptDefMediaHint', 'promptDefTools', 'promptDefToolsHint',
+  'promptDefActions', 'promptDefActionsHint',
   'promptDefToolCall', 'promptDefToolCallHint',
   'promptDefToolMedia', 'promptDefToolMediaHint', 'promptDefInterject', 'promptDefInterjectHint',
-  'promptsPlaceholders', 'promptsNoPlaceholders',
-  'phReplyMode', 'phAdmin', 'phSenderPrefix', 'phMedia', 'phTools', 'phActions', 'phInbound', 'phEnabledNote']) {
+  'promptsPlaceholders', 'promptsNoPlaceholders', 'promptsCollapseHint', 'promptsDirtyMark',
+  'phReplyMode', 'phAdmin', 'phAdminId', 'phSenderPrefix', 'phMedia', 'phTools', 'phActions', 'phInbound', 'phEnabledNote']) {
   t('prompt copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
+t('prompt sections are native collapsible details (collapsed by default)', src.includes("React.createElement('details'") && src.includes("React.createElement('summary'"))
 const phKeyOf = (token) => {
   const inner = String(token ?? '').replace(/[{}]/g, '')
   return 'ph' + inner.charAt(0).toUpperCase() + inner.slice(1)
