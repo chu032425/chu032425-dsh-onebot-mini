@@ -12,7 +12,7 @@ import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage,
   isAddressed, speakerPrefix, textOfMessage, buildPlatformPrompt,
-  ratioReached, ChatBridge,
+  ratioReached, ChatBridge, isPoke, pokeTarget, pokeText,
 } from '../bridge.js'
 import { tmpdir } from 'node:os'
 
@@ -57,7 +57,7 @@ t('non-boolean boolean falls back', normalizeConfig({ senderPrefix: 'yes' }).val
 t('the default keeps steering on and the prefix on', DEFAULTS.privateAutoInterject === true && DEFAULTS.senderPrefix === true)
 t('dead debounce fields are gone; only the interject switch remains', !('debounceMs' in DEFAULTS) && !('debounceMaxMs' in DEFAULTS) && !('autoInterject' in DEFAULTS) && DEFAULTS.privateAutoInterject === true)
 t('no group reply config remains', !('groupDebounceMs' in DEFAULTS) && !('groupAutoInterject' in DEFAULTS))
-t('the reply group holds the send mode then the interject switch', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'reply').fields) === '["replyMode","privateAutoInterject"]')
+t('the reply group holds the send mode, the interject switch, then the two poke switches', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'reply').fields) === '["replyMode","privateAutoInterject","pokeEvents","pokeBack"]')
 
 // 回复模式：stream（边说边发，默认）或 final（缓冲后合成一条）
 t('reply mode defaults to stream', DEFAULTS.replyMode === 'stream')
@@ -208,6 +208,20 @@ t('flatten keeps at-all', flattenMessage([{ type: 'at', data: { qq: 'all' } }]) 
 t('a json mini-program card becomes a labelled placeholder', flattenMessage([{ type: 'json', data: { data: JSON.stringify({ prompt: '[QQ小程序]', desc: '某小程序' }) } }]) === '[卡片: QQ小程序]')
 t('a card-only message is not flattened to empty', flattenMessage([{ type: 'json', data: {} }]).startsWith('[卡片'))
 t('an unknown segment yields nothing to the model', flattenMessage([{ type: 'markdown', data: {} }]) === '')
+
+// --- 戳一戳事件（通知类，不是消息）
+const pokeFrame = (extra = {}) => ({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', user_id: 2000001, target_id: 2000002, group_id: 2000003, ...extra })
+t('a poke notice is recognized', isPoke(pokeFrame()) === true)
+t('a poke without sub_type is still recognized', isPoke({ post_type: 'notice', notice_type: 'notify', user_id: 1, target_id: 2 }) === true)
+t('a plain message is not a poke', isPoke({ post_type: 'message', message_type: 'private', user_id: 1 }) === false)
+t('another notice type is not a poke', isPoke(pokeFrame({ notice_type: 'group_increase' })) === false)
+t('a poke missing target_id is not a poke', isPoke({ post_type: 'notice', notice_type: 'notify', user_id: 1 }) === false)
+t('a group poke resolves to the group chat', pokeTarget(pokeFrame()).chatId === 'group:2000003')
+t('a private poke resolves to the poker chat', pokeTarget(pokeFrame({ group_id: undefined })).chatId === 'private:2000001')
+t('a group poke names the poker', pokeText({ ...pokeFrame(), sender: { card: '小明' } }, '2000002', 'group').includes('小明(2000001)'))
+t('a group poke says it happened in the group', pokeText(pokeFrame(), '2000002', 'group').includes('在群里'))
+t('a private poke names the poker', pokeText({ ...pokeFrame({ group_id: undefined }), sender: {} }, '2000002', 'private').includes('2000001'))
+t('a self-poke is described as the bot poking', pokeText(pokeFrame({ user_id: 2000002 }), '2000002', 'group').includes('你'))
 t('unknown segment types are reported', JSON.stringify(unknownSegmentTypes([{ type: 'text', data: { text: 'x' } }, { type: 'markdown', data: {} }, { type: 'markdown', data: {} }])) === '["markdown"]')
 t('a cq json string becomes a card placeholder', unescapeCq('[CQ:json,data={"prompt":"&#91;QQ小程序&#93;"}]') === '[卡片]')
 t('cq fallback unescapes and strips', unescapeCq('a&#91;b&#93; &amp; [CQ:image,file=x]') === 'a[b] & [图片]')
@@ -418,8 +432,8 @@ t('the build injects the admin QQ', buildPlatformPrompt({ ...DEFAULTS, adminUser
 t('no admin line without an administrator', !buildPlatformPrompt(DEFAULTS).includes('管理员是 QQ'))
 t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
 t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
-t('the prompt registry covers channel, reply mode, admin, prefix, media, tools, actions, inbound and the tool call',
-  PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,replyModeStreamPrompt,replyModeFinalPrompt,adminPrompt,senderPrefixPrompt,mediaPrompt,toolsPrompt,inboundPrompt,toolCallPrompt')
+t('the prompt registry covers channel, reply mode, admin, prefix, media, tools, actions, inbound, the tool call and pokes',
+  PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,replyModeStreamPrompt,replyModeFinalPrompt,adminPrompt,senderPrefixPrompt,mediaPrompt,toolsPrompt,inboundPrompt,toolCallPrompt,pokePrompt')
 t('every registered prompt has a config default', PROMPT_DEFS.every((d) => typeof DEFAULTS[d.field] === 'string' && DEFAULTS[d.field] !== ''))
 t('every registered prompt has a label key', PROMPT_DEFS.every((d) => typeof d.labelKey === 'string' && d.labelKey !== ''))
 const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', mediaPrompt: '' }).value

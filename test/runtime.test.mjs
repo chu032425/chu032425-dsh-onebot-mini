@@ -1196,6 +1196,84 @@ t('a speaker who never pauses is served by the deadline cap', floodDelivered.len
 t('the flushing speaker turns all arrive (no permanent starvation)', floodText.includes('F5') && floodText.includes('F6'))
 await bridgeFlood.stop()
 
+// ---------------------------------------------------------------- 戳一戳
+// 戳一戳是通知事件，不是消息：它要能穿过消息闸交给 agent，并能按开关反戳。
+const pokeCalls = []
+const pokeFollowups = []
+const pokeTransport = {
+  selfId: '2000002', state: 'online',
+  sendText: async () => ({ message_id: 1 }),
+  sendMessage: async () => ({ message_id: 1 }),
+  call: async (action, params) => { pokeCalls.push([action, params]); return {} },
+}
+const pokeAgents = {
+  get: () => undefined,
+  async create(options) {
+    const agent = { session: { id: options.sessionId }, status: 'idle', followup(m) { pokeFollowups.push(String(m.content[0].text)) } }
+    if (typeof options.setup === 'function') await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: () => () => {} } })
+    return { agent, dispose: async () => {} }
+  },
+  async resume() { throw new Error('no persisted session') },
+}
+const pokeCtx = { on: () => () => {}, agents: pokeAgents, get: (n) => (n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'p', model: 'm' }) } : undefined) }
+const pokeBridge = new ChatBridge({
+  ctx: pokeCtx,
+  config: { ...baseConfig, workspacePath: '/workspace/QQ', pokeEvents: true, pokeBack: true, requireMention: true },
+  connection: pokeTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
+})
+pokeBridge.start()
+const pokeFrame = { post_type: 'notice', notice_type: 'notify', sub_type: 'poke', group_id: 2000003, user_id: 2000001, target_id: 2000002, sender: { card: '小明' }, time: 1700000000 }
+await pokeBridge.handleInbound(pokeFrame)
+await wait(200)
+t('群里的戳一戳交给 agent 回答（不需要 @）', pokeFollowups.length === 1, String(pokeFollowups.length))
+t('戳一戳的文本点明了是谁戳的', pokeFollowups[0]?.includes('小明(2000001)') === true, pokeFollowups[0])
+t('戳一戳的文本标了 [戳一戳]', pokeFollowups[0]?.startsWith('[戳一戳]') === true, pokeFollowups[0])
+const pokedBack = pokeCalls.find(([action]) => action === 'send_poke')
+t('打开反戳后会调用 send_poke', pokedBack !== undefined)
+t('反戳带上了群号与被戳的人', pokedBack !== undefined && pokedBack[1].group_id === 2000003 && pokedBack[1].user_id === 2000001, JSON.stringify(pokedBack?.[1]))
+
+// 关掉反戳就只回复、不戳回去
+pokeCalls.length = 0
+pokeFollowups.length = 0
+const quietPokeBridge = new ChatBridge({
+  ctx: pokeCtx,
+  config: { ...baseConfig, workspacePath: '/workspace/QQ', pokeEvents: true, pokeBack: false },
+  connection: pokeTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
+})
+quietPokeBridge.start()
+await quietPokeBridge.handleInbound(pokeFrame)
+await wait(200)
+t('关掉反戳后仍然会回复', pokeFollowups.length === 1, String(pokeFollowups.length))
+t('关掉反戳后不会调用 send_poke', !pokeCalls.some(([action]) => action === 'send_poke'))
+await quietPokeBridge.stop()
+
+// 关掉戳一戳事件就彻底安静
+pokeCalls.length = 0
+pokeFollowups.length = 0
+const offPokeBridge = new ChatBridge({
+  ctx: pokeCtx,
+  config: { ...baseConfig, workspacePath: '/workspace/QQ', pokeEvents: false, pokeBack: true },
+  connection: pokeTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
+})
+offPokeBridge.start()
+await offPokeBridge.handleInbound(pokeFrame)
+await wait(150)
+t('关掉戳一戳后既不回复也不反戳', pokeFollowups.length === 0 && !pokeCalls.some(([action]) => action === 'send_poke'))
+
+// 戳的是别人（不是机器人）时不打扰模型
+pokeFollowups.length = 0
+await offPokeBridge.stop()
+const otherPokeBridge = new ChatBridge({
+  ctx: pokeCtx,
+  config: { ...baseConfig, workspacePath: '/workspace/QQ', pokeEvents: true, pokeBack: true },
+  connection: pokeTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
+})
+otherPokeBridge.start()
+await otherPokeBridge.handleInbound({ ...pokeFrame, target_id: 123456 })
+await wait(150)
+t('群里戳别人不会触发回复', pokeFollowups.length === 0, String(pokeFollowups.length))
+await otherPokeBridge.stop()
+await pokeBridge.stop()
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

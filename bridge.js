@@ -11,7 +11,7 @@
 import { mkdir, stat } from 'node:fs/promises'
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, GROUP_LABELS } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, pokeParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes, unescapeCq } from './inbound.js'
 import { buildReplySegments, groupReplySegments, safeUnlink } from './media.js'
 
@@ -138,6 +138,58 @@ export function isAddressed(frame, botId) {
     if (match !== null && match[1] === botId) return true
   }
   return false
+}
+
+/**
+ * 判断一帧是不是戳一戳通知。
+ *
+ * OneBot 11 把戳一戳报成通知事件：`post_type: notice`、`notice_type: notify`、
+ * `sub_type: poke`。有的实现会省掉 `sub_type`，所以只要通知类型是 notify 且同时
+ * 带了戳人者与被戳者就认。
+ * @param frame - 事件帧。
+ * @returns 是戳一戳则为 true。
+ */
+export function isPoke(frame) {
+  if (frame === null || typeof frame !== 'object') return false
+  if (frame.post_type !== 'notice') return false
+  if (String(frame.notice_type ?? '') !== 'notify') return false
+  const sub = String(frame.sub_type ?? '')
+  if (sub !== '' && sub !== 'poke') return false
+  return String(frame.user_id ?? '') !== '' && String(frame.target_id ?? '') !== ''
+}
+
+/**
+ * 戳一戳事件涉及的聊天：带群号算群聊，其余算私聊。
+ * @param frame - 戳一戳事件。
+ * @returns `{ chatId, chat, poker, target }`。
+ */
+export function pokeTarget(frame) {
+  const groupId = String(frame.group_id ?? '')
+  const poker = String(frame.user_id ?? '')
+  const target = String(frame.target_id ?? '')
+  const kind = groupId !== '' ? 'group' : 'private'
+  const chatId = chatIdOf(kind, kind === 'group' ? groupId : poker)
+  return { chatId, chat: splitChatId(chatId), poker, target }
+}
+
+/**
+ * 戳一戳交给模型看的文本。
+ *
+ * 群里要带上戳人者，否则模型不知道是谁在戳；戳自己的那次值得回答，戳别人的
+ * 只作为上下文。
+ * @param frame - 戳一戳事件。
+ * @param botId - 机器人自己的账号，可能为空。
+ * @param chatKind - `private` 或 `group`。
+ * @returns 一行模型可读的描述。
+ */
+export function pokeText(frame, botId, chatKind) {
+  const poker = String(frame.user_id ?? '')
+  const name = String(frame.sender?.card || frame.sender?.nickname || poker)
+  const self = botId !== '' && poker === botId
+  if (chatKind === 'group') {
+    return self ? '[戳一戳] 你在群里戳了别人' : '[戳一戳] ' + name + '(' + poker + ') 在群里戳了你'
+  }
+  return self ? '[戳一戳] 你戳了对方' : '[戳一戳] ' + name + '(' + poker + ') 戳了你'
 }
 
 /** 给群消息加上发言人前缀，让模型能区分参与者。私聊不需要前缀。
@@ -280,11 +332,59 @@ export class ChatBridge {
     this.log.record('error', { note: stage + ' for ' + chatId, error: this.describeError(error) })
   }
 
+  /**
+   * 处理一次戳一戳：过闸 → 可选反戳 → 交给模型回答。
+   *
+   * 戳一戳没有消息段，所以不走消息闸里的去重、@ 判定与媒体下载；但访问闸
+   * （黑白名单）照旧生效，否则戳一下就能绕过访问控制。
+   * @param frame - 戳一戳事件帧。
+   */
+  async handlePoke(frame) {
+    if (this.config.pokeEvents === false) return
+    const { chatId, chat, poker, target } = pokeTarget(frame)
+    const botId = this.connection.selfId
+    // 戳别人（而不是戳机器人）时不打扰模型：那只是群里的互动，没有要它回答的事。
+    const pokedMe = botId !== '' && target === botId
+    if (!pokedMe && !(chat.kind === 'private')) return
+
+    const allow = chat.kind === 'private' ? this.config.allowFrom : this.config.allowGroups
+    const deny = chat.kind === 'private' ? this.config.denyFrom : this.config.denyGroups
+    if (Array.isArray(deny) && deny.length > 0 && deny.includes(chat.id)) {
+      this.log.record('bridge', { note: 'poke ignored: chat is blacklisted', chatId, poker })
+      return
+    }
+    if (Array.isArray(allow) && allow.length > 0 && !allow.includes(chat.id)) {
+      this.log.record('bridge', { note: 'poke ignored: chat is not allowed', chatId, poker })
+      return
+    }
+    this.log.record('bridge', { note: 'poke received', chatId, poker, target })
+
+    // 反戳：只有运营方打开开关、且戳的确实是机器人时才戳回去，否则两个机器人
+    // 会互相戳个没完。
+    if (this.config.pokeBack === true && pokedMe) {
+      try {
+        const params = chat.kind === 'group'
+          ? { group_id: Number(chat.id), user_id: Number(poker) }
+          : { user_id: Number(poker) }
+        await this.connection.call('send_poke', params)
+        this.log.record('bridge', { note: 'poked back', chatId, poker })
+      } catch (error) {
+        // 有的网关不实现 send_poke；戳不回去不该影响后面把话说完。
+        this.log.record('warn', { note: 'poke back failed: ' + this.describeError(error), chatId })
+      }
+    }
+
+    const text = pokeText(frame, botId, chat.kind)
+    await this.dispatch(chatId, chat, text, frame, [])
+  }
+
   /** 处理一个推送来的 OneBot 事件。
  * @param frame - 事件帧。 */
   async handleInbound(frame) {
     if (this.stopping) return
     if (frame === null || typeof frame !== 'object') return
+    // 戳一戳是通知类事件而不是消息，单独处理：它没有 message 段，也不该走消息闸。
+    if (isPoke(frame)) return this.handlePoke(frame)
     if (frame.post_type !== 'message') return
     if (frame.message_type !== 'private' && frame.message_type !== 'group') return
 
@@ -1148,5 +1248,8 @@ export function buildPlatformPrompt(config) {
     actions = lines.join('\n')
   }
 
-  return renderPrompt(template, { replyMode, admin, senderPrefix, media, tools, actions, inbound })
+  // 戳一戳段落跟着「是否接收戳一戳」走：关掉后整段从提示词里消失。
+  const poke = pokeParagraph(config?.pokeEvents !== false, config?.pokePrompt)
+
+  return renderPrompt(template, { replyMode, admin, senderPrefix, media, tools, actions, inbound, poke })
 }

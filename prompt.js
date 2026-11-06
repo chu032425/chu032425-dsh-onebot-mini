@@ -30,6 +30,7 @@ export const DEFAULT_CHANNEL_PROMPT = [
   '{senderPrefix}',
   '{media}',
   '{inbound}',
+  '{poke}',
   '{actions}',
   '- 本通道没有 Web 端的审批卡片：不要调用 exit_plan_mode，需要计划时用纯文本写出。',
 ].join('\n')
@@ -166,7 +167,7 @@ export function toolsParagraph(allow, template) {
 }
 
 /** 频道模板声明的占位符。 */
-export const PROMPT_PLACEHOLDERS = Object.freeze(['{replyMode}', '{admin}', '{senderPrefix}', '{media}', '{tools}', '{actions}', '{inbound}'])
+export const PROMPT_PLACEHOLDERS = Object.freeze(['{replyMode}', '{admin}', '{senderPrefix}', '{media}', '{tools}', '{actions}', '{inbound}', '{poke}'])
 
 /**
  * 「收到的媒体」默认提示词：告诉模型占位符里带的是本机路径，并说明如何读取。
@@ -181,6 +182,31 @@ export const DEFAULT_INBOUND_PROMPT = [
   '- 视频会保存并给出 [视频: /绝对/路径]；文件会给出 [文件: 名称, /绝对/路径]。需要时用 read 或 bash 工具读取其中内容（如文本、表格、压缩包）。',
   '- 若占位符不带路径（只有 [图片] 这种），说明下载失败或未开启接收媒体：如实告诉用户你没有收到内容，不要凭空编造。',
 ].join('\n')
+
+/**
+ * 「戳一戳」默认提示词：讲清这类事件长什么样，以及应当用文字回应。
+ *
+ * 戳一戳不是消息，没有正文；它作为一条 `[戳一戳] …` 的文本交到模型手里，
+ * 所以这一段要说清楚该怎么对待它。
+ */
+export const DEFAULT_POKE_PROMPT = [
+  '## 戳一戳',
+  '- 有人戳了你时，会收到一条形如 [戳一戳] 昵称(QQ号) 戳了你 的文本（群里会注明「在群里」）。它不是消息，没有正文，含义相当于「在吗 / 提醒你看一眼」。',
+  '- 收到就当作一次打招呼：用纯文本简短回应即可（例如问对方有什么事）。不要假装看到了消息内容，也不要为此去调 onebot_call 查东西。',
+  '- 如果是你自己戳了别人（[戳一戳] 你戳了对方），那是你自己发起的动作，不必再回复自己。',
+].join('\n')
+
+/**
+ * 戳一戳段落（可被提示词页覆盖）。
+ * @param enabled - 是否接收戳一戳事件。
+ * @param template - 覆盖文本；为空则用默认。
+ * @returns 该段落；关闭时为空串。
+ */
+export function pokeParagraph(enabled, template) {
+  if (enabled === false) return ''
+  const custom = String(template ?? '').trim()
+  return custom !== '' ? custom : DEFAULT_POKE_PROMPT
+}
 
 /**
  * 「收到的媒体」段落（可被提示词页覆盖）。
@@ -219,6 +245,7 @@ export const PROMPT_DEFS = Object.freeze([
   Object.freeze({ id: 'tools', field: 'toolsPrompt', labelKey: 'promptDefTools', placeholders: Object.freeze([]), default: DEFAULT_TOOLS_PROMPT }),
   Object.freeze({ id: 'inbound', field: 'inboundPrompt', labelKey: 'promptDefInbound', placeholders: Object.freeze([]), default: DEFAULT_INBOUND_PROMPT }),
   Object.freeze({ id: 'toolCall', field: 'toolCallPrompt', labelKey: 'promptDefToolCall', placeholders: Object.freeze(['{enabledNote}']), default: DEFAULT_TOOL_CALL_PROMPT }),
+  Object.freeze({ id: 'poke', field: 'pokePrompt', labelKey: 'promptDefPoke', placeholders: Object.freeze([]), default: DEFAULT_POKE_PROMPT }),
 ])
 
 /**
@@ -232,7 +259,7 @@ export const PROMPT_DEFS = Object.freeze([
  */
 export function renderPrompt(template, values) {
   let text = String(template ?? '')
-  for (const key of ['replyMode', 'admin', 'senderPrefix', 'media', 'tools', 'actions', 'inbound']) {
+  for (const key of ['replyMode', 'admin', 'senderPrefix', 'media', 'tools', 'actions', 'inbound', 'poke']) {
     const value = String(values?.[key] ?? '')
     const pattern = new RegExp('^[ \\t]*\\{' + key + '\\}[ \\t]*$', 'm')
     if (value.trim() === '') {

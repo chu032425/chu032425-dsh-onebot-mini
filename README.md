@@ -80,6 +80,8 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `titleEqualsId` | `true` | 会话标题钉成会话 ID |
 | `replyMode` | `stream` | `stream`=每产生一段就发一段；`final`=整轮攒成一条、结束时发送 |
 | `privateAutoInterject` | `true` | 私聊里新消息能否打断正在进行的回答 |
+| `pokeEvents` | `true` | 收到戳一戳是否交给模型回答；关=直接忽略 |
+| `pokeBack` | `false` | 被戳后是否反戳回去（默认关，避免两个机器人互相戳） |
 | `onebotToolEnabled` | `true` | 是否给模型注册 `onebot_call`；关=模型完全看不到它 |
 | `onebotToolDisabled` | `[]` | 被禁用的动作名单（「工具」页勾选；未知动作会被忽略） |
 | `actionPrompts` | `{}` | 逐动作提示词覆盖；只有改过的动作才记录 |
@@ -95,9 +97,9 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 | `logToFile` | `true` | 是否同时写 JSONL 日志文件 |
 | `sendTimeoutMs` | `30000` | 单个动作超时 |
 
-另有九项提示词字段（`channelPrompt`、`replyModeStreamPrompt`、`replyModeFinalPrompt`、
+另有十项提示词字段（`channelPrompt`、`replyModeStreamPrompt`、`replyModeFinalPrompt`、
 `adminPrompt`、`senderPrefixPrompt`、`mediaPrompt`、`toolsPrompt`、`inboundPrompt`、
-`toolCallPrompt`），全部在「提示词」页里改，见下文。
+`toolCallPrompt`、`pokePrompt`），全部在「提示词」页里改，见下文。
 
 ## 收到的媒体
 
@@ -123,6 +125,22 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 - **解析后删除源文件**：`deleteInboundMedia` 默认开启时，这条消息所在的一轮结束后就删掉本机文件
   （若本轮回复要把这张图再发回去，会等发送完成后再删）。关掉后文件留在缓存目录，按「缓存」页
   对应的 `QQ/<号>` 项手动清空即可（没有定时任务）。
+
+## 戳一戳
+
+QQ 的「戳一戳」在 OneBot 11 里是**通知事件**（`post_type: notice` / `notice_type: notify` /
+`sub_type: poke`），不是消息，所以它不走消息通道，但同样会被处理：
+
+- 别人戳**机器人**时，这条事件会作为一行 `[戳一戳] 昵称(QQ号) 戳了你` 交给模型，模型用文字回应
+  （群里会注明「在群里」，且**不需要 @**——戳本身就是点名）；
+- 群里戳**别人**（不是机器人）不会触发回复，那只是群里的互动；
+- 访问控制照旧生效：黑名单里的会话、或不在白名单里的会话，戳一戳同样被忽略——否则戳一下就能
+  绕过访问控制；
+- `pokeEvents`（默认开）控制整条链路：关掉后戳一戳被直接忽略，模型也看不到这类事件；
+- `pokeBack`（默认**关**）控制反戳：打开后，别人戳机器人会先戳回去一次，再交给模型回复。
+  两个机器人都打开会互相戳个没完，所以默认关闭。网关不支持 `send_poke` 时反戳失败只记日志，
+  不影响后面的文字回复；
+- 戳一戳没有消息正文，所以不参与去重、@ 判定与媒体下载。
 
 ## 会话工作区
 
@@ -371,7 +389,7 @@ QQ 空间的「修改说说权限 / 设置访问限制」、账号资料的「�
 展示并编辑**所有模型可见的提示词**。页面由一份**提示词注册表**（`prompt.js` 的 `PROMPT_DEFS`）驱动：
 以后代码里新增一处提示词，只要在注册表登记一条，就会自动出现在这个页面上、自动持久化。
 
-当前收录九处：
+当前收录十处：
 
 | 提示词 | 作用 |
 |---|---|
@@ -384,6 +402,7 @@ QQ 空间的「修改说说权限 / 设置访问限制」、账号资料的「�
 | 工具清单提示词 | 工具启用时展开到 `{tools}`：工具总览、硬规则与调用说明；具体动作列表自动接在后面 |
 | 收到的媒体提示词 | 告诉模型收到的媒体已存到本机、如何读取（关闭接收媒体时不注入） |
 | onebot_call 工具描述 | 模型决定是否调 `onebot_call` 时读到的说明 |
+| 戳一戳提示词 | 收到戳一戳时展开到 `{poke}`：说明这类事件没有正文、应当用文字回应（`pokeEvents` 关闭时不注入） |
 
 频道提示词的占位符：
 
@@ -395,6 +414,7 @@ QQ 空间的「修改说说权限 / 设置访问限制」、账号资料的「�
 | `{media}` | 媒体发送说明（工具关闭时为空） |
 | `{tools}` | 工具说明（唯一的 `onebot_call`，含本地动作 `send_message` / `list_files`）与「QQ 相关操作只能用这个工具」的硬规则（工具关闭时为空） |
 | `{inbound}` | 收到的媒体说明（`inboundMedia` 关闭时为空） |
+| `{poke}` | 戳一戳说明（`pokeEvents` 关闭时为空） |
 | `{actions}` | 当前**已启用**的动作列表（工具关闭时换成「工具已关闭」提示） |
 
 - 其它文字都可以自由改，改完点「保存提示词」；「恢复默认」一键还原；

@@ -17,7 +17,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_INBOUND_PROMPT, DEFAULT_POKE_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** DSH 主目录：先看 `$DSH_HOME`，再看 `~/.dsh`。 */
 export function dshHome() {
@@ -83,6 +83,10 @@ export const DEFAULTS = Object.freeze({
   // 回复行为只剩这一个开关：新消息能否打断正在进行的回答。消息不再等什么安静
   // 窗口。
   privateAutoInterject: true,
+  // 收到戳一戳是否交给模型回答。默认开启；关掉后戳一戳事件直接忽略。
+  pokeEvents: true,
+  // 被戳一戳后是否反戳回去。默认关闭：两个机器人都打开会互相戳个没完。
+  pokeBack: false,
   // 助手的回答怎么到达聊天：
   //  - stream（默认）：每产生一条助手消息就立刻发出去；
   //  - final：把每个文本块攒起来，回合结束时发一条 QQ 消息（多步回合不会刷屏）。
@@ -104,6 +108,7 @@ export const DEFAULTS = Object.freeze({
   toolsPrompt: DEFAULT_TOOLS_PROMPT,
   inboundPrompt: DEFAULT_INBOUND_PROMPT,
   toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
+  pokePrompt: DEFAULT_POKE_PROMPT,
   imageCacheMaxKb: 1024,
   imageCacheTotalMb: 100,
   imageShowMaxMb: 32,
@@ -151,7 +156,10 @@ export const FIELD_KINDS = Object.freeze({
   toolsPrompt: 'text',
   inboundPrompt: 'text',
   toolCallPrompt: 'text',
+  pokePrompt: 'text',
   privateAutoInterject: 'boolean',
+  pokeEvents: 'boolean',
+  pokeBack: 'boolean',
   replyMode: 'replyMode',
   imageCacheMaxKb: 'number',
   imageCacheTotalMb: 'number',
@@ -164,7 +172,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'compactRatio', 'senderPrefix'] },
   { id: 'media', fields: ['inboundMedia', 'inboundMediaMaxMb', 'deleteInboundMedia', 'deleteSentMedia'] },
-  { id: 'reply', fields: ['replyMode', 'privateAutoInterject'] },
+  { id: 'reply', fields: ['replyMode', 'privateAutoInterject', 'pokeEvents', 'pokeBack'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
