@@ -93,7 +93,7 @@ async function runListFiles(params) {
  *   `allow` 是动作名集合；集合外的动作被拒绝而不是转发。无任何动作可用时调用方
  *   会完全不注册该工具。
  */
-export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia, prompts, recordLog, adminOnly, adminUserId, senderOf, actionPromptOf }) {
+export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia, prompts, recordLog, adminOnly, adminUserId, getAdminOnly, getAdminUserId, senderOf, actionPromptOf }) {
   // 任何带 `tools` 服务的上下文都可用：agent 作用域上下文只为该 agent 注册，
   // 插件自身的上下文则全局注册——后者是复用在线 agent（setup 未跑过）的兜底。
   const tools = agentCtx?.tools ?? agentCtx?.get?.('tools')
@@ -107,6 +107,17 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
   const disposers = []
   const allowed = allow instanceof Set ? allow : undefined
   const adminOnlySet = adminOnly instanceof Set ? adminOnly : new Set()
+  // 管理员判定集与管理员 QQ 优先走实时 getter：设置页改完立刻生效，不必等 agent
+  // 重建。没给 getter 时回落为注册时传入的静态值（测试与旧调用方仍可用）。
+  const resolveAdminOnly = typeof getAdminOnly === 'function'
+    ? () => {
+        const live = getAdminOnly()
+        return live instanceof Set ? live : new Set()
+      }
+    : () => adminOnlySet
+  const resolveAdminUserId = typeof getAdminUserId === 'function'
+    ? () => String(getAdminUserId() ?? '').trim()
+    : () => String(adminUserId ?? '').trim()
   // 该 agent 服务的聊天，本地 send_message 可默认为它，模型不必每次重复目标。
   const [defaultType, defaultId] = String(chatId ?? '').split(':')
   const env = { connection, defaultType, defaultId, deleteSentMedia, recordLog }
@@ -141,8 +152,8 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
       // 鉴权：标为「仅管理员可用」的动作，只有这条消息的发送者就是管理员时才放行。
       // 没配置管理员时没有人是管理员，这类动作对谁都拒绝；拒绝发生在到达网关之前，
       // 模型只会拿到一个明确错误，不会真的改动群或把本机文件发出去。
-      if (adminOnlySet.has(action)) {
-        const adminId = String(adminUserId ?? '').trim()
+      if (resolveAdminOnly().has(action)) {
+        const adminId = resolveAdminUserId()
         const sender = typeof senderOf === 'function' ? String(senderOf() ?? '').trim() : ''
         if (adminId === '' || sender !== adminId) {
           return {
@@ -174,7 +185,7 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
               data: {
                 name,
                 label: actionLabel(name),
-                admin_only: adminOnlySet.has(name),
+                admin_only: resolveAdminOnly().has(name),
                 doc: doc !== '' ? doc : actionLabel(name),
               },
             }

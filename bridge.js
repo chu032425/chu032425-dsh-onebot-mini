@@ -1043,9 +1043,13 @@ export class ChatBridge {
       chatId,
       deleteSentMedia: this.config.deleteSentMedia === true,
       // 「仅管理员可用」的动作在执行前按本回合的发送者鉴权：这里把判定集的来源、
-      // 管理员 QQ，以及「本回合发送者是谁」的读取器一起交给工具层。
+      // 管理员 QQ，以及「本回合发送者是谁」的读取器一起交给工具层。判定集和管理员
+      // QQ 都以 getter 形式传入，因此运行中改了设置后，同一次注册也能读到新值，
+      // 不会卡在注册那一刻的旧管理员上（否则把管理员改回去也一直「不认」）。
       adminOnly: computeAdminOnly(this.config),
       adminUserId: this.config.adminUserId,
+      getAdminOnly: () => computeAdminOnly(this.config),
+      getAdminUserId: () => this.config.adminUserId,
       senderOf: () => this.turnSender.get(chatId) ?? '',
       // 模型用 get_action_doc 取某个动作的完整说明时，返回「工具」页里显示的那份
       // 文案：运营者覆盖过就用覆盖，否则用 actiondocs.js 生成的内置说明。
@@ -1116,17 +1120,20 @@ export class ChatBridge {
         const { registerTools } = await requireToolsOnce()
         registerTools(agentCtx, this.toolRegistrationOptions(chatId, allow))
       }
+      // 段落正文用函数形式注册：systemPrompt 在每一个模型步骤前都会重新求值，
+      // 于是设置页改了管理员、白/黑名单或任意提示词后，同一个活会话下一回合就能
+      // 读到新配置，而不是永远停留在 agent 创建时烘死的那份快照上。
       agentCtx.systemPrompt.section({
         name: 'channel:dsh-onebot-mini',
         order: 90,
-        text: buildPlatformPrompt(this.config),
+        text: () => buildPlatformPrompt(this.config),
       })
       // 安全/权限/隐私规则单独成段：与是否启用工具无关，始终注入，且可在「提示词」
       // 页整段改写。它把通用的 QQ 助手安全策略按本插件的真实字段与工具做了映射。
       agentCtx.systemPrompt.section({
         name: 'channel:dsh-onebot-mini:security',
         order: 91,
-        text: buildSecurityPrompt(this.config),
+        text: () => buildSecurityPrompt(this.config),
       })
       const registry = typeof this.getAgentPresets === 'function' ? this.getAgentPresets() : undefined
       if (registry === undefined) return

@@ -742,6 +742,36 @@ function makeToolDef({ adminUserId, adminOnly, sender }) {
   t('with no administrator set, an admin-only action is refused for everyone', denied.ok === false && calls.length === 0, JSON.stringify(denied))
 }
 
+// --- 运行中改配置：管理员 getter 让同一份注册立即生效（无需重建 agent）
+{
+  let adminUserId = ''
+  let adminOnly = new Set(['set_group_ban'])
+  let sender = '10001'
+  let def
+  const calls = []
+  registerTools(
+    { tools: { register: (d) => { def = d; return () => {} } } },
+    {
+      connection: { call: async (action, params) => { calls.push([action, params]); return {} } },
+      allow: new Set(['set_group_ban', 'send_group_msg']),
+      chatId: 'group:1', deleteSentMedia: false, recordLog: () => {},
+      adminOnly, adminUserId,
+      getAdminOnly: () => adminOnly,
+      getAdminUserId: () => adminUserId,
+      senderOf: () => sender,
+    },
+  )
+  const before = await def.execute({ action: 'set_group_ban', params: { group_id: 1 } })
+  t('a live admin getter refuses while no administrator is set', before.ok === false && calls.length === 0, JSON.stringify(before))
+  adminUserId = '10001'
+  const after = await def.execute({ action: 'set_group_ban', params: { group_id: 1 } })
+  t('setting the administrator back authorizes the same registration', after.ok === true && calls.length === 1, JSON.stringify(after))
+  adminOnly = new Set()
+  sender = '99999'
+  const ungated = await def.execute({ action: 'set_group_ban', params: { group_id: 1 } })
+  t('removing the admin-only flag takes effect without re-registering', ungated.ok === true && calls.length === 2, JSON.stringify(ungated))
+}
+
 // --- get_action_doc：按动作名取详细说明（渐进式披露）
 {
   let def

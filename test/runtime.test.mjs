@@ -1364,5 +1364,33 @@ await pokeBridge.stop()
   await authBridge.stop()
 }
 
+// ---------------------------------------------------------------- 运行中改配置：工具鉴权与提示词即时生效
+{
+  const ctx = { on: () => () => {}, get: () => undefined, agents: { get: () => undefined } }
+  const bridge = new ChatBridge({
+    ctx,
+    config: { ...baseConfig, adminUserId: '10001', toolAdminOnly: ['set_group_ban'] },
+    connection: { call: async () => ({}) },
+    log,
+    describeError: String,
+  })
+  // 1) 工具注册选项里的管理员判定必须跟着 reconfigure 走。
+  const allow = new Set(['set_group_ban', 'send_group_msg'])
+  const opts = bridge.toolRegistrationOptions('group:1', allow)
+  t('tool registration starts with the configured admin', opts.getAdminUserId() === '10001' && opts.getAdminOnly().has('set_group_ban'))
+  bridge.reconfigure({ ...baseConfig, adminUserId: '20002', toolAdminOnly: [] })
+  t('the admin getter follows reconfigure without re-registering', opts.getAdminUserId() === '20002' && opts.getAdminOnly().has('set_group_ban') === false)
+
+  // 2) 系统提示词段落以函数形式注册，reconfigure 后同一段落求值即为新配置。
+  const sections = []
+  const setup = bridge.buildSetup(undefined, 'group:1')
+  await setup({ systemPrompt: { section: (s) => { sections.push(s); return () => {} } }, tools: { register: () => () => {} } })
+  const platform = sections.find((s) => s.name === 'channel:dsh-onebot-mini')
+  t('the platform prompt is registered as a live function', typeof platform?.text === 'function')
+  t('the platform prompt reflects the current admin', platform.text().includes('20002'))
+  bridge.reconfigure({ ...baseConfig, adminUserId: '30003', toolAdminOnly: [] })
+  t('the platform prompt re-evaluates after reconfigure', platform.text().includes('30003') && !platform.text().includes('20002'))
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
