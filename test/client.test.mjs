@@ -224,6 +224,16 @@ t('the narrow layout stacks the shell', sheet !== undefined && sheet.textContent
 t('the rail becomes horizontal when narrow', sheet !== undefined && sheet.textContent.includes('.obm-rail{flex-direction:row'))
 t('the narrow rail stays on one scrollable row', sheet !== undefined && sheet.textContent.includes('flex-wrap:nowrap')
   && sheet.textContent.includes('overflow-x:auto'))
+// 标签页点击后不得出现黑框：焦点框必须关掉，选中态只靠底色标亮。
+const css = sheet === undefined ? '' : sheet.textContent
+t('tabs draw no focus outline', css.includes('.obm-tab:focus,.obm-tab:focus-visible{outline:none;box-shadow:none;}'))
+t('tabs draw no border in any state', css.includes('.obm-tab,.obm-tab:hover,.obm-tab:active,.obm-tab:focus{border:none;outline:none;box-shadow:none;}'))
+t('the focus outline never uses the near-black brand token', !/outline:[^;}]*var\(--dsw-alias-brand-primary\)/.test(css))
+t('the selected tab is marked by a fill, not a border', css.includes('.obm-tab[aria-selected=true]{background:'))
+t('the tab style leaves colours to the stylesheet', tabs.every((tab) => !('backgroundColor' in tab.props.style)
+  && !('borderColor' in tab.props.style) && !('color' in tab.props.style)))
+t('tabs carry no border and no outline inline', tabs.every((tab) => tab.props.style.border === 'none'
+  && tab.props.style.outline === 'none'))
 for (const key of ['contactsTitle', 'contactsFriends', 'contactsGroups', 'contactsCount', 'contactsEmpty', 'contactsOffline']) {
   t('contacts copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
