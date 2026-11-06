@@ -1,6 +1,6 @@
 # dsh-onebot-mini
 
-把 DeepSeek Harness 接到 **OneBot 11**（NapCat / Lagrange / LLOneBot）的最小通道插件。
+把 DeepSeek Harness 接到 **OneBot 11**（NapCat）的最小通道插件。
 
 - QQ 私聊与群聊消息 → dsh 会话：一个聊天一个持久会话，重启自动续；
 - 模型回复 → 通过同一条 WebSocket 发回原聊天；
