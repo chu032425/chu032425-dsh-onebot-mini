@@ -272,11 +272,20 @@ const dirPath = await safeUnlink('/tmp')
 t('the tmp root itself is refused', dirPath.ok === false)
 
 // --- the editable channel prompt
-import { DEFAULT_CHANNEL_PROMPT, renderPrompt, PROMPT_PLACEHOLDERS, PROMPT_DEFS, renderToolCallPrompt } from '../prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, replyModeParagraph, renderPrompt, PROMPT_PLACEHOLDERS, PROMPT_DEFS, renderToolCallPrompt } from '../prompt.js'
 t('the default prompt documents its placeholders', PROMPT_PLACEHOLDERS.every((p) => DEFAULT_CHANNEL_PROMPT.includes(p)))
 t('renderPrompt fills a placeholder', renderPrompt('x {actions} y', { actions: 'Z' }).includes('x Z y'))
 t('renderPrompt drops an empty placeholder line', !renderPrompt('a\n{media}\nb', { media: '' }).includes('{media}'))
 t('an unknown placeholder is left alone', renderPrompt('keep {unknown}', {}).includes('{unknown}'))
+// the reply-delivery sentence follows replyMode instead of being hardcoded
+t('the stream paragraph says replies stream segment by segment', replyModeParagraph('stream').includes('实时发出'))
+t('the final paragraph says one message per turn', replyModeParagraph('final').includes('只产生一条'))
+t('the default channel prompt carries the replyMode placeholder', DEFAULT_CHANNEL_PROMPT.includes('{replyMode}'))
+t('renderPrompt fills the replyMode line', renderPrompt(DEFAULT_CHANNEL_PROMPT, { replyMode: 'R' }).includes('R'))
+t('the default build prompts streaming', buildPlatformPrompt(DEFAULTS).includes('实时发出'))
+t('an explicit final mode prompts one message', buildPlatformPrompt({ ...DEFAULTS, replyMode: 'final' }).includes('只产生一条'))
+t('the old shipped prompt is migrated to the new placeholder', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
+t('an edited prompt is not migrated', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT + ' (edited)' }).value.channelPrompt.endsWith('(edited)'))
 t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
 t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
 t('the prompt registry covers channel, inbound, both tools and the interject judge', PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,inboundPrompt,toolCallPrompt,toolMediaPrompt,interjectPrompt')

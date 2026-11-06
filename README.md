@@ -357,6 +357,7 @@ QQ 空间、群相册。
 
 | 占位符 | 展开为 |
 |---|---|
+| `{replyMode}` | 回复发送方式说明：`stream` 时「按段实时发出」，`final` 时「整轮攒成一条、结束时发送」 |
 | `{senderPrefix}` | 「群消息带发言人前缀」的说明（关闭时为空） |
 | `{media}` | 媒体发送说明（工具关闭时为空） |
 | `{tools}` | 本插件工具清单（`onebot_call` / `onebot_send_media` / `onebot_list_files`）与「QQ 相关操作只能用这些工具」的硬规则（工具关闭时为空） |
