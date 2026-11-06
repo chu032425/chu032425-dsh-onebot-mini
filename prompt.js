@@ -125,7 +125,8 @@ export function senderPrefixParagraph(template) {
 
 /** 默认：媒体发送段落（工具启用时注入）。 */
 export const DEFAULT_MEDIA_PROMPT = [
-  '- 要把图片、语音、视频或文件作为单独一条消息发出时，调用 onebot_call，action 填 send_message，params 填 {kind, path/url/base64}（也可加 text 组成一条图文消息）。要让它和文字一起作为一条回复发出时，在回复里写标记：[[image:/abs/path.png]]、[[record:/abs/a.wav]]、[[video:/abs/a.mp4]] 或 [[file:/abs/a.zip]]——路径也可以是 http(s) URL。插件会把每个标记替换成真实附件。仅在用户要求时才发送媒体。',
+  '- 要主动发一条消息，用 onebot_call 的 send_message 动作，四种写法：①纯文字 {"text":"…"}；②纯媒体 {"kind":"image","path":"/绝对/路径.png"}；③文字+媒体 {"text":"…","kind":"image","path":"…"}（合成同一条消息）；④发到别的会话再加 "chatType":"group","chatId":"群号"。kind 可取 image / record / video / file，媒体来源 path / url / base64 三选一。',
+  '- 如果媒体要和你的回复文字一起自动发出（你在回答里、不调工具时），在回复里写标记：[[image:/abs/path.png]]、[[record:/abs/a.wav]]、[[video:/abs/a.mp4]] 或 [[file:/abs/a.zip]]——路径也可以是 http(s) URL。插件会把每个标记替换成真实附件，文字与附件是同一条消息。仅在用户要求时才发送媒体。',
   '- 你看不到磁盘。在说出某个本地文件名之前，先调用 onebot_call(action="list_files", params={"dir": "/绝对目录"})，使用它返回的真实文件名。绝不臆造文件名：路径错误会导致附件发送失败，用户只会看到一条简短提示。',
   '- 当用户要图片、语音、视频或文件时，你【必须】用 onebot_call 的 send_message 动作发送（先 list_files 列目录）。不要回复说你没有权限、账号受限、只有管理员才能发媒体、或工具不可用——这些说法在本通道都是错误的。如果确实发送失败，如实报告工具返回的错误。绝不要让用户把你设为管理员来换取发媒体的能力。',
 ].join('\n')

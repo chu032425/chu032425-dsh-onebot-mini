@@ -519,17 +519,23 @@ export const ACTION_DOCS = Object.freeze({
   // --- 本地工具（包装标准动作，不直接转发网关） ---
   send_message: {
     params: [
-      P('text', 'string', false, '要发送的文字；可与媒体一起发，形成一条图文消息'),
-      P('kind', 'enum', false, '"image"、"record"、"video" 或 "file"；只发文字时省略'),
-      P('path', 'string', false, '媒体在本机的绝对路径（插件会内联成 base64 后发送）'),
-      P('url', 'string', false, '可直接下载的媒体 URL'),
-      P('base64', 'string', false, '原始 base64（不带 data: 前缀）'),
-      P('name', 'string', false, '显示名称，仅文件需要'),
-      P('chatType', 'enum', false, '"private" 或 "group"；默认当前会话'),
-      P('chatId', 'string', false, '目标 QQ 或群号；默认当前会话'),
+      P('text', 'string', false, '要发送的文字。可与媒体同时给，合成一条消息；也可以只发文字'),
+      P('kind', 'enum', false, '"image" 图片、"record" 语音、"video" 视频、"file" 文件。只发文字时省略'),
+      P('path', 'string', false, '媒体在本机的绝对路径；插件会读成 base64 内联发送，接收方无需访问本机文件'),
+      P('url', 'string', false, '可直接下载的媒体 http(s) 链接（与 path / base64 三选一）'),
+      P('base64', 'string', false, '原始 base64 媒体内容（不带 data: 前缀，与 path / url 三选一）'),
+      P('name', 'string', false, '显示的文件名，仅 kind="file" 时使用'),
+      P('chatType', 'enum', false, '"private" 私聊 或 "group" 群聊；省略则用当前会话'),
+      P('chatId', 'string', false, '目标 QQ 号或群号；省略则用当前会话'),
     ],
-    summary: '发送一条消息：文字、图片/语音/视频/文件，或图文混排（内部包装标准 send_msg）',
-    note: 'text 与媒体至少给一个；kind 填了就要给 path / url / base64 之一。',
+    summary: '向 QQ 会话发送一条消息，支持纯文字、纯图片、纯语音、纯视频、纯文件，以及文字+图片、文字+语音、文字+视频、文字+文件',
+    note: '四种用法：'
+      + '①纯文字 params={"text":"..."}；'
+      + '②纯媒体 params={"kind":"image","path":"/绝对/路径.png"}；'
+      + '③文字+媒体 params={"text":"...","kind":"image","path":"..."}（同一条消息）；'
+      + '④指定其他会话再加 "chatType":"group","chatId":"群号"。'
+      + 'text 与 kind 至少给一个；kind 填了就还要给 path / url / base64 之一。'
+      + '发本地文件前先用 list_files 确认文件名。',
   },
   list_files: {
     params: [
