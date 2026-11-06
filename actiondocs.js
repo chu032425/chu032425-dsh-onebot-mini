@@ -528,14 +528,17 @@ export const ACTION_DOCS = Object.freeze({
       P('chatType', 'enum', false, '"private" 私聊 或 "group" 群聊；省略则用当前会话'),
       P('chatId', 'string', false, '目标 QQ 号或群号；省略则用当前会话'),
     ],
-    summary: '向 QQ 会话发送一条消息，支持六种组合：纯文字、纯图片、文字+图片、纯语音、纯视频、纯文件',
-    note: '六种组合：'
+    summary: '向 QQ 会话发送一条消息，支持九种组合：纯文字、纯图片、纯语音、纯视频、纯文件，以及文字+图片、文字+语音、文字+视频、文字+文件',
+    note: '九种组合：'
       + '①纯文字 params={"text":"..."}；'
       + '②纯图片 params={"kind":"image","path":"/绝对/路径.png"}；'
       + '③文字+图片 params={"text":"...","kind":"image","path":"..."}（合成同一条消息）；'
       + '④纯语音 params={"kind":"record","path":"/绝对/路径.wav"}；'
-      + '⑤纯视频 params={"kind":"video","path":"/绝对/路径.mp4"}；'
-      + '⑥纯文件 params={"kind":"file","path":"/绝对/路径.zip","name":"显示名.zip"}。'
+      + '⑤文字+语音 params={"text":"...","kind":"record","path":"/绝对/路径.wav"}（合成同一条消息）；'
+      + '⑥纯视频 params={"kind":"video","path":"/绝对/路径.mp4"}；'
+      + '⑦文字+视频 params={"text":"...","kind":"video","path":"/绝对/路径.mp4"}（合成同一条消息）；'
+      + '⑧纯文件 params={"kind":"file","path":"/绝对/路径.zip","name":"显示名.zip"}；'
+      + '⑨文字+文件 params={"text":"...","kind":"file","path":"/绝对/路径.zip","name":"显示名.zip"}（合成同一条消息）。'
       + '要发到其他会话时，任意组合再加 "chatType":"group","chatId":"群号"。'
       + 'text 与 kind 至少给一个；kind 填了就还要给 path / url / base64 之一。'
       + '发本地文件前先用 list_files 确认文件名。',

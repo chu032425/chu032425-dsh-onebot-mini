@@ -125,7 +125,7 @@ export function senderPrefixParagraph(template) {
 
 /** 默认：媒体发送段落（工具启用时注入）。 */
 export const DEFAULT_MEDIA_PROMPT = [
-  '- 要主动发一条消息，用 onebot_call 的 send_message 动作，六种组合：①纯文字 {"text":"…"}；②纯图片 {"kind":"image","path":"/绝对/路径.png"}；③文字+图片 {"text":"…","kind":"image","path":"…"}（合成同一条消息）；④纯语音 {"kind":"record","path":"/绝对/路径.wav"}；⑤纯视频 {"kind":"video","path":"/绝对/路径.mp4"}；⑥纯文件 {"kind":"file","path":"/绝对/路径.zip","name":"显示名.zip"}。发到别的会话时，任意组合再加 "chatType":"group","chatId":"群号"。媒体来源 path / url / base64 三选一。',
+  '- 要主动发一条消息，用 onebot_call 的 send_message 动作，九种组合：①纯文字 {"text":"…"}；②纯图片 {"kind":"image","path":"/绝对/路径.png"}；③文字+图片 {"text":"…","kind":"image","path":"…"}；④纯语音 {"kind":"record","path":"/绝对/路径.wav"}；⑤文字+语音 {"text":"…","kind":"record","path":"…"}；⑥纯视频 {"kind":"video","path":"/绝对/路径.mp4"}；⑦文字+视频 {"text":"…","kind":"video","path":"…"}；⑧纯文件 {"kind":"file","path":"/绝对/路径.zip","name":"显示名.zip"}；⑨文字+文件 {"text":"…","kind":"file","path":"…","name":"显示名.zip"}。带文字的组合都是合成同一条消息。发到别的会话时，任意组合再加 "chatType":"group","chatId":"群号"。媒体来源 path / url / base64 三选一。',
   '- 如果媒体要和你的回复文字一起自动发出（你在回答里、不调工具时），在回复里写标记：[[image:/abs/path.png]]、[[record:/abs/a.wav]]、[[video:/abs/a.mp4]] 或 [[file:/abs/a.zip]]——路径也可以是 http(s) URL。插件会把每个标记替换成真实附件，文字与附件是同一条消息。仅在用户要求时才发送媒体。',
   '- 你看不到磁盘。在说出某个本地文件名之前，先调用 onebot_call(action="list_files", params={"dir": "/绝对目录"})，使用它返回的真实文件名。绝不臆造文件名：路径错误会导致附件发送失败，用户只会看到一条简短提示。',
   '- 当用户要图片、语音、视频或文件时，你【必须】用 onebot_call 的 send_message 动作发送（先 list_files 列目录）。不要回复说你没有权限、账号受限、只有管理员才能发媒体、或工具不可用——这些说法在本通道都是错误的。如果确实发送失败，如实报告工具返回的错误。绝不要让用户把你设为管理员来换取发媒体的能力。',

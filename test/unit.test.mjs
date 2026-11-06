@@ -304,6 +304,22 @@ t('the media ceiling is 20 MB', MAX_MEDIA_BYTES === 20 * 1024 * 1024)
   t('text alone becomes one text segment', JSON.stringify(textOnly) === '[{"type":"text","data":{"text":"你好"}}]')
   const mixed = buildMessageSegments({ text: '看这张', kind: 'image', url: 'http://x/a.png' })
   t('text and media mix into one ordered list', mixed.length === 2 && mixed[0].type === 'text' && mixed[1].type === 'image')
+  // all nine documented combinations must produce the expected segment list
+  for (const [label, kind, expected] of [
+    ['纯文字', '', ['text']],
+    ['纯图片', 'image', ['image']],
+    ['文字+图片', 'image', ['text', 'image']],
+    ['纯语音', 'record', ['record']],
+    ['文字+语音', 'record', ['text', 'record']],
+    ['纯视频', 'video', ['video']],
+    ['文字+视频', 'video', ['text', 'video']],
+    ['纯文件', 'file', ['file']],
+    ['文字+文件', 'file', ['text', 'file']],
+  ]) {
+    const opts = kind === '' ? { text: 'x' } : { kind, url: 'http://x/a.bin', text: label.startsWith('文字') ? 'x' : undefined }
+    const built = buildMessageSegments(opts)
+    t('combination builds ' + label, JSON.stringify(built.map((seg) => seg.type)) === JSON.stringify(expected), JSON.stringify(built.map((seg) => seg.type)))
+  }
   const mediaOnly = buildMessageSegments({ kind: 'image', url: 'http://x/a.png' })
   t('media alone becomes one media segment', mediaOnly.length === 1 && mediaOnly[0].type === 'image')
   t('nothing given produces no segments', buildMessageSegments({}).length === 0)
