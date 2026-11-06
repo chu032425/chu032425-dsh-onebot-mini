@@ -115,7 +115,7 @@ t('session mode is gone', !('fieldSessionMode' in zh) && !('modePlan' in zh))
 for (const key of ['groupTool', 'fieldOnebotToolEnabled', 'hintOnebotToolOff',
   'toolGroupLocal', 'toolGroupMessage', 'toolGroupMedia', 'toolGroupGroup', 'toolGroupQuery', 'toolGroupInteraction',
   'toolGroupRequest', 'toolGroupProfile', 'toolGroupQzone', 'toolGroupAlbum',
-  'toolActionsHint', 'toolNoteAuto', 'toolTotal', 'toolSearchPlaceholder', 'toolNoMatch',
+  'toolActionsHint', 'toolGroupsHint', 'toolNoteAuto', 'toolTotal', 'toolSearchPlaceholder', 'toolNoMatch',
   'toolPromptSummary', 'toolPromptHint', 'toolPromptReset', 'toolPromptCustom']) {
   t('tool config copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
@@ -168,6 +168,7 @@ for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsReset', 'promptsSa
   t('prompt copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 t('prompt sections are native collapsible details (collapsed by default)', src.includes("React.createElement('details'") && src.includes("React.createElement('summary'"))
+t('tool groups are collapsed details too, opened only while searching', src.includes("{ key: group.id, style: styles.toolGroup, open: needle !== '' ? true : undefined }"))
 const phKeyOf = (token) => {
   const inner = String(token ?? '').replace(/[{}]/g, '')
   return 'ph' + inner.charAt(0).toUpperCase() + inner.slice(1)
