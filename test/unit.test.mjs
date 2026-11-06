@@ -7,7 +7,7 @@ import { join as pathJoin } from 'node:path'
 import { existsSync as readFileSyncExists } from 'node:fs'
 import { acceptKey, takeFrame, encodeText, encodeControl } from '../wire.js'
 import { normalizeConfig, ConfigStore, DEFAULTS, MODE_FIELDS, FIELD_GROUPS, FIELD_KINDS } from '../config.js'
-import { TOOL_GROUPS, ALL_ACTIONS, STANDARD_ACTIONS, isKnownAction, computeAllowlist, actionLabel, enabledGroups } from '../toolcatalog.js'
+import { TOOL_GROUPS, ALL_ACTIONS, STANDARD_ACTIONS, isKnownAction, computeAllowlist, computeAdminOnly, DEFAULT_ADMIN_ONLY, actionLabel, enabledGroups } from '../toolcatalog.js'
 import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage,
@@ -660,6 +660,57 @@ const missing = await buildInboundText({
   connection: fakeConnection, config: inboundConfig,
 })
 t('a source-less media segment keeps the bare placeholder', missing.text === '[图片]' && missing.warnings.length === 1)
+
+// ---------------------------------------------------------------- 非管理员鉴权
+t('admin-only defaults cover sensitive local and group actions',
+  DEFAULT_ADMIN_ONLY.includes('send_message') && DEFAULT_ADMIN_ONLY.includes('list_files')
+  && DEFAULT_ADMIN_ONLY.includes('set_group_ban') && !DEFAULT_ADMIN_ONLY.includes('send_group_msg'))
+t('computeAdminOnly falls back to the defaults when unset', computeAdminOnly({}).has('set_group_ban'))
+t('computeAdminOnly honors an explicit empty list', computeAdminOnly({ toolAdminOnly: [] }).size === 0)
+t('computeAdminOnly drops unknown names', computeAdminOnly({ toolAdminOnly: ['set_group_ban', 'nope'] }).has('nope') === false)
+t('config seeds the sensitive admin-only defaults', normalizeConfig({}).value.toolAdminOnly.includes('set_group_ban'))
+t('an explicit empty admin-only list is respected', normalizeConfig({ toolAdminOnly: [] }).value.toolAdminOnly.length === 0)
+t('unknown admin-only names are filtered out', normalizeConfig({ toolAdminOnly: ['set_group_ban', 'nope'] }).value.toolAdminOnly.join(',') === 'set_group_ban')
+
+/** 造一个捕获 onebot_call 定义的假 tools 服务，并记录转发到网关的调用。 */
+function makeToolDef({ adminUserId, adminOnly, sender }) {
+  let def
+  const calls = []
+  registerTools(
+    { tools: { register: (d) => { def = d; return () => {} } } },
+    {
+      connection: { call: async (action, params) => { calls.push([action, params]); return {} } },
+      allow: new Set(['set_group_ban', 'send_group_msg', 'send_message']),
+      chatId: 'group:1',
+      deleteSentMedia: false,
+      adminOnly: new Set(adminOnly),
+      adminUserId,
+      senderOf: () => sender(),
+      recordLog: () => {},
+    },
+  )
+  return { def, calls }
+}
+
+{
+  let sender = '20002'
+  const { def, calls } = makeToolDef({ adminUserId: '10001', adminOnly: ['set_group_ban', 'send_message'], sender: () => sender })
+  const denied = await def.execute({ action: 'set_group_ban', params: { group_id: 1, user_id: 2, duration: 60 } })
+  t('an admin-only action is refused for a non-admin and never reaches the gateway', denied.ok === false && calls.length === 0, JSON.stringify(denied))
+  sender = '10001'
+  const allowed = await def.execute({ action: 'set_group_ban', params: { group_id: 1, user_id: 2, duration: 60 } })
+  t('the same action is allowed for the administrator', allowed.ok === true && calls.length === 1, JSON.stringify(allowed))
+  sender = '20002'
+  const localDenied = await def.execute({ action: 'send_message', params: { text: 'hi' } })
+  t('an admin-only local action is refused for a non-admin', localDenied.ok === false && calls.length === 1, JSON.stringify(localDenied))
+  const plain = await def.execute({ action: 'send_group_msg', params: { group_id: 1, message: [] } })
+  t('a non-restricted action still passes for a non-admin', plain.ok === true && calls.length === 2, JSON.stringify(plain))
+}
+{
+  const { def, calls } = makeToolDef({ adminUserId: '', adminOnly: ['set_group_ban'], sender: () => '20002' })
+  const denied = await def.execute({ action: 'set_group_ban', params: { group_id: 1 } })
+  t('with no administrator set, an admin-only action is refused for everyone', denied.ok === false && calls.length === 0, JSON.stringify(denied))
+}
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

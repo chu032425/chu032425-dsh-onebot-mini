@@ -10,7 +10,7 @@
 
 import { mkdir, stat } from 'node:fs/promises'
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
-import { computeAllowlist, enabledGroups, GROUP_LABELS } from './toolcatalog.js'
+import { computeAllowlist, computeAdminOnly, enabledGroups, GROUP_LABELS } from './toolcatalog.js'
 import { DEFAULT_CHANNEL_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, pokeParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes, unescapeCq } from './inbound.js'
 import { buildReplySegments, groupReplySegments, safeUnlink } from './media.js'
@@ -326,6 +326,12 @@ export class ChatBridge {
  * 把路径绑到回合上，排队消息的文件才不会在自己的回合读到之前就被删掉。 */
     this.inboundQueue = new Map()
     this.inboundCurrent = new Map()
+    /** 回合归属的发送者（供「仅管理员可用」动作鉴权）：
+ * - senderQueue：chatId → 待开始回合的发送者 FIFO（每条排队消息一项）；
+ * - turnSender：chatId → 正在运行这一回合的发送者 QQ。
+ * 和入站文件一样绑到回合上，排队消息才不会把发送者串到别人的回合。 */
+    this.senderQueue = new Map()
+    this.turnSender = new Map()
     /** chatId → 已处理过的消息 id（重连重放防护）。 */
     this.seen = new Map()
     this.dedupWindowMs = 300000
@@ -612,6 +618,8 @@ export class ChatBridge {
     // 把本条消息的文件排到它的 follow-up 将开启的那个回合上。批次在 `turn/start`
     // 弹出，因此还堵在运行中回合后面的消息，其文件不会被前一个回合的结束带走。
     if (savedPaths.length > 0) this.queueInbound(chatId, savedPaths)
+    // 发送者随消息排到这个 follow-up 将开启的回合上，供「仅管理员可用」动作鉴权。
+    this.pushSender(chatId, frame?.user_id)
     try {
       // 「先压缩再作答」：会话压力达到配置比例时，在这条消息变成下一回合前先压缩。
       try {
@@ -633,6 +641,7 @@ export class ChatBridge {
     } catch (error) {
       // 这一批永远不会等到 turn/start，撤销入队，而不是把文件占位泄漏出去。
       if (savedPaths.length > 0) this.dropLastInbound(chatId)
+      this.dropLastSender(chatId)
       this.recordError('delivery failed', chatId, error)
     }
   }
@@ -720,6 +729,30 @@ export class ChatBridge {
     const paths = this.inboundCurrent.get(chatId)
     this.inboundCurrent.delete(chatId)
     return Array.isArray(paths) ? paths : []
+  }
+
+  /** 把一条消息的发送者排进该聊天待开始回合的 FIFO。 */
+  pushSender(chatId, senderId) {
+    const queue = this.senderQueue.get(chatId) ?? []
+    queue.push(String(senderId ?? ''))
+    this.senderQueue.set(chatId, queue)
+  }
+
+  /** 撤销最近一次入队的发送者（投递失败时用）。 */
+  dropLastSender(chatId) {
+    const queue = this.senderQueue.get(chatId)
+    if (queue === undefined) return
+    queue.pop()
+    if (queue.length === 0) this.senderQueue.delete(chatId)
+  }
+
+  /** 在 `turn/start` 把最老的排队发送者移入当前回合（没有就清空，避免上一回合串台）。 */
+  bindTurnSender(chatId) {
+    const queue = this.senderQueue.get(chatId)
+    const next = queue !== undefined && queue.length > 0 ? queue.shift() : undefined
+    if (queue !== undefined && queue.length === 0) this.senderQueue.delete(chatId)
+    if (next !== undefined) this.turnSender.set(chatId, next)
+    else this.turnSender.delete(chatId)
   }
 
   /** 让聊天拿到一个新 agent，或复用已存在的那个。
@@ -1009,6 +1042,11 @@ export class ChatBridge {
       allow,
       chatId,
       deleteSentMedia: this.config.deleteSentMedia === true,
+      // 「仅管理员可用」的动作在执行前按本回合的发送者鉴权：这里把判定集的来源、
+      // 管理员 QQ，以及「本回合发送者是谁」的读取器一起交给工具层。
+      adminOnly: computeAdminOnly(this.config),
+      adminUserId: this.config.adminUserId,
+      senderOf: () => this.turnSender.get(chatId) ?? '',
       prompts: {
         call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
       },
@@ -1099,6 +1137,8 @@ export class ChatBridge {
       this.sentThisTurn.delete(chatId)
       // 把本回合绑到最老那条排队消息的入站文件上。
       this.bindTurnInbound(chatId)
+      // 同样把本回合绑到那条消息的发送者上，供管理员鉴权。
+      this.bindTurnSender(chatId)
       return
     }
 
@@ -1117,6 +1157,8 @@ export class ChatBridge {
     }
 
     if (event.type === 'turn/end') {
+      // 回合结束后忘掉发送者，下一次动作鉴权重新按新回合的发送者判断。
+      this.turnSender.delete(chatId)
       return this.finishTurn(chatId, chat, event)
     }
   }
@@ -1283,6 +1325,7 @@ export function buildPlatformPrompt(config) {
     ? String(config.channelPrompt)
     : DEFAULT_CHANNEL_PROMPT
   const allow = computeAllowlist(config)
+  const adminOnly = computeAdminOnly(config)
 
   const replyMode = replyModeParagraph(
     config?.replyMode,
@@ -1312,7 +1355,9 @@ export function buildPlatformPrompt(config) {
         const body = (typeof override === 'string' && override.trim() !== '')
           ? override.trim()
           : action.defaultPrompt
-        lines.push('- ' + action.name + '：' + String(body ?? '').replace(/\s*\n+\s*/g, ' '))
+        // 标出「仅管理员可用」，模型就不会把回合浪费在一个注定被拒的动作上。
+        const guard = adminOnly.has(action.name) ? '（仅管理员可用）' : ''
+        lines.push('- ' + action.name + guard + '：' + String(body ?? '').replace(/\s*\n+\s*/g, ' '))
       }
     }
     actions = lines.join('\n')

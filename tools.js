@@ -92,7 +92,7 @@ async function runListFiles(params) {
  *   `allow` 是动作名集合；集合外的动作被拒绝而不是转发。无任何动作可用时调用方
  *   会完全不注册该工具。
  */
-export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia, prompts, recordLog }) {
+export function registerTools(agentCtx, { connection, allow, chatId, deleteSentMedia, prompts, recordLog, adminOnly, adminUserId, senderOf }) {
   // 任何带 `tools` 服务的上下文都可用：agent 作用域上下文只为该 agent 注册，
   // 插件自身的上下文则全局注册——后者是复用在线 agent（setup 未跑过）的兜底。
   const tools = agentCtx?.tools ?? agentCtx?.get?.('tools')
@@ -105,6 +105,7 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
   }
   const disposers = []
   const allowed = allow instanceof Set ? allow : undefined
+  const adminOnlySet = adminOnly instanceof Set ? adminOnly : new Set()
   // 该 agent 服务的聊天，本地 send_message 可默认为它，模型不必每次重复目标。
   const [defaultType, defaultId] = String(chatId ?? '').split(':')
   const env = { connection, defaultType, defaultId, deleteSentMedia, recordLog }
@@ -135,6 +136,19 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
           ? 'is switched off in the OneBot-Mini tools page'
           : 'is not offered by this plugin'
         return { ok: false, error: 'action "' + action + '" ' + reason }
+      }
+      // 鉴权：标为「仅管理员可用」的动作，只有这条消息的发送者就是管理员时才放行。
+      // 没配置管理员时没有人是管理员，这类动作对谁都拒绝；拒绝发生在到达网关之前，
+      // 模型只会拿到一个明确错误，不会真的改动群或把本机文件发出去。
+      if (adminOnlySet.has(action)) {
+        const adminId = String(adminUserId ?? '').trim()
+        const sender = typeof senderOf === 'function' ? String(senderOf() ?? '').trim() : ''
+        if (adminId === '' || sender !== adminId) {
+          return {
+            ok: false,
+            error: 'action "' + action + '" is admin-only: the current sender is not the administrator',
+          }
+        }
       }
       // 本地动作永不到达网关，在进程内执行。
       if (LOCAL_ACTIONS.has(action)) {

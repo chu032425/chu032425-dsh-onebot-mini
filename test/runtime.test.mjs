@@ -260,7 +260,8 @@ t('only one tool is registered (local actions ride on onebot_call)', toolDefs.ma
 // 通道提示词只宣传已启用的动作
 const { buildPlatformPrompt } = await import('../bridge.js')
 const promptAll = buildPlatformPrompt(baseConfig)
-t('the prompt lists the enabled actions', promptAll.includes('send_group_msg：功能：发送群消息') && promptAll.includes('set_group_ban：功能：禁言群成员'))
+t('the prompt lists the enabled actions', promptAll.includes('send_group_msg：功能：发送群消息') && promptAll.includes('set_group_ban') && promptAll.includes('功能：禁言群成员'))
+t('the prompt marks admin-only actions', promptAll.includes('set_group_ban（仅管理员可用）') && !promptAll.includes('send_group_msg（仅管理员可用）'))
 const promptOff = buildPlatformPrompt({ ...baseConfig, onebotToolEnabled: false })
 t('the prompt says the tool is off', promptOff.includes('已关闭 onebot_call 工具') && !promptOff.includes('send_group_msg：'))
 const promptNoBan = buildPlatformPrompt({ ...baseConfig, onebotToolDisabled: ['set_group_ban'] })
@@ -1301,6 +1302,65 @@ await wait(150)
 t('群里戳别人不会触发回复', pokeFollowups.length === 0, String(pokeFollowups.length))
 await otherPokeBridge.stop()
 await pokeBridge.stop()
+
+// ---------------------------------------------------------------- 仅管理员动作鉴权（真实 bridge）
+{
+  const authCalls = []
+  const authTools = []
+  let authSessionEvent
+  const authTransport = {
+    selfId: '2000002', state: 'online',
+    sendText: async () => ({ message_id: 1 }),
+    sendMessage: async () => ({ message_id: 1 }),
+    call: async (action, params) => { authCalls.push([action, params]); return {} },
+  }
+  const capture = (def) => { if (def?.name === 'onebot_call') authTools.push(def); return () => {} }
+  const authAgents = {
+    get: () => undefined,
+    async create(options) {
+      const session = { id: options.sessionId }
+      const agent = { session, followups: [], followup(m) { this.followups.push(m) } }
+      if (typeof options.setup === 'function') {
+        await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: capture } })
+      }
+      return { agent, dispose: async () => {} }
+    },
+    async resume() { throw new Error('no persisted session') },
+  }
+  const authCtx = {
+    on: (name, cb) => { if (name === 'session/event') authSessionEvent = cb; return () => {} },
+    agents: authAgents,
+    get: (name) => (name === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'localhost', model: 'group/never-stuck' }) } : undefined),
+  }
+  const authBridge = new ChatBridge({
+    ctx: authCtx,
+    config: { ...baseConfig, workspacePath: '/workspace/QQ', requireMention: false, adminUserId: '10001', toolAdminOnly: ['set_group_ban'] },
+    connection: authTransport, log,
+    getWorkspaceRegistry: () => workspaceRegistry,
+    getAgentPresets: () => agentPresets,
+    getPermissionPresets: () => permissionPresets,
+    describeError: String,
+  })
+  authBridge.start()
+  const authMsg = (uid, messageId) => ({
+    post_type: 'message', message_type: 'group', group_id: 777, user_id: uid, message_id: messageId,
+    message: [{ type: 'text', data: { text: '禁言他' } }], sender: { nickname: 'U' + uid }, time: 1700000000,
+  })
+  // 非管理员发消息 → 本回合发送者 = 20002 → 仅管理员动作被拒，且不进网关。
+  await authBridge.handleInbound(authMsg(20002, 9001))
+  const authSession = authBridge.chats.get('group:777')
+  authSessionEvent({ id: authSession.sessionId }, { type: 'turn/start', data: { turn: 1 } })
+  const tool = authTools[authTools.length - 1]
+  const denied = await tool.execute({ action: 'set_group_ban', params: { group_id: 777, user_id: 2 } })
+  t('a non-admin turn is refused an admin-only action and never hits the gateway', denied.ok === false && authCalls.length === 0, JSON.stringify(denied))
+  authSessionEvent({ id: authSession.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
+  // 管理员在同一群里发消息 → 本回合发送者 = 10001 → 放行。
+  await authBridge.handleInbound(authMsg(10001, 9002))
+  authSessionEvent({ id: authSession.sessionId }, { type: 'turn/start', data: { turn: 2 } })
+  const allowed = await tool.execute({ action: 'set_group_ban', params: { group_id: 777, user_id: 2 } })
+  t('an administrator turn is allowed the admin-only action', allowed.ok === true && authCalls.length === 1, JSON.stringify(allowed))
+  await authBridge.stop()
+}
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

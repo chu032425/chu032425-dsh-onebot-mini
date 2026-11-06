@@ -234,6 +234,35 @@ export function actionLabel(action) {
 }
 
 /**
+ * 出厂默认「仅管理员可用」的动作：会改动群/账号、删消息，或把本机文件送出去的
+ * 敏感动作。运营者可在「工具」页逐项改回「非管理员也可用」。
+ *
+ * 这里只是**出厂默认**；配置里保存的是解析后的完整列表（默认值＋运营者改动），
+ * 由 `computeAdminOnly` 读取。
+ */
+export const DEFAULT_ADMIN_ONLY = Object.freeze([
+  // 本机动作：能读宿主目录、能把本机文件发出去
+  'send_message', 'list_files',
+  // 群管理：全部会改动群或成员状态
+  'set_group_ban', 'set_group_kick', 'set_group_whole_ban', 'set_group_card',
+  'set_group_name', 'set_group_leave', 'set_group_special_title', 'set_group_remark',
+  'set_group_portrait', '_send_group_notice', '_del_group_notice',
+  // 撤回他人消息
+  'delete_msg',
+])
+
+/**
+ * 从一份生效配置算出「仅管理员可用」的动作集合。
+ * @param config - 生效配置；`toolAdminOnly` 缺失时用出厂默认。
+ * @returns 动作名集合（只含已知动作）。
+ */
+export function computeAdminOnly(config) {
+  const source = config !== null && typeof config === 'object' ? config : {}
+  const list = Array.isArray(source.toolAdminOnly) ? source.toolAdminOnly : DEFAULT_ADMIN_ONLY
+  return new Set(list.map((item) => String(item)).filter((name) => KNOWN.has(name)))
+}
+
+/**
  * 从一份生效配置算出某个会话的 agent 能用哪些动作。
  *
  * 三种结果：

@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
+import { TOOL_GROUPS, isKnownAction, DEFAULT_ADMIN_ONLY } from './toolcatalog.js'
 import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, LEGACY_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_INBOUND_PROMPT, DEFAULT_POKE_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** DSH 主目录：先看 `$DSH_HOME`，再看 `~/.dsh`。 */
@@ -71,6 +71,9 @@ export const DEFAULTS = Object.freeze({
   compactRatio: 0.8,
   onebotToolEnabled: true,
   onebotToolDisabled: [],
+  // 「仅管理员可用」的动作集合（出厂默认给敏感动作，见 DEFAULT_ADMIN_ONLY）。
+  // 工具页每一行都有「非管理员可用」开关，取消勾选即加入这里。
+  toolAdminOnly: [...DEFAULT_ADMIN_ONLY],
   // 「工具」页的逐动作提示词覆盖，按动作名索引。只保存运营者真正改过的动作；
   // 缺失或留空表示「用 actiondocs.js 里的内置说明」。刻意不出现在设置页：
   // 它在「工具」页里改。
@@ -137,6 +140,7 @@ export const FIELD_KINDS = Object.freeze({
   compactRatio: 'number',
   onebotToolEnabled: 'boolean',
   onebotToolDisabled: 'stringList',
+  toolAdminOnly: 'stringList',
   actionPrompts: 'actionMap',
   titleEqualsId: 'boolean',
   logCapacity: 'number',
@@ -278,6 +282,12 @@ export function normalizeConfig(raw) {
   // 启用的。未知名字与重复项会被丢掉，手改过的文件因此塞不进垃圾数据。
   const rawDisabled = Array.isArray(value.onebotToolDisabled) ? value.onebotToolDisabled : []
   value.onebotToolDisabled = [...new Set(rawDisabled.filter((action) => isKnownAction(action)))]
+
+  // 「仅管理员可用」同样是已知动作的集合；未知名字与重复项丢掉。注意这里**不是**
+  // 「缺失就清空」：缺省时 coerce 已经填好出厂默认（敏感动作），运营者显式保存
+  // 空数组才会真的变成「谁都允许」。
+  const rawAdminOnly = Array.isArray(value.toolAdminOnly) ? value.toolAdminOnly : []
+  value.toolAdminOnly = [...new Set(rawAdminOnly.filter((action) => isKnownAction(action)))]
 
   // 管理员是一个 QQ 号：去掉首尾空白，并丢弃非数字内容，免得一个多余空格或粘进来
   // 的昵称变成一条假 id。
