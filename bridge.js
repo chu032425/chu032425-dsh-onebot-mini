@@ -4,9 +4,12 @@
  * Inbound: a pushed message event is gated (self → policy → mention → dedup),
  * flattened to text and handed to the chat's agent as one follow-up turn.
  *
- * Outbound: the assistant's text blocks for that session are buffered and sent
- * once the turn ends, so a multi-step turn produces one QQ message instead of
- * one per step. `turn/end` also releases the buffer on an errored turn.
+ * Outbound: how the assistant's text reaches the chat depends on `replyMode`.
+ *  - `final` (default): text blocks are buffered and sent once the turn ends, so
+ *    a multi-step turn produces one QQ message instead of one per step.
+ *  - `stream`: each assistant message is sent as soon as it is produced, so the
+ *    chat sees the answer unfold step by step ("say it when you think it").
+ * `turn/end` releases any leftover buffer and the turn's inbound files.
  *
  * The session id is derived from the chat id, so a restart resumes the same
  * conversation with no mapping file: `agents.resume` finds the persisted log,
@@ -230,8 +233,17 @@ export class ChatBridge {
     this.bySession = new Map()
     /** chatId → in-flight creation promise (collapses concurrent first messages). */
     this.pendingCreates = new Map()
-    /** chatId → accumulated assistant text for the open turn. */
+    /** chatId → accumulated assistant text for the open turn (`final` mode). */
     this.buffers = new Map()
+    /**
+     * `stream` mode delivery state, one entry per chat:
+     *  - streamQueues: chatId → promise chain that serializes streamed sends so
+     *    two assistant messages can never go out of order;
+     *  - sentThisTurn: chatIds that already streamed at least one message, so an
+     *    errored turn does not add a redundant "turn failed" notice.
+     */
+    this.streamQueues = new Map()
+    this.sentThisTurn = new Set()
     /**
      * Incoming-media cleanup, only used when `deleteInboundMedia` is on:
      *  - inboundQueue: chatId → FIFO of batches (one per queued message) whose
@@ -282,6 +294,8 @@ export class ChatBridge {
     this.chats.clear()
     this.bySession.clear()
     this.buffers.clear()
+    this.streamQueues.clear()
+    this.sentThisTurn.clear()
     this.inboundQueue.clear()
     this.inboundCurrent.clear()
     for (const chat of chats) {
@@ -1066,6 +1080,7 @@ export class ChatBridge {
       // Reset here, not at dispatch: a message queued while a turn runs must not
       // wipe the text that turn has already accumulated.
       this.buffers.set(chatId, '')
+      this.sentThisTurn.delete(chatId)
       // Bind this turn to the oldest queued message's inbound files.
       const queue = this.inboundQueue.get(chatId)
       const next = queue !== undefined && queue.length > 0 ? queue.shift() : undefined
@@ -1078,26 +1093,72 @@ export class ChatBridge {
     if (event.type === 'assistant/message') {
       const text = textOfMessage(event.data?.message)
       if (text === '') return
-      this.buffers.set(chatId, (this.buffers.get(chatId) ?? '') + text)
+      // `stream` sends each message the moment it appears; `final` collects it
+      // and lets `turn/end` send the whole answer as one message.
+      if (this.config.replyMode === 'stream') {
+        this.sentThisTurn.add(chatId)
+        this.enqueueStream(chatId, chat, text)
+      } else {
+        this.buffers.set(chatId, (this.buffers.get(chatId) ?? '') + text)
+      }
       return
     }
 
     if (event.type === 'turn/end') {
-      const buffered = this.buffers.get(chatId) ?? ''
-      this.buffers.delete(chatId)
-      // Detach this turn's inbound files now; delete them after the reply has
-      // gone out, because the reply may echo one of those same files back.
-      const inboundPaths = this.takeCurrentInbound(chatId)
-      const reason = event.data?.reason
-      if (buffered.trim() === '') {
-        if (reason?.kind === 'error') {
-          const message = String(reason?.error?.message ?? 'turn failed')
-          void this.sendNotice(chatId, chat, '⚠️ 本轮出错：' + message)
-        }
-        this.releaseInbound(chatId, inboundPaths)
-        return
+      return this.finishTurn(chatId, chat, event)
+    }
+  }
+
+  /**
+   * Queue one streamed delivery behind the chat's previous streamed send.
+   *
+   * Serializing per chat keeps two assistant messages in production order even
+   * though `deliver` is async.
+   * @param chatId - canonical chat id.
+   * @param chat - split chat id.
+   * @param text - assistant text to send now.
+   */
+  enqueueStream(chatId, chat, text) {
+    const previous = this.streamQueues.get(chatId) ?? Promise.resolve()
+    const next = previous.catch(() => {}).then(() => this.deliver(chatId, chat, text))
+    this.streamQueues.set(chatId, next)
+  }
+
+  /**
+   * Flush one turn at `turn/end`.
+   *
+   * In `final` mode the buffered text goes out as one message; in `stream` mode
+   * the already-enqueued sends are awaited so inbound files stay on disk until
+   * every reply that might echo them has gone out. A turn that produced nothing
+   * still reports an error notice, and an errored turn that already streamed
+   * text does not add a redundant one.
+   * @param chatId - canonical chat id.
+   * @param chat - split chat id.
+   * @param event - the `turn/end` event.
+   * @returns a promise that resolves once the turn's sends and cleanup finish.
+   */
+  async finishTurn(chatId, chat, event) {
+    const pending = this.streamQueues.get(chatId)
+    this.streamQueues.delete(chatId)
+    const buffered = this.buffers.get(chatId) ?? ''
+    this.buffers.delete(chatId)
+    const streamed = this.sentThisTurn.delete(chatId)
+    // Detach this turn's inbound files now; delete them after the reply has
+    // gone out, because the reply may echo one of those same files back.
+    const inboundPaths = this.takeCurrentInbound(chatId)
+    const reason = event.data?.reason
+    try {
+      if (pending !== undefined) await pending.catch(() => {})
+      if (buffered.trim() !== '') {
+        // Covers `final` mode, and a turn whose mode flipped to `stream` after
+        // it had already buffered some text.
+        await this.deliver(chatId, chat, buffered)
+      } else if (!streamed && reason?.kind === 'error') {
+        const message = String(reason?.error?.message ?? 'turn failed')
+        await this.sendNotice(chatId, chat, '⚠️ 本轮出错：' + message)
       }
-      void this.deliver(chatId, chat, buffered).finally(() => this.releaseInbound(chatId, inboundPaths))
+    } finally {
+      this.releaseInbound(chatId, inboundPaths)
     }
   }
 

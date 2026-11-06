@@ -80,6 +80,11 @@ export const DEFAULTS = Object.freeze({
   // One reply-behaviour switch: may a message interrupt a running answer?
   // Messages never wait for a quiet window any more.
   privateAutoInterject: true,
+  // How the assistant's answer reaches the chat:
+  //  - final: buffer every text block and send one QQ message when the turn ends
+  //    (a multi-step turn does not spam the chat);
+  //  - stream: send each assistant message the moment it appears.
+  replyMode: 'final',
   // Legacy keys kept only so an older config file still loads.
   debounceMs: 0,
   debounceMaxMs: 0,
@@ -139,6 +144,7 @@ export const FIELD_KINDS = Object.freeze({
   toolMediaPrompt: 'text',
   interjectPrompt: 'text',
   privateAutoInterject: 'boolean',
+  replyMode: 'replyMode',
   debounceMs: 'number',
   debounceMaxMs: 'number',
   autoInterject: 'boolean',
@@ -153,7 +159,7 @@ export const FIELD_GROUPS = Object.freeze([
   { id: 'access', fields: ['requireMention'] },
   { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
   { id: 'media', fields: ['inboundMedia', 'inboundMediaMaxMb', 'deleteInboundMedia', 'deleteSentMedia'] },
-  { id: 'reply', fields: ['privateAutoInterject'] },
+  { id: 'reply', fields: ['replyMode', 'privateAutoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
   { id: 'diagnostics', fields: ['logCapacity', 'logMessagePreview', 'logToFile', 'sendTimeoutMs'] },
 ])
@@ -194,6 +200,7 @@ function coerce(field, raw) {
     return raw.map((item) => String(item).trim()).filter((item) => item !== '')
   }
   if (kind === 'enum') return raw === 'reverse' || raw === 'forward' ? raw : fallback
+  if (kind === 'replyMode') return raw === 'stream' || raw === 'final' ? raw : fallback
   if (kind === 'permission') return String(raw)
   if (kind === 'model') return String(raw)
   if (kind === 'actionMap') {

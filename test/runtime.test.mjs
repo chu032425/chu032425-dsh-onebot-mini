@@ -315,6 +315,25 @@ await wait(50)
 t('one message is sent at turn end', sent.length === 1)
 t('only text blocks are joined', sent[0] === '第一段\n第二段')
 
+// `stream` mode: each assistant message is sent the moment it appears, and the
+// turn end does not re-send it
+bridge.config.replyMode = 'stream'
+const streamBase = sent.length
+sessionEvent({ id: chat.sessionId }, { type: 'turn/start', data: { turn: 90 } })
+sessionEvent({ id: chat.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '先说一句' }] } } })
+await wait(40)
+t('stream mode sends mid-turn', sent.length === streamBase + 1 && sent[streamBase] === '先说一句', JSON.stringify(sent.slice(streamBase)))
+sessionEvent({ id: chat.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '再说一句' }] } } })
+await wait(40)
+t('stream mode sends each message separately', sent.length === streamBase + 2 && sent[streamBase + 1] === '再说一句', JSON.stringify(sent.slice(streamBase)))
+await sessionEvent({ id: chat.sessionId }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
+await wait(40)
+t('stream mode does not send the answer again at turn end', sent.length === streamBase + 2, JSON.stringify(sent.slice(streamBase)))
+// restore final mode and drop the streamed sends so the index-based assertions
+// below keep applying to the final-mode turns that follow
+bridge.config.replyMode = 'final'
+sent.length = streamBase
+
 // a message queued mid-turn must not wipe the running turn's buffer
 sessionEvent({ id: chat.sessionId }, { type: 'turn/start', data: { turn: 2 } })
 sessionEvent({ id: chat.sessionId }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'T2' }] } } })

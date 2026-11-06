@@ -168,7 +168,8 @@ for (const key of ['cacheTitle', 'cacheTotal', 'cacheConfig', 'cacheLogs', 'cach
 }
 t('qzone settings group label present', zh.groupQzone === '空间' && en.groupQzone === 'Qzone')
 t('media group label present', zh.groupMedia === '媒体' && en.groupMedia === 'Media')
-for (const key of ['groupReply', 'fieldPrivateAutoInterject', 'hintPrivateAutoInterject']) {
+for (const key of ['groupReply', 'fieldPrivateAutoInterject', 'hintPrivateAutoInterject',
+  'fieldReplyMode', 'hintReplyMode', 'replyModeFinal', 'replyModeStream']) {
   t('reply copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
 t('no debounce, group or queue strings remain', !('fieldPrivateDebounceMs' in zh) && !('fieldGroupDebounceMs' in zh) && !('queueTitle' in zh))
