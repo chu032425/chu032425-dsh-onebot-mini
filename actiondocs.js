@@ -519,7 +519,7 @@ export const ACTION_DOCS = Object.freeze({
   // --- 本地工具（包装标准动作，不直接转发网关） ---
   send_message: {
     params: [
-      P('text', 'string', false, '要发送的文字。可与媒体同时给，合成一条消息；也可以只发文字'),
+      P('text', 'string', false, '要发送的文字。只有图片能和文字合成一条消息；语音/视频/文件必须单独发'),
       P('kind', 'enum', false, '"image" 图片、"record" 语音、"video" 视频、"file" 文件。只发文字时省略'),
       P('path', 'string', false, '媒体在本机的绝对路径；插件会读成 base64 内联发送，接收方无需访问本机文件'),
       P('url', 'string', false, '可直接下载的媒体 http(s) 链接（与 path / base64 三选一）'),
@@ -528,17 +528,15 @@ export const ACTION_DOCS = Object.freeze({
       P('chatType', 'enum', false, '"private" 私聊 或 "group" 群聊；省略则用当前会话'),
       P('chatId', 'string', false, '目标 QQ 号或群号；省略则用当前会话'),
     ],
-    summary: '向 QQ 会话发送一条消息，支持九种组合：纯文字、纯图片、纯语音、纯视频、纯文件，以及文字+图片、文字+语音、文字+视频、文字+文件',
-    note: '九种组合：'
+    summary: '向 QQ 会话发送一条消息，支持六种组合：纯文字、纯图片、文字+图片、纯语音、纯视频、纯文件',
+    note: '六种组合：'
       + '①纯文字 params={"text":"..."}；'
       + '②纯图片 params={"kind":"image","path":"/绝对/路径.png"}；'
       + '③文字+图片 params={"text":"...","kind":"image","path":"..."}（合成同一条消息）；'
       + '④纯语音 params={"kind":"record","path":"/绝对/路径.wav"}；'
-      + '⑤文字+语音 params={"text":"...","kind":"record","path":"/绝对/路径.wav"}（合成同一条消息）；'
-      + '⑥纯视频 params={"kind":"video","path":"/绝对/路径.mp4"}；'
-      + '⑦文字+视频 params={"text":"...","kind":"video","path":"/绝对/路径.mp4"}（合成同一条消息）；'
-      + '⑧纯文件 params={"kind":"file","path":"/绝对/路径.zip","name":"显示名.zip"}；'
-      + '⑨文字+文件 params={"text":"...","kind":"file","path":"/绝对/路径.zip","name":"显示名.zip"}（合成同一条消息）。'
+      + '⑤纯视频 params={"kind":"video","path":"/绝对/路径.mp4"}；'
+      + '⑥纯文件 params={"kind":"file","path":"/绝对/路径.zip","name":"显示名.zip"}。'
+      + '只有图片可以与文字同条发送：语音、视频、文件不能带 text，需要说明时先发文字再发媒体，分成两条。'
       + '要发到其他会话时，任意组合再加 "chatType":"group","chatId":"群号"。'
       + 'text 与 kind 至少给一个；kind 填了就还要给 path / url / base64 之一。'
       + '发本地文件前先用 list_files 确认文件名。',

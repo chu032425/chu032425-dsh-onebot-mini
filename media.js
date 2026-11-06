@@ -135,6 +135,12 @@ export async function sendMedia(connection, options) {
   if (kind !== '' && !MEDIA_KINDS.includes(kind)) {
     return { ok: false, error: 'kind must be one of ' + MEDIA_KINDS.join(', ') }
   }
+  // Only an image may share a message with text. A voice clip, a video and a
+  // file each go out on their own; the QQ client does not present them together
+  // with a caption, so the wrapper refuses instead of sending something odd.
+  if (text.trim() !== '' && kind !== '' && kind !== 'image') {
+    return { ok: false, error: 'text can only accompany an image; send ' + kind + ' on its own' }
+  }
 
   // Only a media item needs a payload read; text alone skips all of it.
   let source
@@ -220,6 +226,38 @@ export async function safeUnlink(target) {
  * ordinary prose, and the four kind names match the tool's `kind` values.
  */
 export const MEDIA_MARKER_PATTERN = /\[\[(image|record|video|file):([^\[\]]+)\]\]/g
+
+/**
+ * Split one flat reply segment list into the messages it may actually be sent as.
+ *
+ * Only an image shares a message with text; a voice clip, a video and a file go
+ * out alone, because QQ does not present them together with a caption. Text runs
+ * therefore break wherever a non-image media item sits: the segments before it
+ * form one message, the media item is its own message, and the segments after it
+ * start another.
+ * @param segments - the ordered segments from `buildReplySegments`.
+ * @returns an array of segment arrays, one per outgoing message.
+ */
+export function groupReplySegments(segments) {
+  const list = Array.isArray(segments) ? segments : []
+  const messages = []
+  let current = []
+  const flush = () => {
+    if (current.length > 0) messages.push(current)
+    current = []
+  }
+  for (const segment of list) {
+    if (segment !== null && typeof segment === 'object' && segment.type !== 'text' && segment.type !== 'image') {
+      // A standalone attachment: it must not travel with any text.
+      flush()
+      messages.push([segment])
+      continue
+    }
+    current.push(segment)
+  }
+  flush()
+  return messages
+}
 
 /**
  * Turn a reply's text into an ordered segment list.

@@ -303,22 +303,27 @@ t('the media ceiling is 20 MB', MAX_MEDIA_BYTES === 20 * 1024 * 1024)
   const textOnly = buildMessageSegments({ text: '你好' })
   t('text alone becomes one text segment', JSON.stringify(textOnly) === '[{"type":"text","data":{"text":"你好"}}]')
   const mixed = buildMessageSegments({ text: '看这张', kind: 'image', url: 'http://x/a.png' })
-  t('text and media mix into one ordered list', mixed.length === 2 && mixed[0].type === 'text' && mixed[1].type === 'image')
-  // all nine documented combinations must produce the expected segment list
-  for (const [label, kind, expected] of [
-    ['纯文字', '', ['text']],
-    ['纯图片', 'image', ['image']],
-    ['文字+图片', 'image', ['text', 'image']],
-    ['纯语音', 'record', ['record']],
-    ['文字+语音', 'record', ['text', 'record']],
-    ['纯视频', 'video', ['video']],
-    ['文字+视频', 'video', ['text', 'video']],
-    ['纯文件', 'file', ['file']],
-    ['文字+文件', 'file', ['text', 'file']],
+  t('text and an image mix into one ordered list', mixed.length === 2 && mixed[0].type === 'text' && mixed[1].type === 'image')
+  // the six documented combinations; only an image may share a message with text
+  for (const [label, kind, withText, expected] of [
+    ['纯文字', '', true, ['text']],
+    ['纯图片', 'image', false, ['image']],
+    ['文字+图片', 'image', true, ['text', 'image']],
+    ['纯语音', 'record', false, ['record']],
+    ['纯视频', 'video', false, ['video']],
+    ['纯文件', 'file', false, ['file']],
   ]) {
-    const opts = kind === '' ? { text: 'x' } : { kind, url: 'http://x/a.bin', text: label.startsWith('文字') ? 'x' : undefined }
+    const opts = kind === '' ? { text: 'x' } : { kind, url: 'http://x/a.bin', ...(withText ? { text: 'x' } : {}) }
     const built = buildMessageSegments(opts)
     t('combination builds ' + label, JSON.stringify(built.map((seg) => seg.type)) === JSON.stringify(expected), JSON.stringify(built.map((seg) => seg.type)))
+  }
+  // text with a voice clip / video / file is refused, not silently mixed
+  {
+    const refuseConn = { call: async () => ({ message_id: 1 }) }
+    for (const kind of ['record', 'video', 'file']) {
+      const refused = await sendMedia(refuseConn, { chatType: 'group', chatId: '7', text: 'x', kind, url: 'http://x/a.bin' })
+      t('text with ' + kind + ' is refused', refused.ok === false && refused.error.includes('only accompany an image'))
+    }
   }
   const mediaOnly = buildMessageSegments({ kind: 'image', url: 'http://x/a.png' })
   t('media alone becomes one media segment', mediaOnly.length === 1 && mediaOnly[0].type === 'image')
@@ -333,6 +338,22 @@ t('the media ceiling is 20 MB', MAX_MEDIA_BYTES === 20 * 1024 * 1024)
   t('the wrapper keeps text and media in one message', calls[0].params.message.length === 2)
   const empty = await sendMedia(conn, { chatType: 'group', chatId: '7' })
   t('an empty message is refused', empty.ok === false)
+}
+
+// reply markers: only an image shares a message with text; the rest split out
+{
+  const { groupReplySegments } = await import('../media.js')
+  const seg = (type) => ({ type, data: {} })
+  const one = groupReplySegments([seg('text'), seg('image'), seg('text')])
+  t('text and an image stay one reply message', one.length === 1 && one[0].length === 3, JSON.stringify(one.map((m) => m.length)))
+  const split = groupReplySegments([seg('text'), seg('file'), seg('text')])
+  t('a file splits the reply into separate messages', split.length === 3
+    && JSON.stringify(split.map((m) => m.map((s) => s.type))) === JSON.stringify([['text'], ['file'], ['text']]),
+  JSON.stringify(split.map((m) => m.map((s) => s.type))))
+  const voice = groupReplySegments([seg('text'), seg('record')])
+  t('a voice clip travels alone', voice.length === 2 && voice[1].length === 1 && voice[1][0].type === 'record')
+  t('images among themselves stay with the text run', groupReplySegments([seg('text'), seg('image'), seg('image'), seg('text')]).length === 1)
+  t('grouping an empty list yields no messages', groupReplySegments([]).length === 0)
 }
 const readBack = await readFileAsBase64('/tmp/onebot-mini-unit.json')
 t('a local file is read into base64', readBack.ok === true && typeof readBack.base64 === 'string' && readBack.base64.length > 0)

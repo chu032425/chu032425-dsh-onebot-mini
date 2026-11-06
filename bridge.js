@@ -1236,14 +1236,20 @@ export class ChatBridge {
   async deliver(chatId, chat, text) {
     try {
       // A reply may carry `[[image:…]]`-style markers; those become real message
-      // segments so a caption and its picture go out as one message.
-      const { buildReplySegments, safeUnlink } = await import('./media.js')
+      // segments. Only an image travels with text, so the segment list is split
+      // into as many messages as QQ accepts (see `groupReplySegments`).
+      const { buildReplySegments, groupReplySegments, safeUnlink } = await import('./media.js')
       const { segments, warnings, sourcePaths } = await buildReplySegments(text)
       if (segments.length === 0) return
       for (const warning of warnings) {
         this.log.record('warn', { note: 'reply media skipped: ' + warning, chatId })
       }
-      const data = await this.connection.sendMessage(chat, segments)
+      const messages = groupReplySegments(segments)
+      let lastMessageId = ''
+      for (const message of messages) {
+        const data = await this.connection.sendMessage(chat, message)
+        lastMessageId = String(data?.message_id ?? '')
+      }
       // Only after the gateway accepted the message: remove the source files the
       // reply attached, when the operator asked for that.
       if (this.config.deleteSentMedia === true && sourcePaths.length > 0) {
@@ -1258,9 +1264,10 @@ export class ChatBridge {
       this.log.record('bridge', {
         note: 'reply sent',
         chatId,
-        messageId: String(data?.message_id ?? ''),
+        messageId: lastMessageId,
         length: text.length,
         segments: segments.length,
+        messages: messages.length,
         media: segments.filter((segment) => segment.type !== 'text').length,
       })
     } catch (error) {
