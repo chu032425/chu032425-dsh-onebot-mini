@@ -137,6 +137,9 @@ t('the swapped remark label is gone', !('contactsRemark' in zh) && !('contactsRe
 for (const key of ['fieldImageCacheMaxKb', 'fieldImageCacheTotalMb', 'fieldImageShowMaxMb']) {
   t('image cache field label present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
 }
+for (const key of ['fieldCompactRatio', 'hintCompactRatio']) {
+  t('compaction ratio copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')
+}
 t('sex is localized in the friend detail', typeof zh.profileSexUnknown === 'string' && zh.profileSexUnknown === '未知')
 for (const key of ['qzoneForbidden', 'qzoneForbiddenHint', 'qzoneForbiddenSwitch']) {
   t('permission copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')

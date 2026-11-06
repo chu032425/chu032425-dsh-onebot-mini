@@ -12,6 +12,7 @@ import { LogBus, redact, preview } from '../logbus.js'
 import {
   chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
   isAddressed, speakerPrefix, speakerKey, textOfMessage, buildPlatformPrompt,
+  ratioReached, ChatBridge,
 } from '../bridge.js'
 import { tmpdir } from 'node:os'
 
@@ -72,6 +73,43 @@ t('admin user id is trimmed', normalizeConfig({ adminUserId: ' 12345 ' }).value.
 t('a numeric admin id is stored as a string', normalizeConfig({ adminUserId: 12345 }).value.adminUserId === '12345')
 t('a non-numeric admin id is dropped', normalizeConfig({ adminUserId: 'abc' }).value.adminUserId === '')
 t('admin user id is not on the settings groups', !FIELD_GROUPS.some((group) => group.fields.includes('adminUserId')))
+
+// context-compaction ratio: 0-1 (or a percentage), 0 disables the pre-reply check
+t('compact ratio defaults to 0.8', DEFAULTS.compactRatio === 0.8)
+t('compact ratio is on the session settings group', FIELD_GROUPS.find((group) => group.id === 'session').fields.includes('compactRatio'))
+t('a fraction compact ratio is kept', normalizeConfig({ compactRatio: 0.5 }).value.compactRatio === 0.5)
+t('a percentage compact ratio becomes a fraction', normalizeConfig({ compactRatio: 80 }).value.compactRatio === 0.8)
+t('zero disables the pre-reply check', normalizeConfig({ compactRatio: 0 }).value.compactRatio === 0)
+t('an out-of-range compact ratio falls back', normalizeConfig({ compactRatio: 200 }).value.compactRatio === 0.8)
+t('ratioReached compares consumed over window', ratioReached(0.8, 800, 1000) === true && ratioReached(0.8, 799, 1000) === false)
+t('ratioReached is false when disabled or unmeasured', ratioReached(0, 999, 1000) === false && ratioReached(0.8, undefined, 1000) === false && ratioReached(0.8, 800, 0) === false)
+
+// maybeCompact calls the live compaction service only when the ratio is reached
+{
+  const compactionCalls = []
+  const meter = { contextPressure: () => ({ pressureTokens: 900, contextWindow: 1000 }) }
+  const compaction = { compactNow: async (agent, signal) => { compactionCalls.push(agent); return { compacted: true } } }
+  const services = { tokenMeter: meter, compaction }
+  const mkCtx = () => ({ on: () => () => {}, get: (name) => services[name] })
+  const agent = { session: { id: 's' }, runMaintenance: (task) => task(new AbortController().signal) }
+  const log = new LogBus({ capacity: 20 })
+  const hot = new ChatBridge({ ctx: mkCtx(), config: { ...DEFAULTS, compactRatio: 0.8 }, connection: {}, log })
+  await hot.maybeCompact('private:1', { agent })
+  t('maybeCompact compacts when pressure reaches the ratio', compactionCalls.length === 1)
+  const cold = new ChatBridge({ ctx: mkCtx(), config: { ...DEFAULTS, compactRatio: 0.99 }, connection: {}, log })
+  await cold.maybeCompact('private:1', { agent })
+  t('maybeCompact skips below the ratio', compactionCalls.length === 1)
+  const off = new ChatBridge({ ctx: mkCtx(), config: { ...DEFAULTS, compactRatio: 0 }, connection: {}, log })
+  await off.maybeCompact('private:1', { agent })
+  t('maybeCompact is disabled by ratio 0', compactionCalls.length === 1)
+  // a busy agent (compaction throws) must not reject the caller
+  const busyCompaction = { compactNow: async () => { throw new Error('busy') } }
+  const busyCtx = { on: () => () => {}, get: (name) => (name === 'tokenMeter' ? meter : name === 'compaction' ? busyCompaction : undefined) }
+  const busyBridge = new ChatBridge({ ctx: busyCtx, config: { ...DEFAULTS, compactRatio: 0.8 }, connection: {}, log })
+  let threw = false
+  try { await busyBridge.maybeCompact('private:1', { agent }) } catch { threw = true }
+  t('a compaction failure never blocks the answer', threw === false)
+}
 
 // delete-inbound-media mirrors delete-sent-media and defaults on
 t('the inbound-delete switch defaults on', DEFAULTS.deleteInboundMedia === true)

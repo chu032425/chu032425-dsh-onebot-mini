@@ -68,6 +68,11 @@ export const DEFAULTS = Object.freeze({
   sessionPrefix: 'onebot',
   sessionPermission: '',
   agentModel: '',
+  // Pre-reply context compaction: when the last measured pressure (used tokens /
+  // context window) reaches this ratio, compact the session before delivering the
+  // new message. 0 disables the pre-reply check (the harness's own auto-compaction
+  // still runs); values above 1 are read as a percentage (80 → 0.8).
+  compactRatio: 0.8,
   onebotToolEnabled: true,
   onebotToolDisabled: [],
   // Per-action prompt overrides for the Tools page, keyed by action name. Only
@@ -137,6 +142,7 @@ export const FIELD_KINDS = Object.freeze({
   sessionPrefix: 'string',
   sessionPermission: 'permission',
   agentModel: 'model',
+  compactRatio: 'number',
   onebotToolEnabled: 'boolean',
   onebotToolDisabled: 'stringList',
   actionPrompts: 'actionMap',
@@ -175,7 +181,7 @@ export const FIELD_KINDS = Object.freeze({
 export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention'] },
-  { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'senderPrefix'] },
+  { id: 'session', fields: ['sessionPrefix', 'titleEqualsId', 'workspacePath', 'agentPreset', 'agentModel', 'sessionPermission', 'compactRatio', 'senderPrefix'] },
   { id: 'media', fields: ['inboundMedia', 'inboundMediaMaxMb', 'deleteInboundMedia', 'deleteSentMedia'] },
   { id: 'reply', fields: ['replyMode', 'privateAutoInterject'] },
   { id: 'qzone', fields: ['imageShowMaxMb', 'imageCacheMaxKb', 'imageCacheTotalMb'] },
@@ -258,6 +264,15 @@ export function normalizeConfig(raw) {
     problems.push('sendTimeoutMs must be 1000-600000')
     value.sendTimeoutMs = DEFAULTS.sendTimeoutMs
   }
+  // Context-compaction ratio: accept 0-1, or a percentage 1-100 (80 → 0.8).
+  // 0 disables the pre-reply check.
+  let compactRatio = Number(value.compactRatio)
+  if (compactRatio > 1 && compactRatio <= 100) compactRatio = compactRatio / 100
+  if (!Number.isFinite(compactRatio) || compactRatio < 0 || compactRatio > 1) {
+    problems.push('compactRatio must be 0-1 (0 disables, or a percentage up to 100)')
+    compactRatio = DEFAULTS.compactRatio
+  }
+  value.compactRatio = Math.round(compactRatio * 1000) / 1000
   value.imageCacheMaxKb = Math.trunc(value.imageCacheMaxKb)
   if (value.imageCacheMaxKb < 64 || value.imageCacheMaxKb > 20480) {
     problems.push('imageCacheMaxKb must be 64-20480')

@@ -63,6 +63,22 @@ export function sessionIdOf(chatId, prefix = 'onebot') {
 }
 
 /**
+ * Whether consumed context has reached a pressure threshold.
+ *
+ * @param threshold - ratio in (0, 1]; 0 or less disables the check.
+ * @param used - measured pressure tokens.
+ * @param window - model context window in tokens.
+ * @returns true when `used / window >= threshold`.
+ */
+export function ratioReached(threshold, used, window) {
+  const limit = Number(threshold)
+  const consumed = Number(used)
+  const capacity = Number(window)
+  if (!(limit > 0) || !Number.isFinite(consumed) || !Number.isFinite(capacity) || capacity <= 0) return false
+  return consumed / capacity >= limit
+}
+
+/**
  * Flatten OneBot message segments to model-facing text.
  *
  * Non-text segments become bracketed placeholders: the model gets to know an
@@ -487,6 +503,13 @@ export class ChatBridge {
     // turn never loses its files to that earlier turn's end.
     if (savedPaths.length > 0) this.enqueueInbound(chatId, savedPaths)
     try {
+      // "Compact first, then answer": if the session has reached the configured
+      // pressure ratio, condense it before this message becomes the next turn.
+      try {
+        await this.maybeCompact(chatId, record)
+      } catch {
+        // Compaction is best-effort; a failure here must never block the answer.
+      }
       const message = await createPluginUserMessage({
         content: [{ type: 'text', text }],
         source: PLUGIN_SOURCE,
@@ -503,6 +526,54 @@ export class ChatBridge {
       // claim on files that no `turn/end` would clear.
       if (savedPaths.length > 0) this.dropLastInbound(chatId)
       this.log.record('error', { note: 'delivery failed for ' + chatId, error: this.describeError(error) })
+    }
+  }
+
+  /**
+   * Compact the chat's session before the next answer when context pressure has
+   * reached `compactRatio`.
+   *
+   * Uses the harness token meter to read the last measured pressure and the live
+   * compaction service to condense idle history. Everything is best-effort: a
+   * missing service, an unmeasured session, a disabled ratio, or a busy agent all
+   * leave the turn untouched so the user still gets an answer.
+   * @param chatId - canonical chat id (for logging).
+   * @param record - the chat record holding the live agent.
+   */
+  async maybeCompact(chatId, record) {
+    const threshold = Number(this.config.compactRatio)
+    if (!(threshold > 0)) return
+    const agent = record?.agent
+    if (agent === undefined || agent === null) return
+    if (typeof this.ctx?.get !== 'function') return
+    const meter = this.ctx.get('tokenMeter')
+    if (meter === undefined || typeof meter.contextPressure !== 'function') return
+    let pressure
+    try {
+      pressure = meter.contextPressure(agent.session)
+    } catch {
+      return
+    }
+    const used = Number(pressure?.pressureTokens)
+    const window = Number(pressure?.contextWindow)
+    if (!ratioReached(threshold, used, window)) return
+    const ratio = Number((used / window).toFixed(3))
+    const compaction = this.ctx.get('compaction')
+    if (compaction === undefined || typeof compaction.compactNow !== 'function') {
+      this.log.record('warn', { note: 'context ratio reached but no compaction service; answering without compacting', chatId, ratio })
+      return
+    }
+    try {
+      const result = await compaction.compactNow(agent, new AbortController().signal)
+      this.log.record('bridge', {
+        note: result === null ? 'context ratio reached; nothing safe to compact' : 'context compacted before reply',
+        chatId,
+        ratio,
+      })
+    } catch (error) {
+      // Busy (a turn or queued work owns the agent) or a summarizer failure must
+      // never block the user's message; log and answer with the current history.
+      this.log.record('warn', { note: 'pre-reply compaction skipped: ' + this.describeError(error), chatId, ratio })
     }
   }
 
