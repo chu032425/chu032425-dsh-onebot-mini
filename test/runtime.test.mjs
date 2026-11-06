@@ -11,7 +11,7 @@ import { join as pathJoin } from 'node:path'
 import { profileCacheRoot } from '../cachepaths.js'
 import { OneBotConnection } from '../connection.js'
 import { LogBus } from '../logbus.js'
-import { ChatBridge } from '../bridge.js'
+import { ChatBridge, isDetachedSessionError } from '../bridge.js'
 
 let pass = 0
 let fail = 0
@@ -1390,6 +1390,60 @@ await pokeBridge.stop()
   t('the platform prompt reflects the current admin', platform.text().includes('20002'))
   bridge.reconfigure({ ...baseConfig, adminUserId: '30003', toolAdminOnly: [] })
   t('the platform prompt re-evaluates after reconfigure', platform.text().includes('30003') && !platform.text().includes('20002'))
+}
+
+// ---------------------------------------------------------------- 缓存 agent 的会话被卸载后自愈重投
+{
+  let createCount = 0
+  let firstThrows = true
+  const delivered = []
+  const detachedAgents = {
+    get: () => undefined,
+    async create(options) {
+      createCount += 1
+      const session = { id: options.sessionId }
+      const agent = {
+        session,
+        status: 'idle',
+        followup(message) {
+          if (firstThrows) {
+            firstThrows = false
+            throw new Error('session "' + options.sessionId + '" cannot append outside a SessionStore')
+          }
+          delivered.push(message)
+        },
+      }
+      if (typeof options.setup === 'function') {
+        await options.setup({ systemPrompt: { section: () => () => {} }, tools: { register: () => () => {} } })
+      }
+      return { agent, dispose: async () => {} }
+    },
+    async resume() { throw new Error('no persisted session') },
+  }
+  const detachedCtx = {
+    on: () => () => {},
+    agents: detachedAgents,
+    get: (name) => (name === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'localhost', model: 'group/never-stuck' }) } : undefined),
+  }
+  const detachedTransport = {
+    selfId: '2000002', state: 'online',
+    sendText: async () => ({ message_id: 1 }),
+    sendMessage: async () => ({ message_id: 1 }),
+    call: async () => ({}),
+  }
+  const detachedBridge = new ChatBridge({
+    ctx: detachedCtx,
+    config: { ...baseConfig, workspacePath: '/workspace/QQ', requireMention: false },
+    connection: detachedTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String,
+  })
+  detachedBridge.start()
+  await detachedBridge.handleInbound({
+    post_type: 'message', message_type: 'group', group_id: 888, user_id: 10001, message_id: 1,
+    message: [{ type: 'text', data: { text: '在吗' } }], sender: { nickname: 'U' }, time: 1700000000,
+  })
+  t('a detached cached agent is rebuilt and the message is delivered once on retry', delivered.length === 1 && createCount === 2, 'delivered=' + delivered.length + ' created=' + createCount)
+  t('isDetachedSessionError matches the store-detach message', isDetachedSessionError(new Error('session "x" cannot append outside a SessionStore')) === true && isDetachedSessionError(new Error('boom')) === false)
+  await detachedBridge.stop()
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

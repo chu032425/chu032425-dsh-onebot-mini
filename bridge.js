@@ -614,7 +614,7 @@ export class ChatBridge {
  * @param text - 消息文本。
  * @param frame - 来源事件，用于日志。
  * @param savedPaths - 本条消息产生的入站文件，供清理用。 */
-  async sendToAgent(chatId, record, text, frame, savedPaths = []) {
+  async sendToAgent(chatId, record, text, frame, savedPaths = [], attempt = 0) {
     // 把本条消息的文件排到它的 follow-up 将开启的那个回合上。批次在 `turn/start`
     // 弹出，因此还堵在运行中回合后面的消息，其文件不会被前一个回合的结束带走。
     if (savedPaths.length > 0) this.queueInbound(chatId, savedPaths)
@@ -642,8 +642,35 @@ export class ChatBridge {
       // 这一批永远不会等到 turn/start，撤销入队，而不是把文件占位泄漏出去。
       if (savedPaths.length > 0) this.dropLastInbound(chatId)
       this.dropLastSender(chatId)
+      // 缓存的 agent 可能已经失效：它的会话被从 SessionStore 上卸下（例如在 Web UI
+      // 里打开了同一个 QQ 会话而由会话控制器接管，或 agent 被宿主回收）。此时
+      // `followup` 会抛「cannot append outside a SessionStore」。丢掉陈旧记录，重新
+      // 取一个 agent（复用新属主或重新 resume）后只重试一次，绝不无限循环。
+      if (attempt === 0 && isDetachedSessionError(error)) {
+        this.log.record('warn', {
+          note: 'cached agent session was detached; rebuilding the chat and retrying delivery',
+          chatId,
+          error: this.describeError(error),
+        })
+        this.dropChatRecord(chatId)
+        try {
+          const fresh = await this.ensureChat(chatId)
+          return await this.sendToAgent(chatId, fresh, text, frame, savedPaths, attempt + 1)
+        } catch (retryError) {
+          this.recordError('delivery retry failed', chatId, retryError)
+          return
+        }
+      }
       this.recordError('delivery failed', chatId, error)
     }
+  }
+
+  /** 只丢掉 chatId → 记录的映射，保留缓冲区与队列（供「会话被卸载」后就地重建用）。
+ * @param chatId - 规范 chat id。 */
+  dropChatRecord(chatId) {
+    const record = this.chats.get(chatId)
+    if (record !== undefined) this.bySession.delete(record.sessionId)
+    this.chats.delete(chatId)
   }
 
   /** 上下文压力达到 `compactRatio` 时，在下一个回答前压缩该聊天的会话。
@@ -1314,6 +1341,15 @@ export class ChatBridge {
   sessionOf(chatId) {
     return this.chats.get(chatId)?.sessionId
   }
+}
+
+/** 判断错误是不是「会话已从 SessionStore 上卸载」——这类错误可以用重建 agent 自愈。
+ * @param error - 捕获到的错误。
+ * @returns 是否属于会话被卸载的失败。 */
+export function isDetachedSessionError(error) {
+  const message = String(error?.message ?? error)
+  return message.includes('cannot append outside a SessionStore')
+    || message.includes('not attached to a store')
 }
 
 /** 拼合一条助手消息里的文本块。
