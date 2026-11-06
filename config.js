@@ -19,7 +19,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
 
 /** The DSH home, honoring `$DSH_HOME` then `~/.dsh`. */
 export function dshHome() {
@@ -293,10 +293,12 @@ export function normalizeConfig(raw) {
     if (String(value[def.field] ?? '').trim() === '') value[def.field] = DEFAULTS[def.field]
   }
 
-  // A channel prompt still equal to the old shipped default is upgraded to the
-  // new one, whose reply sentence is a `{replyMode}` placeholder. An operator's
-  // edited prompt is never touched.
-  if (value.channelPrompt === LEGACY_CHANNEL_PROMPT) value.channelPrompt = DEFAULT_CHANNEL_PROMPT
+  // A channel prompt still equal to an old shipped default is upgraded to the
+  // current one: v1 hardcoded the reply sentence, v2 had `{replyMode}` but no
+  // `{admin}`. An operator's edited prompt is never touched.
+  if (value.channelPrompt === LEGACY_CHANNEL_PROMPT || value.channelPrompt === LEGACY_CHANNEL_PROMPT_V2) {
+    value.channelPrompt = DEFAULT_CHANNEL_PROMPT
+  }
 
   const rawPrefix = String(value.sessionPrefix ?? '').trim()
   if (/^[a-z][a-z0-9-]*$/.test(rawPrefix)) {

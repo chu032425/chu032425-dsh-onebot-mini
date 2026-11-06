@@ -280,7 +280,7 @@ const dirPath = await safeUnlink('/tmp')
 t('the tmp root itself is refused', dirPath.ok === false)
 
 // --- the editable channel prompt
-import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, replyModeParagraph, renderPrompt, PROMPT_PLACEHOLDERS, PROMPT_DEFS, renderToolCallPrompt } from '../prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, replyModeParagraph, adminParagraph, renderPrompt, PROMPT_PLACEHOLDERS, PROMPT_DEFS, renderToolCallPrompt } from '../prompt.js'
 t('the default prompt documents its placeholders', PROMPT_PLACEHOLDERS.every((p) => DEFAULT_CHANNEL_PROMPT.includes(p)))
 t('renderPrompt fills a placeholder', renderPrompt('x {actions} y', { actions: 'Z' }).includes('x Z y'))
 t('renderPrompt drops an empty placeholder line', !renderPrompt('a\n{media}\nb', { media: '' }).includes('{media}'))
@@ -293,7 +293,14 @@ t('renderPrompt fills the replyMode line', renderPrompt(DEFAULT_CHANNEL_PROMPT, 
 t('the default build prompts streaming', buildPlatformPrompt(DEFAULTS).includes('实时发出'))
 t('an explicit final mode prompts one message', buildPlatformPrompt({ ...DEFAULTS, replyMode: 'final' }).includes('只产生一条'))
 t('the old shipped prompt is migrated to the new placeholder', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
+t('the replyMode-only prompt is migrated too', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT_V2 }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
 t('an edited prompt is not migrated', normalizeConfig({ channelPrompt: LEGACY_CHANNEL_PROMPT + ' (edited)' }).value.channelPrompt.endsWith('(edited)'))
+// the administrator identity is injected into the model prompt
+t('the default channel prompt carries the admin placeholder', DEFAULT_CHANNEL_PROMPT.includes('{admin}'))
+t('no admin paragraph when unset', adminParagraph('') === '')
+t('the admin paragraph names the admin QQ', adminParagraph('12345').includes('12345') && adminParagraph('12345').includes('优先'))
+t('the build injects the admin QQ', buildPlatformPrompt({ ...DEFAULTS, adminUserId: '12345' }).includes('管理员是 QQ 12345'))
+t('no admin line without an administrator', !buildPlatformPrompt(DEFAULTS).includes('管理员是 QQ'))
 t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
 t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
 t('the prompt registry covers channel, inbound, both tools and the interject judge', PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,inboundPrompt,toolCallPrompt,toolMediaPrompt,interjectPrompt')

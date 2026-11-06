@@ -18,7 +18,7 @@
 
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, GROUP_LABELS } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, DEFAULT_TOOL_MEDIA_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
 import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes } from './inbound.js'
 
 /** Non-alphanumerics become `-` so the id stays filesystem-safe. */
@@ -1292,6 +1292,7 @@ export function buildPlatformPrompt(config) {
   const allow = computeAllowlist(config)
 
   const replyMode = replyModeParagraph(config?.replyMode)
+  const admin = adminParagraph(config?.adminUserId)
   const senderPrefix = config?.senderPrefix ? senderPrefixParagraph() : ''
   const inbound = config?.inboundMedia === false
     ? ''
@@ -1325,5 +1326,5 @@ export function buildPlatformPrompt(config) {
     actions = lines.join('\n')
   }
 
-  return renderPrompt(template, { replyMode, senderPrefix, media, tools, actions, inbound })
+  return renderPrompt(template, { replyMode, admin, senderPrefix, media, tools, actions, inbound })
 }

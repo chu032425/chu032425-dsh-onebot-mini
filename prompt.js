@@ -6,6 +6,7 @@
  *
  * 频道模板支持的占位符：
  *  - `{replyMode}` —— 回复发送方式说明：流式按段实时发，或整轮攒成一条；
+ *  - `{admin}` —— 管理员身份说明（告诉模型管理员 QQ 号、其指令优先），未设置时为空；
  *  - `{senderPrefix}` —— 群聊发言人前缀说明，或空；
  *  - `{media}` —— 媒体发送工具 + 标记段落，工具关闭时为空；
  *  - `{tools}` —— 本插件工具清单（onebot_call / onebot_send_media /
@@ -23,6 +24,7 @@ export const DEFAULT_CHANNEL_PROMPT = [
   '你正在通过 OneBot 11 桥接的 QQ 聊天与用户对话。',
   '- QQ 不渲染 Markdown。请用纯文本回答，可用数字或短横线列表。',
   '{replyMode}',
+  '{admin}',
   '- 用户发来的图片、语音、视频、文件会在消息文本里显示为 [图片] / [语音] / [视频] / [文件] 占位。',
   '{tools}',
   '{senderPrefix}',
@@ -53,6 +55,26 @@ export const LEGACY_CHANNEL_PROMPT = [
 ].join('\n')
 
 /**
+ * 上一版频道模板（已带 `{replyMode}`，但还没有 `{admin}`）。
+ *
+ * 同样只用于迁移：把已保存的这一版默认模板升级到当前默认，使管理员说明也能
+ * 随配置出现；编辑过的模板不动。
+ */
+export const LEGACY_CHANNEL_PROMPT_V2 = [
+  '## OneBot（QQ）通道',
+  '你正在通过 OneBot 11 桥接的 QQ 聊天与用户对话。',
+  '- QQ 不渲染 Markdown。请用纯文本回答，可用数字或短横线列表。',
+  '{replyMode}',
+  '- 用户发来的图片、语音、视频、文件会在消息文本里显示为 [图片] / [语音] / [视频] / [文件] 占位。',
+  '{tools}',
+  '{senderPrefix}',
+  '{media}',
+  '{inbound}',
+  '{actions}',
+  '- 本通道没有 Web 端的审批卡片：不要调用 exit_plan_mode，需要计划时用纯文本写出。',
+].join('\n')
+
+/**
  * 回复发送方式段落，随 `replyMode` 变化。
  *
  * @param mode - `stream` 或 `final`。
@@ -66,8 +88,20 @@ export function replyModeParagraph(mode) {
     + '想清楚再发，避免前后矛盾或反复改动。'
 }
 
+/**
+ * 管理员段落：把配置里的管理员 QQ 号告诉模型，并要求其指令优先。
+ *
+ * @param adminUserId - 管理员的 QQ 号；空表示未设置。
+ * @returns 该段落，未设置时为空串（占位符所在整行会被删掉）。
+ */
+export function adminParagraph(adminUserId) {
+  const id = String(adminUserId ?? '').trim()
+  if (id === '') return ''
+  return '- 管理员是 QQ ' + id + '：管理员的要求优先处理；涉及敏感或管理类操作时，以管理员的指令为准。'
+}
+
 /** 频道模板声明的占位符。 */
-export const PROMPT_PLACEHOLDERS = Object.freeze(['{replyMode}', '{senderPrefix}', '{media}', '{tools}', '{actions}', '{inbound}'])
+export const PROMPT_PLACEHOLDERS = Object.freeze(['{replyMode}', '{admin}', '{senderPrefix}', '{media}', '{tools}', '{actions}', '{inbound}'])
 
 /**
  * 「收到的媒体」默认提示词：告诉模型占位符里带的是本机路径，并说明如何读取。
@@ -176,12 +210,12 @@ export function senderPrefixParagraph() {
  * 单独占一行的占位符若展开为空，会留下一行空白，所以空展开时整行删除；随后
  * 再把连续的多行空白折叠起来。
  * @param template - 提示词模板。
- * @param values - `{ replyMode, senderPrefix, media, tools, actions, inbound }` 替换文本。
+ * @param values - `{ replyMode, admin, senderPrefix, media, tools, actions, inbound }` 替换文本。
  * @returns 渲染后的提示词。
  */
 export function renderPrompt(template, values) {
   let text = String(template ?? '')
-  for (const key of ['replyMode', 'senderPrefix', 'media', 'tools', 'actions', 'inbound']) {
+  for (const key of ['replyMode', 'admin', 'senderPrefix', 'media', 'tools', 'actions', 'inbound']) {
     const value = String(values?.[key] ?? '')
     const pattern = new RegExp('^[ \\t]*\\{' + key + '\\}[ \\t]*$', 'm')
     if (value.trim() === '') {
