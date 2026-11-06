@@ -1,17 +1,15 @@
 /**
- * The plugin's own configuration store.
+ * 插件自己的配置存储。
  *
- * Deliberately not a Loader `config:` block. Two reasons:
+ * 刻意不用 Loader 的 `config:` 块，原因有两条：
  *
- *  1. A save must reconnect the WebSocket, not restart the plugin fiber — a
- *     fiber restart tears down in-flight turns and every chat's agent mapping.
- *  2. No dependency on a schema library, so the package installs identically
- *     from a git URL and as a `link:` to a local checkout.
+ *  1. 保存设置只需重连 WebSocket，不能重启插件 fiber——fiber 一重启，正在跑的
+ *     回合和每个会话的 agent 映射都会被打断。
+ *  2. 不依赖任何 schema 库，所以从 git 安装与以 `link:` 指向本地检出，装出来的
+ *     行为完全一致。
  *
- * The file lives beside the profile that mounted the plugin, so several
- * profiles on one machine keep independent settings. Writes are atomic
- * (temp file + rename) and a corrupt file degrades to defaults instead of
- * failing the mount.
+ * 文件放在挂载本插件的那个 profile 旁边，因此一台机器上的多个 profile 各自独立。
+ * 写入是原子的（临时文件 + rename）；文件损坏时退回默认值，而不是让挂载失败。
  */
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -19,20 +17,19 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { TOOL_GROUPS, isKnownAction } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_INTERJECT_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
+import { DEFAULT_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT, LEGACY_CHANNEL_PROMPT_V2, DEFAULT_REPLY_MODE_STREAM_PROMPT, DEFAULT_REPLY_MODE_FINAL_PROMPT, DEFAULT_ADMIN_PROMPT, DEFAULT_SENDER_PREFIX_PROMPT, DEFAULT_MEDIA_PROMPT, DEFAULT_TOOLS_PROMPT, DEFAULT_TOOL_CALL_PROMPT, DEFAULT_INBOUND_PROMPT, PROMPT_DEFS } from './prompt.js'
 
-/** The DSH home, honoring `$DSH_HOME` then `~/.dsh`. */
+/** DSH 主目录：先看 `$DSH_HOME`，再看 `~/.dsh`。 */
 export function dshHome() {
   const env = typeof process.env.DSH_HOME === 'string' ? process.env.DSH_HOME.trim() : ''
   return env !== '' ? env : join(homedir(), '.dsh')
 }
 
 /**
- * The file this plugin persists its settings in.
+ * 本插件持久化设置的文件。
  *
- * The profile name comes from `$DSH_PROFILE` (set by every profile-launched
- * Harness shell); without it the `web` profile is assumed, which is the one the
- * Web GUI runs.
+ * profile 名取自 `$DSH_PROFILE`（由每个 profile 启动的 Harness 外壳设置）；
+ * 没有这个变量时按 `web` 处理，也就是 Web 界面用的那个。
  */
 export function configPath() {
   const profile = typeof process.env.DSH_PROFILE === 'string' && process.env.DSH_PROFILE.trim() !== ''
@@ -41,12 +38,12 @@ export function configPath() {
   return join(dshHome(), 'profiles', profile, 'onebot-mini.json')
 }
 
-/** Where the JSONL log sink writes, beside the config file. */
+/** JSONL 日志落盘的位置，紧挨着配置文件。 */
 export function logPath() {
   return configPath().replace(/onebot-mini\.json$/, 'onebot-mini.log.jsonl')
 }
 
-/** Every accepted field with its default. Single source of truth. */
+/** 每个可接受的字段及其默认值，唯一权威来源。 */
 export const DEFAULTS = Object.freeze({
   mode: 'reverse',
   host: '127.0.0.1',
@@ -59,8 +56,8 @@ export const DEFAULTS = Object.freeze({
   denyFrom: [],
   allowGroups: [],
   denyGroups: [],
-  // The one account treated as the bot's administrator: a QQ number picked from
-  // the friend list on the Access page. Empty means no administrator is set.
+  // 唯一的机器人管理员账号：在「访问控制」页从好友列表里挑一个 QQ 号。
+  // 留空表示没设管理员。
   adminUserId: '',
   workspacePath: '',
   agentPreset: '',
@@ -68,42 +65,35 @@ export const DEFAULTS = Object.freeze({
   sessionPrefix: 'onebot',
   sessionPermission: '',
   agentModel: '',
-  // Pre-reply context compaction: when the last measured pressure (used tokens /
-  // context window) reaches this ratio, compact the session before delivering the
-  // new message. 0 disables the pre-reply check (the harness's own auto-compaction
-  // still runs); values above 1 are read as a percentage (80 → 0.8).
+  // 回答前的上下文压缩：当最近一次测得的占用（已用 token / 上下文窗口）达到这个
+  // 比例时，先压缩会话再投递新消息。0 关闭这条预检查（Harness 自带的自动压缩
+  // 仍然有效）；大于 1 的值按百分比理解（80 → 0.8）。
   compactRatio: 0.8,
   onebotToolEnabled: true,
   onebotToolDisabled: [],
-  // Per-action prompt overrides for the Tools page, keyed by action name. Only
-  // actions an operator actually edited are stored; a missing or blank entry
-  // means "use the built-in prompt from actiondocs.js". Kept out of the Settings
-  // page on purpose: it is edited from the Tools page.
+  // 「工具」页的逐动作提示词覆盖，按动作名索引。只保存运营者真正改过的动作；
+  // 缺失或留空表示「用 actiondocs.js 里的内置说明」。刻意不出现在设置页：
+  // 它在「工具」页里改。
   actionPrompts: {},
   titleEqualsId: true,
   logCapacity: 500,
   logMessagePreview: true,
   logToFile: true,
   sendTimeoutMs: 30000,
-  // One reply-behaviour switch: may a message interrupt a running answer?
-  // Messages never wait for a quiet window any more.
+  // 回复行为只剩这一个开关：新消息能否打断正在进行的回答。消息不再等什么安静
+  // 窗口。
   privateAutoInterject: true,
-  // How the assistant's answer reaches the chat:
-  //  - stream (default): send each assistant message the moment it appears;
-  //  - final: buffer every text block and send one QQ message when the turn ends
-  //    (a multi-step turn does not spam the chat).
+  // 助手的回答怎么到达聊天：
+  //  - stream（默认）：每产生一条助手消息就立刻发出去；
+  //  - final：把每个文本块攒起来，回合结束时发一条 QQ 消息（多步回合不会刷屏）。
   replyMode: 'stream',
-  // Legacy keys kept only so an older config file still loads.
-  debounceMs: 0,
-  debounceMaxMs: 0,
-  autoInterject: true,
   deleteSentMedia: true,
-  // Incoming media: download image/voice/video/file segments to a local inbox so
-  // the model can actually read them, and cap one file's size.
+  // 收到的媒体：把图片/语音/视频/文件段下载到本地收件目录，让模型真能读到；
+  // 同时限制单个文件的大小。
   inboundMedia: true,
   inboundMediaMaxMb: 20,
-  // Delete the downloaded incoming file once the turn that parsed it has ended,
-  // the mirror of `deleteSentMedia` for outgoing media.
+  // 解析过这份文件的那一轮结束后就删掉它，是「发送后删除源文件」在入站侧的对应
+  // 开关。
   deleteInboundMedia: true,
   channelPrompt: DEFAULT_CHANNEL_PROMPT,
   replyModeStreamPrompt: DEFAULT_REPLY_MODE_STREAM_PROMPT,
@@ -114,13 +104,12 @@ export const DEFAULTS = Object.freeze({
   toolsPrompt: DEFAULT_TOOLS_PROMPT,
   inboundPrompt: DEFAULT_INBOUND_PROMPT,
   toolCallPrompt: DEFAULT_TOOL_CALL_PROMPT,
-  interjectPrompt: DEFAULT_INTERJECT_PROMPT,
   imageCacheMaxKb: 1024,
   imageCacheTotalMb: 100,
   imageShowMaxMb: 32,
 })
 
-/** Field kinds the config page renders. */
+/** 设置页要渲染的字段类型。 */
 export const FIELD_KINDS = Object.freeze({
   mode: 'enum',
   host: 'string',
@@ -162,18 +151,14 @@ export const FIELD_KINDS = Object.freeze({
   toolsPrompt: 'text',
   inboundPrompt: 'text',
   toolCallPrompt: 'text',
-  interjectPrompt: 'text',
   privateAutoInterject: 'boolean',
   replyMode: 'replyMode',
-  debounceMs: 'number',
-  debounceMaxMs: 'number',
-  autoInterject: 'boolean',
   imageCacheMaxKb: 'number',
   imageCacheTotalMb: 'number',
   imageShowMaxMb: 'number',
 })
 
-/** Field order and grouping for the config page. */
+/** 设置页的字段顺序与分组。 */
 export const FIELD_GROUPS = Object.freeze([
   { id: 'connection', fields: ['mode', 'host', 'port', 'url', 'accessToken', 'botQQ'] },
   { id: 'access', fields: ['requireMention'] },
@@ -185,11 +170,10 @@ export const FIELD_GROUPS = Object.freeze([
 ])
 
 /**
- * Fields that only apply to one connection mode.
+ * 只对某一种连接模式有效的字段。
  *
- * The config page hides a field whose mode is not the current one, so a reverse
- * setup never shows a "gateway URL" box it ignores and a forward setup never
- * shows a "listen address/port" it never binds.
+ * 设置页会藏起与当前模式无关的字段：反向配置不该看到它不用的「网关地址」输入框，
+ * 正向配置也不该看到它根本不监听的地址与端口。
  */
 export const MODE_FIELDS = Object.freeze({
   host: 'reverse',
@@ -197,14 +181,14 @@ export const MODE_FIELDS = Object.freeze({
   url: 'forward',
 })
 
-/** Fields that must never leave the Host in the clear. */
+/** 绝不能以明文离开宿主的字段。 */
 const SECRET_FIELDS = new Set(['accessToken'])
 
 /**
- * Coerce one raw value to its declared kind, falling back to the default.
- * @param field - field name.
- * @param raw - candidate value.
- * @returns the coerced value.
+ * 把一个原始值按它声明的类型规整，不合规就回落默认值。
+ * @param field - 字段名。
+ * @param raw - 候选值。
+ * @returns 规整后的值。
  */
 function coerce(field, raw) {
   const kind = FIELD_KINDS[field]
@@ -238,9 +222,25 @@ function coerce(field, raw) {
 }
 
 /**
- * Validate one complete candidate config.
- * @param raw - an object, possibly partial or hostile.
- * @returns `{ value, problems }`; `value` is always complete.
+ * 把一个整数字段夹进区间，越界就记一条问题并回落默认值。
+ * @param value - 正在校验的配置对象，原地修改。
+ * @param problems - 问题清单，原地追加。
+ * @param field - 字段名。
+ * @param min - 下界（含）。
+ * @param max - 上界（含）。
+ */
+function range(value, problems, field, min, max) {
+  value[field] = Math.trunc(value[field])
+  if (value[field] < min || value[field] > max) {
+    problems.push(field + ' must be ' + min + '-' + max)
+    value[field] = DEFAULTS[field]
+  }
+}
+
+/**
+ * 校验一份完整的候选配置。
+ * @param raw - 一个对象，可能只给了一部分，也可能是恶意输入。
+ * @returns `{ value, problems }`；`value` 永远是完整的。
  */
 export function normalizeConfig(raw) {
   const source = raw !== null && typeof raw === 'object' ? raw : {}
@@ -250,18 +250,10 @@ export function normalizeConfig(raw) {
     value[field] = coerce(field, source[field])
   }
 
-  value.port = Math.trunc(value.port)
-  if (value.port < 1 || value.port > 65535) {
-    problems.push('port must be 1-65535')
-    value.port = DEFAULTS.port
-  }
-  value.sendTimeoutMs = Math.trunc(value.sendTimeoutMs)
-  if (value.sendTimeoutMs < 1000 || value.sendTimeoutMs > 600000) {
-    problems.push('sendTimeoutMs must be 1000-600000')
-    value.sendTimeoutMs = DEFAULTS.sendTimeoutMs
-  }
-  // Context-compaction ratio: accept 0-1, or a percentage 1-100 (80 → 0.8).
-  // 0 disables the pre-reply check.
+  range(value, problems, 'port', 1, 65535)
+  range(value, problems, 'sendTimeoutMs', 1000, 600000)
+  // 上下文压缩比例：接受 0-1，也接受 1-100 的百分比（80 → 0.8）。
+  // 0 关闭这条预检查。
   let compactRatio = Number(value.compactRatio)
   if (compactRatio > 1 && compactRatio <= 100) compactRatio = compactRatio / 100
   if (!Number.isFinite(compactRatio) || compactRatio < 0 || compactRatio > 1) {
@@ -269,58 +261,33 @@ export function normalizeConfig(raw) {
     compactRatio = DEFAULTS.compactRatio
   }
   value.compactRatio = Math.round(compactRatio * 1000) / 1000
-  value.imageCacheMaxKb = Math.trunc(value.imageCacheMaxKb)
-  if (value.imageCacheMaxKb < 64 || value.imageCacheMaxKb > 20480) {
-    problems.push('imageCacheMaxKb must be 64-20480')
-    value.imageCacheMaxKb = DEFAULTS.imageCacheMaxKb
-  }
-  value.imageCacheTotalMb = Math.trunc(value.imageCacheTotalMb)
-  if (value.imageCacheTotalMb < 8 || value.imageCacheTotalMb > 4096) {
-    problems.push('imageCacheTotalMb must be 8-4096')
-    value.imageCacheTotalMb = DEFAULTS.imageCacheTotalMb
-  }
-  value.imageShowMaxMb = Math.trunc(value.imageShowMaxMb)
-  if (value.imageShowMaxMb < 1 || value.imageShowMaxMb > 512) {
-    problems.push('imageShowMaxMb must be 1-512')
-    value.imageShowMaxMb = DEFAULTS.imageShowMaxMb
-  }
-  value.inboundMediaMaxMb = Math.trunc(value.inboundMediaMaxMb)
-  if (value.inboundMediaMaxMb < 1 || value.inboundMediaMaxMb > 512) {
-    problems.push('inboundMediaMaxMb must be 1-512')
-    value.inboundMediaMaxMb = DEFAULTS.inboundMediaMaxMb
-  }
-  value.logCapacity = Math.trunc(value.logCapacity)
-  if (value.logCapacity < 50 || value.logCapacity > 5000) {
-    problems.push('logCapacity must be 50-5000')
-    value.logCapacity = DEFAULTS.logCapacity
-  }
-  // The tool allowlist is stored as the set of *disabled* actions, so an action
-  // added to the catalog by a later release is on by default for existing
-  // installs. Unknown names and duplicates are dropped so a hand-edited file
-  // cannot smuggle junk into the config.
+  range(value, problems, 'imageCacheMaxKb', 64, 20480)
+  range(value, problems, 'imageCacheTotalMb', 8, 4096)
+  range(value, problems, 'imageShowMaxMb', 1, 512)
+  range(value, problems, 'inboundMediaMaxMb', 1, 512)
+  range(value, problems, 'logCapacity', 50, 5000)
+  // 工具白名单存的是「被禁用」的动作集合，这样以后版本新增的动作对老配置默认就是
+  // 启用的。未知名字与重复项会被丢掉，手改过的文件因此塞不进垃圾数据。
   const rawDisabled = Array.isArray(value.onebotToolDisabled) ? value.onebotToolDisabled : []
   value.onebotToolDisabled = [...new Set(rawDisabled.filter((action) => isKnownAction(action)))]
 
-  // The administrator is one QQ number: trim it and drop anything non-numeric so
-  // a stray space or a pasted nickname cannot become a bogus id.
+  // 管理员是一个 QQ 号：去掉首尾空白，并丢弃非数字内容，免得一个多余空格或粘进来
+  // 的昵称变成一条假 id。
   const rawAdmin = String(value.adminUserId ?? '').trim()
   value.adminUserId = /^\d*$/.test(rawAdmin) ? rawAdmin : ''
 
-  // The session prefix becomes part of a filesystem-backed session id, so it is
-  // flattened to the same safe alphabet the chat body already uses. A value that
-  // flattens to nothing usable (CJK only, punctuation only) falls back to the
-  // default instead of producing a dangling '-' prefix, and says so.
+  // 会话前缀会成为文件系统里会话 id 的一部分，所以压平到与聊天 id 同一套安全字符
+  // 集。压平后什么都不剩的值（纯中文、纯标点）退回默认，而不是留下一个孤零零的
+  // `-` 前缀，并且会明确报出来。
 
-  // An emptied prompt would leave the model with no guidance, so a blank value
-  // silently returns to the shipped default. Driven by the same registry the
-  // Prompt page renders, so a newly registered prompt gets the same treatment.
+  // 提示词被清空会让模型失去指引，所以空值静默回到出厂默认。这里遍历的正是「提示词」
+  // 页所用的那张注册表，新登记的提示词自动获得同样的处理。
   for (const def of PROMPT_DEFS) {
     if (String(value[def.field] ?? '').trim() === '') value[def.field] = DEFAULTS[def.field]
   }
 
-  // A channel prompt still equal to an old shipped default is upgraded to the
-  // current one: v1 hardcoded the reply sentence, v2 had `{replyMode}` but no
-  // `{admin}`. An operator's edited prompt is never touched.
+  // 仍等于旧版出厂默认的频道提示词会升级到当前版本：v1 把回复那句写死了，v2 有了
+  // `{replyMode}` 但还没有 `{admin}`。运营者改过的提示词绝不动。
   if (value.channelPrompt === LEGACY_CHANNEL_PROMPT || value.channelPrompt === LEGACY_CHANNEL_PROMPT_V2) {
     value.channelPrompt = DEFAULT_CHANNEL_PROMPT
   }
@@ -329,9 +296,8 @@ export function normalizeConfig(raw) {
   if (/^[a-z][a-z0-9-]*$/.test(rawPrefix)) {
     value.sessionPrefix = rawPrefix
   } else {
-    // Reject rather than salvage: silently turning "我的QQ" into "QQ" would hide
-    // that the prefix never took effect. Lowercase-only keeps session ids
-    // predictable to type in URLs and searches.
+    // 宁可拒绝也不打补丁：把「我的QQ」悄悄变成「QQ」会掩盖前缀根本没生效这件事。
+    // 只允许小写，是为了会话 id 在地址栏和搜索框里都保持可预期的样子。
     if (rawPrefix !== '') {
       problems.push('sessionPrefix must start with a lowercase letter and contain only lowercase letters, digits and hyphens; using "' + DEFAULTS.sessionPrefix + '"')
     }
@@ -357,14 +323,14 @@ export function normalizeConfig(raw) {
 }
 
 /**
- * The durable config store for one profile.
+ * 一个 profile 的持久化配置存储。
  *
- * `read()` is synchronous on purpose: the plugin mount needs the settings
- * before it can build the connection, and a 4 KiB JSON file is cheap.
+ * `read()` 故意做成同步的：插件挂载时必须在建连接之前就拿到设置，而读一个
+ * 几 KB 的 JSON 文件本来就很便宜。
  */
 export class ConfigStore {
   /**
-   * @param path - absolute path of the JSON file.
+   * @param path - JSON 文件的绝对路径。
    */
   constructor(path) {
     this.path = path
@@ -372,8 +338,8 @@ export class ConfigStore {
   }
 
   /**
-   * Read the effective config, caching after the first successful read.
-   * @returns the complete config object.
+   * 读出生效中的配置，第一次读成功后缓存起来。
+   * @returns 完整的配置对象。
    */
   read() {
     if (this.cache !== undefined) return this.cache
@@ -389,9 +355,9 @@ export class ConfigStore {
   }
 
   /**
-   * Merge a patch into the stored config and persist it.
-   * @param patch - partial candidate fields.
-   * @returns `{ ok, problems, value }`; `value` is the new effective config.
+   * 把一份补丁合进已存的配置并落盘。
+   * @param patch - 只给出部分字段的候选值。
+   * @returns `{ ok, problems, value }`；`value` 是新的生效配置。
    */
   async write(patch) {
     const current = this.read()
@@ -407,14 +373,12 @@ export class ConfigStore {
   }
 
   /**
-   * The config as the browser sees it.
+   * 浏览器看到的那份配置。
    *
-   * The access token is returned in full: this page is the only place the token
-   * is edited, an operator debugging a gateway mismatch needs to compare the
-   * exact string, and the request is already authenticated by the Host's own
-   * browser session. `secretFields` still tells the page which inputs to render
-   * as password-style controls.
-   * @returns `{ config, secretFields, groups, kinds, defaults }`.
+   * 访问令牌整串返回：这个页面是唯一编辑它的地方，排查令牌对不上时需要逐字比对，
+   * 而请求本身已经由宿主的浏览器会话鉴权过。`secretFields` 仍然告诉页面哪些输入
+   * 框要渲染成密码样式。
+   * @returns `{ config, secretFields, groups, kinds, defaults }`。
    */
   snapshot() {
     const value = this.read()

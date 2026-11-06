@@ -1,39 +1,27 @@
 /**
- * Host half of dsh-onebot-mini.
+ * dsh-onebot-mini 的宿主侧。
  *
- * Responsibilities:
- *  1. Read the plugin's own settings file (see config.js for why it is not a
- *     Loader `config:` block).
- *  2. Own the OneBot transport and the chat ↔ session bridge.
- *  3. Serve the JSON routes the browser half uses for the config page and the
- *     log page.
+ * 三件事：
+ *  1. 读插件自己的设置文件（为什么不用 Loader 的 `config:` 块，见 config.js）。
+ *  2. 管住 OneBot 传输层，以及「聊天 ↔ 会话」的桥。
+ *  3. 提供浏览器侧要用的 JSON 路由（设置页与日志页）。
  *
- * Only Node builtins and `@deepseek-ai/*` peers are imported, so the package
- * works both as a git install and as a `link:` to a local checkout.
+ * 只 import Node 内置模块和相对路径文件，所以无论是从 git 安装还是以 `link:`
+ * 指向本地检出，都能正常工作。
  */
 
 import { ChatBridge } from './bridge.js'
 import { OneBotConnection } from './connection.js'
 import { ConfigStore, configPath, logPath } from './config.js'
-import { LogBus } from './logbus.js'
+import { LogBus, errorText } from './logbus.js'
 import { registerRoutes } from './api.js'
 
-/** Services this plugin uses. */
+/** 本插件用到的宿主服务。 */
 export const inject = ['agents', 'systemPrompt', 'tools', 'webServer', 'connection']
 
-/** Human-readable error text for logs. */
-function describeError(error) {
-  return error instanceof Error ? error.message : String(error)
-}
-
-/** The status object reported before any transport exists. */
-function offlineStatus(mode) {
-  return { state: 'offline', mode, address: '', selfId: '', onlineSince: 0, pendingActions: 0, reconnectAttempt: 0 }
-}
-
 /**
- * Mount the plugin.
- * @param ctx - the plugin context.
+ * 挂载插件。
+ * @param ctx - 插件上下文。
  */
 export function apply(ctx) {
   const store = new ConfigStore(configPath())
@@ -48,22 +36,20 @@ export function apply(ctx) {
   ctx.effect(async () => {
     log.record('bridge', { note: 'plugin starting', configPath: store.path, mode: initial.mode })
 
-    /** The live transport, replaced on every config save. */
+    /** 当前生效的传输层，每次保存设置都会换一个。 */
     let connection
 
     /**
-     * Build and start one transport.
-     * @param config - the effective config.
-     * @returns the started connection.
+     * 建一个传输层并启动它。
+     * @param config - 生效中的配置。
+     * @returns 已启动的连接。
      */
     async function startTransport(config) {
       const next = new OneBotConnection({ config, log })
       next.onEvent = (frame) => {
         void bridge.handleInbound(frame)
       }
-      // Backfill the bot account from the live connection: an operator should not
-      // have to look it up, and a stored value that no longer matches the gateway
-      // would otherwise stay misleading.
+      // 从活连接回填机器人账号：不该让运营者自己去查，而存着对不上的旧号只会误导。
       next.onLearnSelfId = (learned) => {
         const current = store.read()
         if (String(current.botQQ ?? '') === learned) return
@@ -76,8 +62,7 @@ export function apply(ctx) {
     }
 
     /**
-     * A stable facade the bridge talks to, so a transport swap needs no
-     * re-wiring of the bridge or of any chat's agent.
+     * 给桥用的稳定外壳：换传输层时，桥和每个会话的 agent 都不用重新接线。
      */
     const transport = {
       get selfId() {
@@ -86,13 +71,12 @@ export function apply(ctx) {
       get state() {
         return connection?.state ?? 'offline'
       },
-      status: () => connection?.status() ?? offlineStatus(store.read().mode),
+      status: () => connection?.status() ?? { state: 'offline', mode: store.read().mode, address: '', selfId: '', onlineSince: 0, pendingActions: 0, reconnectAttempt: 0 },
       sendText: (chat, text) => {
         if (connection === undefined) throw new Error('transport is not running')
         return connection.sendText(chat, text)
       },
-      // The bridge builds a full segment list (text plus any media markers), so
-      // the facade must expose the segment-level send as well.
+      // 桥会自己拼完整的段列表（文字加媒体标记），所以外壳也要暴露段级发送。
       sendMessage: (chat, message) => {
         if (connection === undefined) throw new Error('transport is not running')
         return connection.sendMessage(chat, message)
@@ -103,9 +87,8 @@ export function apply(ctx) {
       },
     }
 
-    // Resolved on demand: the workspace registry initializes asynchronously, so
-    // a value captured at mount can still be undefined. Optional too — a bare
-    // composition has no workspace service and the plugin must still run.
+    // 按需取：工作区注册表是异步初始化的，挂载时抓到的值可能还是 undefined。
+    // 它本身也是可选的——精简组合里没有工作区服务，插件仍要能跑。
     const getWorkspaceRegistry = () => ctx.get('workspaceRegistry')
 
     const bridge = new ChatBridge({
@@ -118,15 +101,15 @@ export function apply(ctx) {
       getAgentPresets: () => ctx.get('agentPresets'),
       getPermissionPresets: () => ctx.get('permissionPresets'),
       getPlanMode: () => ctx.get('planMode'),
-      describeError,
+      errorText,
     })
     const disposeEvents = bridge.start()
 
     /**
-     * Swap the transport after a config save.
+     * 保存设置后换掉传输层。
      *
-     * The bridge and every chat's agent survive: only the link is rebuilt.
-     * @param config - the new effective config.
+     * 桥和每个会话的 agent 都活着，重建的只是那条链路。
+     * @param config - 新的生效配置。
      */
     async function applyConfig(config) {
       const previous = connection
@@ -139,12 +122,8 @@ export function apply(ctx) {
     }
 
     /**
-     * The workspaces a chat Session may be pinned to, for the settings picker.
-     * @returns `{ available, workspaces }`; a missing registry degrades quietly.
-     */
-    /**
-     * The agent presets a chat may run under, for the settings picker.
-     * @returns `{ available, presets }`; a missing registry degrades quietly.
+     * 一个会话可以挂靠哪些工作区，供设置页的下拉框使用。
+     * @returns `{ available, workspaces }`；服务缺失时安静降级。
      */
     async function listAgentPresets() {
       const registry = ctx.get('agentPresets')
@@ -174,9 +153,9 @@ export function apply(ctx) {
     }
 
     /**
-     * The provider/model pairs a chat may run on, for the settings picker.
-     * Values are `provider::model` so a model id containing a slash is preserved.
-     * @returns `{ available, models, defaultModel }`.
+     * 一个会话可以跑在哪些「提供方 / 模型」组合上，供设置页的下拉框使用。
+     * 取值写成 `provider::model`，这样模型 id 里带斜杠也不会被截断。
+     * @returns `{ available, models, defaultModel }`。
      */
     async function listModels() {
       const llm = ctx.get('llm')
@@ -217,8 +196,8 @@ export function apply(ctx) {
     }
 
     /**
-     * The permission presets a chat may run under.
-     * @returns `{ available, options, defaultPreset }`.
+     * 一个会话可以跑在哪些权限预设下。
+     * @returns `{ available, options, defaultPreset }`。
      */
     function listPermissionPresets() {
       const service = ctx.get('permissionPresets')
@@ -239,6 +218,10 @@ export function apply(ctx) {
       }
     }
 
+    /**
+     * 一个会话可以挂靠哪些工作区。
+     * @returns `{ available, workspaces }`。
+     */
     function listWorkspaces() {
       const registry = getWorkspaceRegistry()
       if (registry === undefined) return { available: false, workspaces: [] }
@@ -273,20 +256,18 @@ export function apply(ctx) {
     try {
       connection = await startTransport(initial)
     } catch (error) {
-      log.record('error', { note: 'initial transport start failed: ' + describeError(error) })
+      log.record('error', { note: 'initial transport start failed: ' + errorText(error) })
     }
-    // Register the tools once at the plugin scope before any agent exists: a
-    // scoped registration made inside a setup callback has to reach that agent's
-    // view, and a global one covers every agent created afterwards.
+    // 在任何 agent 出现之前，先在插件作用域注册一次工具：写在 setup 回调里的
+    // 注册必须传到那个 agent 的视野里，而全局注册能覆盖之后新建的每个 agent。
     try {
       await bridge.registerToolsFor(ctx, '')
     } catch (error) {
-      log.record('warn', { note: 'early tool registration failed: ' + describeError(error) })
+      log.record('warn', { note: 'early tool registration failed: ' + errorText(error) })
     }
     log.record('bridge', { note: 'plugin mounted', mode: initial.mode, state: connection?.state ?? 'offline' })
-    // Startup self-check: confirm the tools service is reachable from this ctx.
-    // Without it every agent silently lacks the OneBot tools, which shows up as
-    // the model inventing reasons it cannot send anything.
+    // 启动自检：确认从这个 ctx 摸得到工具服务。摸不到的话，每个 agent 都会
+    // 悄悄少掉 OneBot 工具，表现出来就是模型自己编一个「没权限发图」的理由。
     try {
       const toolsService = ctx.get('tools') ?? ctx.tools
       log.record('bridge', {
@@ -294,7 +275,7 @@ export function apply(ctx) {
         hasRegister: typeof toolsService?.register === 'function',
       })
     } catch (error) {
-      log.record('warn', { note: 'startup check failed: ' + describeError(error) })
+      log.record('warn', { note: 'startup check failed: ' + errorText(error) })
     }
 
     return async () => {
@@ -305,7 +286,7 @@ export function apply(ctx) {
       try {
         disposeEvents()
       } catch {
-        // Already disposed with the agent scope.
+        // 已经随 agent 作用域一起释放了。
       }
       await bridge.stop()
       disposeRoutes()

@@ -1,57 +1,50 @@
 /**
- * The OneBot actions the `onebot_call` tool is allowed to relay, grouped for
- * the tools page.
+ * `onebot_call` 工具可以转发的 OneBot 动作，按「工具」页的分组整理。
  *
- * `onebot_call` stays one generic escape hatch; this catalog only says which
- * actions an operator can switch on or off. The list is a whitelist: an action
- * that is not here, or that the operator turned off, is refused by the tool
- * instead of reaching the gateway.
+ * `onebot_call` 始终只是一个通用入口；这份目录只说明运营者能开关哪些动作。
+ * 它是白名单：不在这里的动作、或被运营者关掉的动作，会被工具直接拒绝，不会发到
+ * 网关。
  *
- * Coverage comes from NapCat's published API reference. Three families are
- * deliberately left out, because handing them to a model would leak secrets or
- * break the running bot:
+ * 覆盖范围来自 NapCat 公开的接口文档。有三类刻意不收，因为交给模型会泄露密钥
+ * 或弄坏运行中的机器人：
  *
- *  - credentials and keys: get_credentials, get_csrf_token, get_cookies,
- *    get_rkey, nc_get_rkey, get_rkey_server, get_clientkey;
- *  - self-destructive: set_restart, bot_exit, clean_cache,
- *    clean_stream_temp_file;
- *  - raw protocol: send_packet, nc_get_packet_status, and the streaming
- *    upload/download endpoints.
+ *  - 凭据与密钥：get_credentials、get_csrf_token、get_cookies、get_rkey、
+ *    nc_get_rkey、get_rkey_server、get_clientkey；
+ *  - 自毁操作：set_restart、bot_exit、clean_cache、clean_stream_temp_file；
+ *  - 原始协议：send_packet、nc_get_packet_status，以及流式上传/下载端点。
  *
- * Also omitted as niche or platform-specific: flash transfer and online files,
- * custom stickers, group sign-in, guild/channel, Ark share cards, inline
- * keyboard buttons, ocr_image (Windows only) and the AI-voice pair.
+ * 另外还有一批偏门或平台相关的也没收：闪传与在线文件、自定义表情、群打卡、
+ * 频道、Ark 分享卡片、内联键盘按钮、仅 Windows 可用的 ocr_image，以及那一对
+ * AI 语音动作。
  *
- * Trimmed further on the operator's request, so the tool surface stays small:
- * the whole group-album family, the Qzone permission pair, the custom online
- * status, everything in request handling except the two add-request handlers,
- * the per-chat read markers, the merged/one-message forwards, the extended
- * group query and recent contacts, bulk kick / group admin / group todo, and
- * the group-file upload, listing and folder-management set. They are gone from
- * the catalog, the docs and the prompt, not merely switched off.
+ * 按运营者要求又精简过一轮，好让工具面保持小：整个群相册家族、QQ 空间的两个
+ * 权限动作、自定义在线状态、请求处理里除两个加好友/加群之外的全部、各会话的
+ * 已读标记、合并与单条转发、扩展群查询与最近会话、批量踢人 / 群管理员 / 群待办，
+ * 以及群文件的上传、列表与文件夹管理一整组。它们是从目录、文档和提示词里一起
+ * 删掉的，不是仅仅关掉。
  *
- * Every entry carries its Chinese annotation inline, so the tools page shows
- * "禁言群成员 / set_group_ban" without a second dictionary to keep in sync.
+ * 每个条目自带中文注释，所以「工具」页直接显示「禁言群成员 / set_group_ban」，
+ * 不用再维护第二份词典。
  */
 
 import { ACTION_DOCS, actionPrompt } from './actiondocs.js'
 
 /**
- * One catalogued action.
+ * 一条被收录的动作。
  * @typedef {{ name: string, zh: string, en: string, standard: boolean, params: ReadonlyArray<object>, defaultPrompt: string }} ToolAction
  */
 
 /**
- * One operator-facing group of actions.
+ * 一组面向运营者的动作。
  * @typedef {{ id: string, actions: ToolAction[] }} ToolGroup
  */
 
 /**
- * Build one frozen action entry.
+ * 造一条冻结的动作条目。
  *
- * `params` and `defaultPrompt` come from `actiondocs.js`, so the Tools page and
- * the channel prompt describe an action the same way. `defaultPrompt` is the
- * built-in text an operator can override per action in the config.
+ * `params` 与 `defaultPrompt` 都来自 `actiondocs.js`，这样「工具」页和频道提示词
+ * 对同一个动作的描述永远一致。`defaultPrompt` 是内置文案，运营者可以在配置里
+ * 逐个动作覆盖它。
  */
 const a = (name, zh, en) => Object.freeze({
   name,
@@ -63,7 +56,7 @@ const a = (name, zh, en) => Object.freeze({
   defaultPrompt: actionPrompt(name, zh),
 })
 
-/** Chinese labels for each action group, used in the channel prompt. */
+/** 每个动作分组的中文标题，频道提示词里用。 */
 export const GROUP_LABELS = Object.freeze({
   local: '本地工具（插件自带）',
   message: '发送消息',
@@ -77,10 +70,9 @@ export const GROUP_LABELS = Object.freeze({
 })
 
 /**
- * The action names that belong to the OneBot 11 standard protocol
- * (https://onebot.dev / OneBot-11). Everything else in the catalog is an
- * implementation extension (go-cqhttp / NapCat), so the tools page can badge each
- * row as 「标准」or 「扩展」. Kept here as the single source of truth.
+ * 属于 OneBot 11 标准协议的动作名。目录里其余的都属于实现扩展
+ * （go-cqhttp / NapCat），「工具」页据此给每一行打「标准」或「扩展」徽章。
+ * 这里是唯一权威来源。
  */
 export const STANDARD_ACTIONS = Object.freeze(new Set([
   // 消息
@@ -99,13 +91,12 @@ export const STANDARD_ACTIONS = Object.freeze(new Set([
 ]))
 
 /**
- * Actions implemented inside this plugin instead of being relayed to the
- * gateway. They share the one `onebot_call` tool: the tool dispatches these
- * names to local handlers before falling back to the OneBot transport.
+ * 在本插件内部实现、不转发给网关的动作。它们共用同一个 `onebot_call` 工具：
+ * 工具先把这些名字派给本地处理器，剩下的才落到 OneBot 传输层。
  */
 export const LOCAL_ACTIONS = Object.freeze(new Set(['send_message', 'list_files']))
 
-/** The operator-facing grouping. Order is the order shown in the tools page. */
+/** 面向运营者的分组。这里的顺序就是「工具」页显示的顺序。 */
 export const TOOL_GROUPS = Object.freeze([
   Object.freeze({ id: 'local', actions: Object.freeze([
     a('send_message', '发送消息（文字 / 图片 / 语音 / 视频 / 文件；仅文字+图片可同条）', 'Send a message (text, image, voice, video, file; only text+image share one)'),
@@ -209,25 +200,25 @@ export const TOOL_GROUPS = Object.freeze([
   ]) }),
 ])
 
-/** Every known action name, flattened. */
+/** 全部已知动作名，压平成一维。 */
 export const ALL_ACTIONS = Object.freeze(TOOL_GROUPS.flatMap((group) => group.actions.map((action) => action.name)))
 
-/** Membership set for O(1) "is this a known action" checks. */
+/** 用于 O(1) 判断「是不是已知动作」的集合。 */
 const KNOWN = new Set(ALL_ACTIONS)
 
 /**
- * Whether a raw string is a known action.
- * @param action - candidate action name.
- * @returns true when the action is in the catalog.
+ * 判断一个原始字符串是不是已知动作。
+ * @param action - 候选动作名。
+ * @returns 在目录里则为 true。
  */
 export function isKnownAction(action) {
   return KNOWN.has(String(action))
 }
 
 /**
- * The Chinese annotation for one action.
- * @param action - action name.
- * @returns the annotation, or the action name itself when it is not catalogued.
+ * 一个动作的中文注释。
+ * @param action - 动作名。
+ * @returns 注释；没有收录时退回动作名本身。
  */
 export function actionLabel(action) {
   for (const group of TOOL_GROUPS) {
@@ -239,16 +230,14 @@ export function actionLabel(action) {
 }
 
 /**
- * Compute the actions a chat's agent may use, from one effective config.
+ * 从一份生效配置算出某个会话的 agent 能用哪些动作。
  *
- * Three outcomes:
- *  - the master switch is off  → `null`: the tool is not registered at all, so
- *    the model never sees it;
- *  - every action is off        → `null`: registering a tool that can do nothing
- *    only wastes the model's attention;
- *  - otherwise                  → a Set of allowed action names.
- * @param config - the effective config (any missing field means "enabled").
- * @returns a Set of allowed actions, or null to skip registration entirely.
+ * 三种结果：
+ *  - 总开关关闭 → `null`：工具根本不注册，模型看不到它；
+ *  - 一个动作都不剩 → `null`：注册一个什么都做不了的工具只是浪费模型的注意力；
+ *  - 其它情况 → 允许的动作名集合。
+ * @param config - 生效配置（字段缺失按「启用」处理）。
+ * @returns 允许的动作集合；返回 null 表示完全跳过注册。
  */
 export function computeAllowlist(config) {
   const source = config !== null && typeof config === 'object' ? config : {}
@@ -262,11 +251,10 @@ export function computeAllowlist(config) {
 }
 
 /**
- * The enabled actions grouped by their operator-facing category, for the
- * channel prompt. Only groups with at least one enabled action appear, so the
- * prompt never advertises something the tool would refuse.
- * @param allow - the allowed action set from `computeAllowlist`.
- * @returns an array of `{ id, actions }`, in catalog order.
+ * 按面向运营者的分类把已启用动作分组，供频道提示词使用。只出现至少有一个启用
+ * 动作的分组，提示词因此绝不会宣传一个工具会拒绝的动作。
+ * @param allow - `computeAllowlist` 给出的允许集合。
+ * @returns `{ id, actions }` 数组，按目录顺序。
  */
 export function enabledGroups(allow) {
   if (!(allow instanceof Set)) return []

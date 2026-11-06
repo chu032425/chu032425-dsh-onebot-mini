@@ -8,7 +8,7 @@ import { createServer } from 'node:http'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join as pathJoin } from 'node:path'
-import { cacheRoot } from '../imagecache.js'
+import { profileCacheRoot } from '../cachepaths.js'
 import { OneBotConnection } from '../connection.js'
 import { LogBus } from '../logbus.js'
 import { ChatBridge } from '../bridge.js'
@@ -404,7 +404,6 @@ bridge3.start()
 await bridge3.handleInbound(inbound({ user_id: 20002, message_id: 11 }))
 const borrowedChat = bridge3.chats.get('private:20002')
 t('live agent is reused', borrowedChat !== undefined && borrowedChat.agent === liveAgent)
-t('borrowed agent is not disposed by the plugin', borrowedChat.borrowed === true)
 t('reused agent receives the message', liveAgent.followups.length === 1)
 await bridge3.stop()
 t('stopping does not dispose a borrowed agent', liveAgent.session !== undefined)
@@ -887,7 +886,7 @@ try { fsDel.unlinkSync(keepFile) } catch {}
 // an image over the cache cap is streamed through, not refused: the route serves
 // the bytes with a "not cached" marker, and nothing is written to disk
 const { fetchIntoCache } = await import('../imagecache.js')
-const overflowDir = cacheRoot()
+const overflowDir = profileCacheRoot()
 const pathExists = (p) => existsSync(p)
 const overUrl = 'http://photonjmaz.photo.store.qq.com/psc?/V54JTqSk2zBNux1ERE9s2QDEH83fi638/TmEUgtj9EK6.7V8ajmQrED8MbnFmwsbc*6gEXsTsIPJg8Di0zJYeXtquAxNEsuSqxBrZ*bxHGNMiY27B4GLq4irnaWy8o3igYDoueOCuStc!/b&bo=XgZABl4GQAYWECA!'
 const overflow = await fetchIntoCache('987654', overUrl, { maxKb: 64, totalMb: 100 })
@@ -1093,7 +1092,7 @@ const steerCtx = {
     return undefined
   },
 }
-const bridgeSteer = new ChatBridge({ ctx: steerCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 0, autoInterject: true }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+const bridgeSteer = new ChatBridge({ ctx: steerCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', privateAutoInterject: true }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
 bridgeSteer.start()
 await bridgeSteer.handleInbound(inbound({ user_id: 41002, message_id: 420, message: [{ type: 'text', data: { text: '不对，停一下' } }] }))
 await wait(150)
@@ -1112,14 +1111,14 @@ const fallbackCtx = {
     return undefined
   },
 }
-const bridgeFallback = new ChatBridge({ ctx: fallbackCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 0, autoInterject: true }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+const bridgeFallback = new ChatBridge({ ctx: fallbackCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', privateAutoInterject: true }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
 bridgeFallback.start()
 await bridgeFallback.handleInbound(inbound({ user_id: 41003, message_id: 430 }))
 await wait(150)
 t('a broken judge queues a follow-up instead', fellBack.length === 1)
 await bridgeFallback.stop()
 
-// with autoInterject off, a running agent is never steered
+// 关掉自动插话后，正在回答的 agent 绝不会被插话
 const offQueued = []
 const offAgent = (id) => ({ session: { id }, status: 'running', steer() { throw new Error('should not steer') }, followup(m) { offQueued.push(m) } })
 const offCtx = {
@@ -1127,11 +1126,11 @@ const offCtx = {
   agents: { get: (id) => (id === sessionFor(41004) ? offAgent(id) : undefined) },
   get: () => undefined,
 }
-const bridgeNoSteer = new ChatBridge({ ctx: offCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', debounceMs: 0, autoInterject: false }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
+const bridgeNoSteer = new ChatBridge({ ctx: offCtx, config: { ...baseConfig, workspacePath: '/workspace/QQ', privateAutoInterject: false }, connection: flatTransport, log, getWorkspaceRegistry: () => workspaceRegistry, describeError: String })
 bridgeNoSteer.start()
 await bridgeNoSteer.handleInbound(inbound({ user_id: 41004, message_id: 440 }))
 await wait(100)
-t('autoInterject off queues instead of steering', offQueued.length === 1)
+t('自动插话关闭时改为排队', offQueued.length === 1)
 await bridgeNoSteer.stop()
 
 // ---------------------------------------------------------------- group debounce per speaker

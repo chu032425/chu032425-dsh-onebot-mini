@@ -1,44 +1,48 @@
 /**
- * The live WebSocket log ring.
+ * 在线 WebSocket 日志环。
  *
- * One process-wide instance per plugin mount. Every transport, protocol and
- * bridge decision records one entry here; the log page polls for entries newer
- * than its cursor. The bus never throws: a full ring drops its oldest entry and
- * a malformed field is stringified.
+ * 每次插件挂载一个进程内实例。传输、协议与桥接的每个决策都记一条，日志页按
+ * 游标拉取更新的条目。总线永不抛错：环满丢最旧一条，字段不可读则字符串化。
  *
- * An optional file sink appends the same redacted entries as JSONL, which is the
- * only way to diagnose a channel whose traffic arrives before anyone opens the
- * log page (a gateway reconnecting at boot, for example).
+ * 可选的落盘会把同样脱敏后的条目追加为 JSONL，这是诊断「页面打开之前就到达的
+ * 流量」（例如启动时网关正在重连）的唯一手段。
  */
 
 import { appendFile } from 'node:fs/promises'
 
-/** Entry kinds the log page knows how to label. */
-export const LOG_KINDS = [
-  'connect',
-  'disconnect',
-  'reconnect',
-  'send',
-  'recv',
-  'event',
-  'error',
-  'bridge',
-]
-
-/** Kinds that represent a failed or notable condition (rendered in warn color). */
-export const LOG_WARN_KINDS = new Set(['disconnect', 'error'])
-
 /**
- * Fields that must never reach the page or disk in the clear.
- * Matched case-insensitively against a key at any depth.
+ * 字段绝不能以明文进入页面或磁盘。
+ * 对任意深度的键做大小写不敏感匹配。
  */
 const SECRET_KEYS = new Set(['access_token', 'accesstoken', 'token', 'authorization', 'secret', 'password'])
 
+/** 容量下限与上限，构造与重配置共用一处。 */
+const CAPACITY_MIN = 50
+const CAPACITY_MAX = 5000
+
 /**
- * Replace every secret-looking value with a marker.
- * @param value - any JSON-ish value.
- * @param depth - recursion guard.
- * @returns a detached redacted copy.
+ * 把一个容量值夹到合法区间。
+ * @param value - 候选容量。
+ * @returns 合法容量；非法输入回落到默认 500。
+ */
+function clampCapacity(value) {
+  return Math.max(CAPACITY_MIN, Math.min(CAPACITY_MAX, Math.trunc(value) || 500))
+}
+
+/**
+ * 把任意异常压成一句可读文本。
+ * @param error - 抛出的东西，可能不是 Error。
+ * @returns 可读文本。
+ */
+export function errorText(error) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * 把所有像密钥的值替换成标记。
+ * @param value - 任意 JSON 值。
+ * @param depth - 递归护栏。
+ * @returns 一份脱钩的脱敏副本。
  */
 export function redact(value, depth = 0) {
   if (depth > 6) return '[depth]'
@@ -52,10 +56,10 @@ export function redact(value, depth = 0) {
 }
 
 /**
- * Bound one message preview so a long QQ message does not flood the ring.
- * @param text - raw text.
- * @param limit - maximum code points kept.
- * @returns the preview string.
+ * 截断一条消息预览，避免长文本刷爆日志环。
+ * @param text - 原始文本。
+ * @param limit - 保留的最大码点数。
+ * @returns 预览字符串。
  */
 export function preview(text, limit = 60) {
   const chars = Array.from(String(text ?? ''))
@@ -63,38 +67,38 @@ export function preview(text, limit = 60) {
   return chars.length > limit ? head + '…' : head
 }
 
-/** A bounded, cursor-addressable log of connection and protocol activity. */
+/** 有界、可按游标寻址的日志环。 */
 export class LogBus {
   /**
-   * @param options - `capacity` (entries kept) and `messagePreview` (whether
-   * message bodies contribute a text preview).
+   * @param options - `capacity`（保留条目数）与 `messagePreview`（消息体是否
+   *   贡献一段预览文本）。
    */
   constructor({ capacity = 500, messagePreview = true, file = '' } = {}) {
-    this.capacity = Math.max(50, Math.min(5000, Math.trunc(capacity) || 500))
+    this.capacity = clampCapacity(capacity)
     this.messagePreview = messagePreview !== false
     this.entries = []
     this.nextSeq = 1
-    /** Absolute JSONL path, or '' when file logging is off. */
+    /** 绝对 JSONL 路径；关闭落盘时为空串。 */
     this.file = typeof file === 'string' ? file : ''
-    /** Pending append chain so entries keep their order without blocking callers. */
+    /** 追加链：保证顺序，同时不阻塞调用方。 */
     this.writes = Promise.resolve()
   }
 
   /**
-   * Apply live page settings without dropping existing entries.
-   * @param options - `capacity`, `messagePreview`.
+   * 在线应用页面设置，不丢弃已有条目。
+   * @param options - `capacity`、`messagePreview`。
    */
   configure({ capacity, messagePreview } = {}) {
-    if (typeof capacity === 'number') this.capacity = Math.max(50, Math.min(5000, Math.trunc(capacity) || 500))
+    if (typeof capacity === 'number') this.capacity = clampCapacity(capacity)
     if (typeof messagePreview === 'boolean') this.messagePreview = messagePreview
     this.trim()
   }
 
   /**
-   * Append one entry.
-   * @param kind - one of `LOG_KINDS`.
-   * @param fields - additional JSON fields; secrets are redacted.
-   * @returns the stored entry.
+   * 追加一条记录。
+   * @param kind - 条目类别。
+   * @param fields - 附加 JSON 字段；其中的密钥会被脱敏。
+   * @returns 已存入的条目。
    */
   record(kind, fields = {}) {
     let safe
@@ -112,11 +116,10 @@ export class LogBus {
   }
 
   /**
-   * Append one entry to the file sink, if configured.
+   * 把一条记录追加进文件，若已配置。
    *
-   * Failures are swallowed on purpose: a read-only or full disk must not change
-   * how the channel behaves.
-   * @param entry - the entry already stored in the ring.
+   * 失败被刻意吞掉：磁盘只读或写满都不该改变通道的行为。
+   * @param entry - 已存入日志环的条目。
    */
   appendToFile(entry) {
     if (this.file === '') return
@@ -126,17 +129,17 @@ export class LogBus {
       .catch(() => undefined)
   }
 
-  /** Drop the oldest entries beyond the capacity. */
+  /** 丢弃超出容量的最旧条目。 */
   trim() {
     const excess = this.entries.length - this.capacity
     if (excess > 0) this.entries.splice(0, excess)
   }
 
   /**
-   * Read entries newer than a cursor.
-   * @param after - last seq the caller has seen (0 = from the oldest retained).
-   * @param limit - maximum entries returned.
-   * @returns `{ entries, nextSeq, oldestSeq }`.
+   * 读取比某游标更新的条目。
+   * @param after - 调用方已看到的最后 seq（0 = 从保留的最旧一条开始）。
+   * @param limit - 最多返回条数。
+   * @returns `{ entries, nextSeq, oldestSeq }`。
    */
   snapshot(after = 0, limit = 200) {
     const cursor = Number.isFinite(after) ? after : 0
@@ -150,13 +153,8 @@ export class LogBus {
     }
   }
 
-  /** Forget every retained entry, keeping the cursor monotonic. */
+  /** 清空全部保留条目，游标保持单调。 */
   clear() {
     this.entries = []
-  }
-
-  /** Current retained entry count (diagnostics). */
-  get size() {
-    return this.entries.length
   }
 }

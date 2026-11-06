@@ -1,34 +1,27 @@
-/**
- * The OneBot 11 transport: reverse (NapCat dials in) or forward (we dial out).
- *
- * Everything the transport observes lands in the log bus, so the log page can
- * show connection state, every action sent, every response received and every
- * pushed event without instrumenting the rest of the plugin.
- *
- * OneBot 11 contract this relies on: every action carries a client-generated
- * `echo`, the response repeats it, and `status`/`retcode` say whether the action
- * succeeded. Anything else is treated as a pushed event.
- */
+/** OneBot 11 传输层：reverse（NapCat 主动拨入）或 forward（本端拨出）。
+ * 传输层观察到的一切都写进日志总线，因此日志页能显示连接状态、每个发出的动作、
+ * 每个收到的响应和每个推送事件，而不需要给插件其余部分加埋点。
+ * 依赖的 OneBot 11 契约：每个动作带一个客户端生成的 `echo`，响应原样回传，由
+ * `status`/`retcode` 判断成败。其余帧一律当作推送事件。 */
 
 import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { acceptKey, ServerWire } from './wire.js'
+import { preview } from './logbus.js'
 
-/** Reconnect ladder in milliseconds; the last value repeats. */
+/** 重连退避阶梯（毫秒）；最后一档重复使用。 */
 const BACKOFF_MS = [2000, 5000, 10000, 30000, 60000]
 
-/** A rejected action: the gateway answered `status: failed` or a non-zero retcode. */
+/** 动作被拒：网关回了 `status: failed` 或非零 retcode。 */
 export class OneBotActionError extends Error {
-  constructor(message, { action, retcode, wording } = {}) {
+  constructor(message, { retcode } = {}) {
     super(message)
     this.name = 'OneBotActionError'
-    this.action = action
     this.retcode = retcode
-    this.wording = wording
   }
 }
 
-/** An action that never completed: the link is down or the response timed out. */
+/** 动作没能完成：链路已断或响应超时。 */
 export class OneBotTransportError extends Error {
   constructor(message) {
     super(message)
@@ -36,12 +29,10 @@ export class OneBotTransportError extends Error {
   }
 }
 
-/**
- * Constant-time comparison that tolerates different lengths.
- * @param a - candidate token.
- * @param b - expected token.
- * @returns whether they match.
- */
+/** 长度不敏感时也安全的常数时间比较。
+ * @param a - 待验证的令牌。
+ * @param b - 期望的令牌。
+ * @returns 是否匹配。 */
 function tokensEqual(a, b) {
   const left = Buffer.from(String(a ?? ''), 'utf8')
   const right = Buffer.from(String(b ?? ''), 'utf8')
@@ -49,26 +40,23 @@ function tokensEqual(a, b) {
   return timingSafeEqual(left, right)
 }
 
-/**
- * The transport. Construct with the resolved config and the log bus, then
- * `start()` from the plugin effect and `stop()` from its disposer.
- */
+/** 传输层。用解析后的配置与日志总线构造，在插件 effect 里 `start()`、在
+ * disposer 里 `stop()`。 */
 export class OneBotConnection {
-  /**
-   * @param options - `config`, `log` (LogBus), `describeError`.
-   */
+  /** @param options - `config` 与 `log`（LogBus）。
+ * @param options - `config` 与 `log`（LogBus）。 */
   constructor({ config, log }) {
     this.config = config
     this.log = log
 
-    /** Called with every pushed (non-response) event frame. */
+    /** 每个推送（非响应）事件帧都会调用。 */
     this.onEvent = () => {}
-    /** Called with `'online' | 'offline' | 'connecting'` transitions. */
+    /** 状态迁移（`'online' | 'offline' | 'connecting'`）时调用。 */
     this.onState = () => {}
-    /** Called once per newly learned bot account id. */
+    /** 每学到一次机器人账号 id 调用一次。 */
     this.onLearnSelfId = () => {}
 
-    /** The bot's own account id, learned from a meta event when not configured. */
+    /** 机器人自己的账号 id；未配置时由 meta 事件学到。 */
     this.selfId = String(config.botQQ ?? '')
     this.state = 'offline'
     this.address = ''
@@ -81,14 +69,12 @@ export class OneBotConnection {
     this.attempt = 0
     this.reconnectTimer = undefined
     this.stopping = false
-    /** True while a replacement dial-in is retiring the previous socket. */
+    /** 为真时表示新的拨入正在顶替上一个 socket。 */
     this.superseding = false
   }
 
-  /**
-   * Open the transport according to `config.mode`.
-   * @returns resolution once the first connection attempt settled.
-   */
+  /** 按 `config.mode` 打开传输层。
+ * @returns 首次连接尝试落定后 resolve。 */
   async start() {
     this.stopping = false
     if (this.config.mode === 'reverse') return this.startReverse()
@@ -96,11 +82,9 @@ export class OneBotConnection {
     return undefined
   }
 
-  /**
-   * Bind the reverse listener. A missing token refuses to start (fail-closed):
-   * an open reverse port lets anyone on the network drive the bot.
-   * @returns resolution once the listener is bound.
-   */
+  /** 绑定 reverse 监听。缺少令牌时拒绝启动（fail-closed）：敞开的 reverse 端口
+ * 等于让网络里任何人都能驱动这个机器人。
+ * @returns 监听绑定后 resolve。 */
   async startReverse() {
     const token = String(this.config.accessToken ?? '')
     if (token.trim() === '') {
@@ -165,20 +149,16 @@ export class OneBotConnection {
     })
   }
 
-  /**
-   * Accept one reverse client. A newer connection supersedes the previous one:
-   * NapCat reconnects without closing cleanly, and two live sockets would
-   * duplicate every send.
-   * @param socket - the upgraded socket.
-   * @param req - the upgrade request (for the remote address).
-   */
+  /** 接受一个 reverse 客户端。更新的连接顶替上一个：NapCat 重连时并不干净地关闭
+ * 旧连接，两条活着的 socket 会让每个发送重复一遍。
+ * @param socket - 已 upgrade 的 socket。
+ * @param req - upgrade 请求（用于远端地址）。 */
   adoptReverse(socket, req) {
     const remote = String(req.socket?.remoteAddress ?? 'unknown')
     const previous = this.wire
     if (previous !== undefined) {
       this.log.record('bridge', { note: 'replacing previous reverse connection', remote })
-      // Detach first: the outgoing socket's close must not report the link as
-      // offline a moment before the replacement comes online.
+      // 先摘除引用：旧 socket 的 close 不能在替换者上线前一刻把链路报成 offline。
       this.wire = undefined
       this.superseding = true
       try {
@@ -187,12 +167,11 @@ export class OneBotConnection {
         this.superseding = false
       }
     }
-    this.attach(socket, remote, 'reverse')
+    this.attach(socket, remote)
   }
 
-  /**
-   * Dial out to the gateway.
-   */
+  /** 向网关拨出。
+ * 向网关拨出。 */
   startForward() {
     if (this.stopping) return
     const url = String(this.config.url)
@@ -230,26 +209,21 @@ export class OneBotConnection {
     })
   }
 
-  /**
-   * Wire one inbound socket into the transport.
-   * @param socket - upgraded socket.
-   * @param remote - remote address for the log.
-   * @param mode - `reverse`.
-   */
-  attach(socket, remote, mode) {
+  /** 把一个入站 socket 接进传输层。
+ * @param socket - 已 upgrade 的 socket。
+ * @param remote - 远端地址，供日志用。 */
+  attach(socket, remote) {
     const wire = new ServerWire(socket, {
       onText: (text) => this.onFrameText(text),
       onClose: (reason) => this.onWireClosed(reason, remote),
     })
     this.wire = wire
-    this.markOnline(mode, remote)
+    this.markOnline('reverse', remote)
   }
 
-  /**
-   * Wire one outbound socket into the transport.
-   * @param ws - the open client socket.
-   * @param url - the gateway URL for the log.
-   */
+  /** 把一个出站 socket 接进传输层。
+ * @param ws - 已打开的客户端 socket。
+ * @param url - 网关 URL，供日志用。 */
   attachForward(ws, url) {
     this.wire = {
       send: (text) => {
@@ -264,7 +238,7 @@ export class OneBotConnection {
         try {
           ws.close()
         } catch {
-          // Already closing.
+          // 已经在关闭中。
         }
       },
     }
@@ -281,11 +255,9 @@ export class OneBotConnection {
     this.markOnline('forward', url)
   }
 
-  /**
-   * Announce a live link and reset the reconnect ladder.
-   * @param mode - connection mode.
-   * @param address - remote or URL.
-   */
+  /** 宣告链路可用并重置重连阶梯。
+ * @param mode - 连接模式。
+ * @param address - 远端地址或 URL。 */
   markOnline(mode, address) {
     this.attempt = 0
     this.onlineSince = Date.now()
@@ -293,24 +265,20 @@ export class OneBotConnection {
     this.log.record('connect', { mode, address })
   }
 
-  /**
-   * Handle one closed inbound wire.
-   * @param reason - close reason.
-   * @param remote - remote address.
-   */
+  /** 处理一个关闭的入站 wire。
+ * @param reason - 关闭原因。
+ * @param remote - 远端地址。 */
   onWireClosed(reason, remote) {
     if (this.superseding) return
     this.wire = undefined
     this.failPending('link closed')
     this.setState('offline')
     this.log.record('disconnect', { mode: 'reverse', reason, remote })
-    // A reverse listener keeps listening; the next dial-in is a new connect.
+    // reverse 监听继续在听；下一次拨入是一次新的 connect。
   }
 
-  /**
-   * Publish a state transition once.
-   * @param next - the new state.
-   */
+  /** 发布一次状态迁移。
+ * @param next - 新状态。 */
   setState(next) {
     if (this.state === next) return
     this.state = next
@@ -318,29 +286,34 @@ export class OneBotConnection {
     try {
       this.onState(next)
     } catch {
-      // Observers must not break the transport.
+      // 观察者异常不得打断传输层。
     }
   }
 
-  /**
-   * Reject every in-flight action after a link loss.
-   * @param reason - diagnostic reason.
-   */
+  /** 结清一个在途动作：从 pending 里摘除、停掉超时定时器、按原因 reject。
+ * @param echo - 该动作的 echo。
+ * @param reason - 失败原因。
+ * @returns 是否真的结清了一个条目。 */
+  settlePending(echo, reason) {
+    const item = this.pending.get(echo)
+    if (item === undefined) return false
+    this.pending.delete(echo)
+    clearTimeout(item.timer)
+    item.reject(new OneBotTransportError(reason))
+    return true
+  }
+
+  /** 链路断开后拒绝所有在途动作。
+ * @param reason - 诊断原因。 */
   failPending(reason) {
     if (this.pending.size === 0) return
-    const pending = [...this.pending.values()]
-    this.pending.clear()
-    for (const item of pending) {
-      clearTimeout(item.timer)
-      item.reject(new OneBotTransportError(reason))
-    }
+    for (const echo of [...this.pending.keys()]) this.settlePending(echo, reason)
   }
 
-  /**
-   * Schedule the next forward dial.
-   */
+  /** 安排下一次 forward 拨号。
+ * 安排下一次 forward 拨号。 */
   scheduleReconnect() {
-    if (this.stopping || this.config.mode !== 'forward') return
+    if (this.stopping) return
     if (this.reconnectTimer !== undefined) return
     const delay = BACKOFF_MS[Math.min(this.attempt, BACKOFF_MS.length - 1)]
     this.attempt += 1
@@ -353,10 +326,8 @@ export class OneBotConnection {
     if (typeof this.reconnectTimer.unref === 'function') this.reconnectTimer.unref()
   }
 
-  /**
-   * Decode and dispatch one text frame.
-   * @param text - raw JSON text.
-   */
+  /** 解码并分发一个文本帧。
+ * @param text - 原始 JSON 文本。 */
   onFrameText(text) {
     let frame
     try {
@@ -381,7 +352,7 @@ export class OneBotConnection {
       if (ok) item.resolve(frame.data ?? {})
       else item.reject(new OneBotActionError(
         String(frame.wording ?? frame.message ?? 'action failed'),
-        { action: item.action, retcode: frame.retcode, wording: frame.wording },
+        { retcode: frame.retcode },
       ))
       return
     }
@@ -396,7 +367,7 @@ export class OneBotConnection {
           try {
             this.onLearnSelfId(learned)
           } catch {
-            // A listener failure must not break frame handling.
+            // 监听器异常不得打断帧处理。
           }
         }
       }
@@ -412,15 +383,13 @@ export class OneBotConnection {
       return
     }
 
-    this.log.record('event', { post_type: 'unknown', detail: previewOf(frame) })
+    this.log.record('event', { post_type: 'unknown', detail: preview(frameText(frame)) })
   }
 
-  /**
-   * Call one OneBot action and await its response.
-   * @param action - action name, e.g. `send_msg`.
-   * @param params - action parameters.
-   * @returns the action's `data` object.
-   */
+  /** 调用一个 OneBot 动作并等待其响应。
+ * @param action - 动作名，例如 `send_msg`。
+ * @param params - 动作参数。
+ * @returns 动作的 `data` 对象。 */
   async call(action, params = {}) {
     if (this.state !== 'online' || this.wire === undefined) {
       throw new OneBotTransportError('link is ' + this.state)
@@ -432,44 +401,32 @@ export class OneBotConnection {
     const promise = new Promise((resolve, reject) => {
       const timeoutMs = Number(this.config.sendTimeoutMs) || 30000
       const timer = setTimeout(() => {
-        this.pending.delete(echo)
         this.log.record('error', { note: 'action timed out', action, timeoutMs })
-        reject(new OneBotTransportError(action + ' timed out after ' + timeoutMs + 'ms'))
+        this.settlePending(echo, action + ' timed out after ' + timeoutMs + 'ms')
       }, timeoutMs)
       if (typeof timer.unref === 'function') timer.unref()
       this.pending.set(echo, { action, resolve, reject, timer, startedAt })
     })
     if (!this.wire.send(body)) {
-      const item = this.pending.get(echo)
-      if (item !== undefined) {
-        this.pending.delete(echo)
-        clearTimeout(item.timer)
-        item.reject(new OneBotTransportError('write failed'))
-      }
+      this.settlePending(echo, 'write failed')
     }
     return promise
   }
 
-  /**
-   * Send one plain text message to a chat.
-   * @param chat - `{ kind: 'private'|'group', id: string }`.
-   * @param text - message body.
-   * @returns the gateway's response data.
-   */
+  /** 向一个聊天发送纯文本消息。
+ * @param chat - 聊天引用：`kind` 为 private/group，`id` 为字符串。
+ * @param text - 消息正文。
+ * @returns 网关的响应数据。 */
   sendText(chat, text) {
     return this.sendMessage(chat, [{ type: 'text', data: { text } }])
   }
 
-  /**
-   * Send a full message: an ordered list of OneBot segments.
-   *
-   * A reply that mixes text and media becomes one message with several
-   * segments, so a caption and its picture arrive together instead of as
-   * separate sends.
-   * @param chat - `{ kind: 'private'|'group', id: string }`.
-   * @param message - the segment array.
-   * @returns the gateway's response data.
-   */
+  /** 发送一条完整消息：一段有序的 OneBot 段列表。
+ * 同时含文本与媒体的回复会拼成一条多段消息，让说明和图片一起到达，而不是分成
+ * 两次发送。
+ * @param chat - 聊天引用：`kind` 为 private/group，`id` 为字符串。
+ * @param message - 段数组。
+ * @returns 网关的响应数据。 */
   sendMessage(chat, message) {
     const segments = Array.isArray(message) ? message : []
     if (chat.kind === 'group') {
@@ -478,10 +435,8 @@ export class OneBotConnection {
     return this.call('send_private_msg', { user_id: Number(chat.id), message: segments })
   }
 
-  /**
-   * Current transport status for the log page header.
-   * @returns a detached status object.
-   */
+  /** 供日志页头部显示的当前传输状态。
+ * @returns 一份脱离内部引用的状态对象。 */
   status() {
     return {
       state: this.state,
@@ -494,9 +449,8 @@ export class OneBotConnection {
     }
   }
 
-  /**
-   * Close the listener, the socket and every pending action.
-   */
+  /** 关闭监听、socket 以及所有在途动作。
+ * 关闭监听、socket 以及所有在途动作。 */
   async stop() {
     this.stopping = true
     if (this.reconnectTimer !== undefined) {
@@ -512,7 +466,7 @@ export class OneBotConnection {
       try {
         this.socket.close()
       } catch {
-        // Already closed.
+        // 已经关闭。
       }
       this.socket = undefined
     }
@@ -525,40 +479,31 @@ export class OneBotConnection {
   }
 }
 
-/**
- * Summarize one pushed event for the log page.
- * @param frame - the OneBot event frame.
- * @param withPreview - whether message bodies contribute a text preview.
- * @returns a short, redaction-safe detail object.
- */
+/** 提取一个帧里的正文文本（数组段先拼成文本）。
+ * @param frame - 任意带 `message` 或 `raw_message` 的帧。
+ * @returns 拼接后的文本；没有正文时返回空串。 */
+function frameText(frame) {
+  const raw = frame.raw_message ?? frame.message
+  if (typeof raw === 'string') return raw
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((seg) => seg !== null && typeof seg === 'object' && seg.type === 'text')
+      .map((seg) => String(seg?.data?.text ?? ''))
+      .join('')
+  }
+  return ''
+}
+
+/** 为日志页压缩一个推送事件。
+ * @param frame - OneBot 事件帧。
+ * @param withPreview - 正文是否贡献一段文本预览。
+ * @returns 一段简短、可脱敏的摘要。 */
 function eventDetail(frame, withPreview) {
   const detail = { message_type: frame.message_type ?? frame.notice_type ?? frame.request_type ?? '' }
   if (typeof frame.user_id !== 'undefined') detail.user_id = frame.user_id
   if (typeof frame.group_id !== 'undefined') detail.group_id = frame.group_id
   if (withPreview !== false && frame.post_type === 'message') {
-    detail.text = previewOf(frame)
+    detail.text = preview(frameText(frame))
   }
   return detail
-}
-
-/**
- * Extract the leading text of a message event or action frame.
- * @param frame - any frame carrying `message` or `raw_message`.
- * @returns a bounded preview string.
- */
-function previewOf(frame) {
-  const raw = frame.raw_message ?? frame.message
-  if (typeof raw === 'string') {
-    const chars = Array.from(raw)
-    return chars.slice(0, 60).join('') + (chars.length > 60 ? '…' : '')
-  }
-  if (Array.isArray(raw)) {
-    const text = raw
-      .filter((seg) => seg !== null && typeof seg === 'object' && seg.type === 'text')
-      .map((seg) => String(seg?.data?.text ?? ''))
-      .join('')
-    const chars = Array.from(text)
-    return chars.slice(0, 60).join('') + (chars.length > 60 ? '…' : '')
-  }
-  return ''
 }

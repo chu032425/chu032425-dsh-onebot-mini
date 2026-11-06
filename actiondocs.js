@@ -1,29 +1,23 @@
 /**
- * Structured documentation for every action in `toolcatalog.js`.
+ * `toolcatalog.js` 里每个动作的结构化说明。
  *
- * `onebot_call` is one generic escape hatch, so the model only learns what an
- * action does and which parameters it takes from the prompt. Keeping that
- * knowledge here, as data, has three benefits:
+ * `onebot_call` 只是一个通用入口，所以模型只能从提示词里知道某个动作干什么、
+ * 要哪些参数。把这些知识当作数据放在这里，有三个好处：
  *
- *  1. the Tools page renders one collapsible prompt per action from the same
- *     source the channel prompt uses, so the UI and the model never drift;
- *  2. an operator can override a single action's prompt without editing code;
- *  3. tests can assert that every catalogued action has a doc, so adding an
- *     action without describing it fails loudly.
+ *  1. 「工具」页和频道提示词用同一份来源渲染，界面和模型不会说两套话；
+ *  2. 运营者可以覆盖单个动作的提示词，不必改代码；
+ *  3. 测试可以断言「每个收录的动作都有说明」，漏写说明时会直接报错。
  *
- * Each entry is `{ params: Param[], summary?, note? }`. A `Param` is
- * `{ name, type, required, desc }`. `type` is one of the labels in
- * `TYPE_LABELS`; `required` is a boolean. Nothing here talks to the gateway — it
- * is pure reference data.
+ * 每条是 `{ params: Param[], summary?, note? }`；`Param` 是
+ * `{ name, type, required, desc }`，`type` 取 `TYPE_LABELS` 里的标签，
+ * `required` 是布尔值。这里不跟网关打交道，纯粹是参考资料。
  *
- * Coverage comes from the OneBot 11 specification and NapCat's published API
- * reference. Parameter descriptions are best-effort and editable from the Tools
- * page, so a slightly stale detail on an obscure action can be corrected without
- * a release.
+ * 覆盖范围来自 OneBot 11 规范与 NapCat 公开的接口文档。参数说明是尽力而为的，
+ * 也能在「工具」页直接改，所以某个偏门动作写得过时了，不用发版就能修正。
  */
 
-/** Human labels for parameter types, used in the generated prompt. */
-export const TYPE_LABELS = Object.freeze({
+/** 参数类型的中文标签，生成提示词时用。 */
+const TYPE_LABELS = Object.freeze({
   number: '数字',
   string: '文本',
   boolean: '布尔',
@@ -33,10 +27,10 @@ export const TYPE_LABELS = Object.freeze({
   enum: '枚举',
 })
 
-/** Build one frozen parameter doc. */
+/** 造一条冻结的参数说明。 */
 const P = (name, type, required, desc) => Object.freeze({ name, type, required, desc })
 
-// --- shared parameters (frozen, referenced by many actions) ---
+// --- 共用参数（已冻结，被许多动作引用） ---
 const groupId = P('group_id', 'number', true, '群号')
 const userId = P('user_id', 'number', true, 'QQ 号')
 const message = P('message', 'message', true, '要发送的消息：字符串，或消息段数组，如 [{"type":"text","data":{"text":"hi"}}]')
@@ -45,7 +39,7 @@ const messageId = P('message_id', 'number', true, '消息 ID（从收到的消�
 const noCache = P('no_cache', 'boolean', false, '为 true 时强制刷新、不走缓存')
 
 /**
- * The structured docs, keyed by action name.
+ * 结构化说明，按动作名索引。
  * @type {Readonly<Record<string, { params: ReadonlyArray<object>, summary?: string, note?: string }>>}
  */
 export const ACTION_DOCS = Object.freeze({
@@ -350,9 +344,9 @@ export const ACTION_DOCS = Object.freeze({
 })
 
 /**
- * One parameter rendered for a prompt: `名称（类型，必填/可选）：说明`.
- * @param param - a `{ name, type, required, desc }` entry.
- * @returns the rendered fragment.
+ * 把一个参数渲染进提示词：`名称（类型，必填/可选）：说明`。
+ * @param param - `{ name, type, required, desc }` 条目。
+ * @returns 渲染出的片段。
  */
 function renderParam(param) {
   const type = TYPE_LABELS[param.type] ?? param.type
@@ -361,13 +355,13 @@ function renderParam(param) {
 }
 
 /**
- * The built-in prompt for one action, as a single line.
+ * 一个动作的内置提示词，压成一行。
  *
- * Shape: `功能：…。参数：a（…）：…；b（…）：…。用法：onebot_call(action="x", params={"a":…, "b":…})。`
- * Actions with no parameters say `无需参数。` and omit `params`.
- * @param name - action name.
- * @param zh - the Chinese annotation, used as the function summary fallback.
- * @returns the default prompt text.
+ * 形状：`功能：…。参数：a（…）：…；b（…）：…。用法：onebot_call(action="x", params={"a":…, "b":…})。`
+ * 没有参数的动作写 `无需参数。`，并省略 `params`。
+ * @param name - 动作名。
+ * @param zh - 中文注释，作为功能摘要的兜底。
+ * @returns 默认提示词文本。
  */
 export function actionPrompt(name, zh) {
   const doc = ACTION_DOCS[name] ?? { params: [] }

@@ -10,8 +10,8 @@ import { normalizeConfig, ConfigStore, DEFAULTS, MODE_FIELDS, FIELD_GROUPS, FIEL
 import { TOOL_GROUPS, ALL_ACTIONS, STANDARD_ACTIONS, isKnownAction, computeAllowlist, actionLabel, enabledGroups } from '../toolcatalog.js'
 import { LogBus, redact, preview } from '../logbus.js'
 import {
-  chatIdOf, splitChatId, sessionIdOf, flattenMessage, unescapeCq,
-  isAddressed, speakerPrefix, speakerKey, textOfMessage, buildPlatformPrompt,
+  chatIdOf, splitChatId, sessionIdOf, flattenMessage,
+  isAddressed, speakerPrefix, textOfMessage, buildPlatformPrompt,
   ratioReached, ChatBridge,
 } from '../bridge.js'
 import { tmpdir } from 'node:os'
@@ -54,8 +54,8 @@ t('string list is trimmed', JSON.stringify(good.value.allowFrom) === '["1","2"]'
 t('unknown enum falls back', normalizeConfig({ mode: 'weird' }).value.mode === 'reverse')
 t('non-boolean boolean falls back', normalizeConfig({ senderPrefix: 'yes' }).value.senderPrefix === true)
 
-t('the default keeps steering on and the prefix on', DEFAULTS.autoInterject === true && DEFAULTS.senderPrefix === true)
-t('debounce config is gone; only the interject switch remains', !('privateDebounceMs' in DEFAULTS) && !('privateDebounceMaxMs' in DEFAULTS) && DEFAULTS.privateAutoInterject === true)
+t('the default keeps steering on and the prefix on', DEFAULTS.privateAutoInterject === true && DEFAULTS.senderPrefix === true)
+t('dead debounce fields are gone; only the interject switch remains', !('debounceMs' in DEFAULTS) && !('debounceMaxMs' in DEFAULTS) && !('autoInterject' in DEFAULTS) && DEFAULTS.privateAutoInterject === true)
 t('no group reply config remains', !('groupDebounceMs' in DEFAULTS) && !('groupAutoInterject' in DEFAULTS))
 t('the reply group holds the send mode then the interject switch', JSON.stringify(FIELD_GROUPS.find((g) => g.id === 'reply').fields) === '["replyMode","privateAutoInterject"]')
 
@@ -185,9 +185,8 @@ t('write without a workspace is refused', (await new ConfigStore('/tmp/onebot-mi
 // --- log ring
 const log = new LogBus({ capacity: 50 })
 for (let i = 0; i < 80; i += 1) log.record('event', { i })
-t('ring is bounded', log.size === 50, String(log.size))
 const s1 = log.snapshot(0, 200)
-t('snapshot returns retained entries', s1.entries.length === 50)
+t('ring is bounded', s1.entries.length === 50, String(s1.entries.length))
 t('seq is monotonic', s1.nextSeq === 80, String(s1.nextSeq))
 const s2 = log.snapshot(75, 200)
 t('cursor filters older entries', s2.entries.length === 5 && s2.entries[0].seq === 76)
@@ -218,9 +217,6 @@ t('unknown bot fails closed', isAddressed({ message: [{ type: 'at', data: { qq: 
 t('mention via cq string', isAddressed({ message: '[CQ:at,qq=10001] hi' }, '10001') === true)
 t('group prefix has speaker', speakerPrefix({ sender: { card: '小明' }, user_id: 20002, time: 1700000000 }, 'group', true).startsWith('['))
 t('private prefix is empty', speakerPrefix({ sender: {} }, 'private', true) === '')
-t('a group speaker key is the sender id', speakerKey({ user_id: 111 }, 'group') === '111')
-t('different group senders get different keys', speakerKey({ user_id: 111 }, 'group') !== speakerKey({ user_id: 222 }, 'group'))
-t('a private chat has one speaker key', speakerKey({ user_id: 111 }, 'private') === speakerKey({ user_id: 222 }, 'private'))
 t('prefix can be disabled', speakerPrefix({ sender: { card: 'x' } }, 'group', false) === '')
 t('only text blocks are joined', textOfMessage({ content: [{ type: 'text', text: 'a' }, { type: 'reasoning', text: 'secret' }, { type: 'text', text: 'b' }] }) === 'a\nb')
 t('empty content yields empty text', textOfMessage({ content: [] }) === '')
@@ -297,7 +293,8 @@ t('unknown and duplicate disabled actions are dropped', JSON.stringify(filteredD
 t('snapshot ships the tool catalog', Array.isArray(snap.toolCatalog) && snap.toolCatalog.length === TOOL_GROUPS.length)
 
 // --- image cache: url allow-list and account folders
-import { isAllowedImageUrl, accountDir, cacheRoot } from '../imagecache.js'
+import { isAllowedImageUrl } from '../imagecache.js'
+import { accountDir, profileCacheRoot } from '../cachepaths.js'
 t('a qzone image host is allowed', isAllowedImageUrl('http://photomaz.photo.store.qq.com/psc?/abc/b&bo=x'))
 t('a qpic host is allowed', isAllowedImageUrl('https://gchat.qpic.cn/gchatpic_new/1/2-3-4/0'))
 t('a random host is refused', !isAllowedImageUrl('https://evil.example.com/a.jpg'))
@@ -305,7 +302,7 @@ t('a host that merely ends with the suffix text is refused', !isAllowedImageUrl(
 t('a lookalike suffix is refused', !isAllowedImageUrl('https://qq.com.evil.io/a.jpg'))
 t('a non-http scheme is refused', !isAllowedImageUrl('file:///etc/passwd'))
 t('a malformed url is refused', !isAllowedImageUrl('not a url'))
-t('the profile cache root sits beside the config', cacheRoot().endsWith('onebot-mini-cache'))
+t('the profile cache root sits beside the config', profileCacheRoot().endsWith('onebot-mini-cache'))
 t('an account folder keeps only digits under QQ/', accountDir({}, '2000002').endsWith('/QQ/2000002'))
 t('the account folder follows the configured workspace', accountDir({ workspacePath: '/workspace/QQ' }, '2000002') === '/workspace/QQ/onebot-mini-cache/QQ/2000002')
 t('a hostile account id cannot escape the cache root', !accountDir({}, '../etc').includes('..'))
@@ -421,8 +418,8 @@ t('the build injects the admin QQ', buildPlatformPrompt({ ...DEFAULTS, adminUser
 t('no admin line without an administrator', !buildPlatformPrompt(DEFAULTS).includes('管理员是 QQ'))
 t('a custom prompt is kept by normalize', normalizeConfig({ mode: 'forward', accessToken: 'x', workspacePath: '/workspace/QQ', sessionPermission: 'workspace-write', channelPrompt: 'hello prompt' }).value.channelPrompt === 'hello prompt')
 t('an empty prompt falls back to the default', normalizeConfig({ channelPrompt: '   ' }).value.channelPrompt === DEFAULT_CHANNEL_PROMPT)
-t('the prompt registry covers channel, reply mode, admin, prefix, media, tools, actions, inbound, both tools and the interject judge',
-  PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,replyModeStreamPrompt,replyModeFinalPrompt,adminPrompt,senderPrefixPrompt,mediaPrompt,toolsPrompt,inboundPrompt,toolCallPrompt,interjectPrompt')
+t('the prompt registry covers channel, reply mode, admin, prefix, media, tools, actions, inbound and the tool call',
+  PROMPT_DEFS.map((d) => d.field).join(',') === 'channelPrompt,replyModeStreamPrompt,replyModeFinalPrompt,adminPrompt,senderPrefixPrompt,mediaPrompt,toolsPrompt,inboundPrompt,toolCallPrompt')
 t('every registered prompt has a config default', PROMPT_DEFS.every((d) => typeof DEFAULTS[d.field] === 'string' && DEFAULTS[d.field] !== ''))
 t('every registered prompt has a label key', PROMPT_DEFS.every((d) => typeof d.labelKey === 'string' && d.labelKey !== ''))
 const blankAll = normalizeConfig({ channelPrompt: '', toolCallPrompt: '  ', mediaPrompt: '' }).value
@@ -575,7 +572,7 @@ t('the media paragraph requires listing first', mediaText.includes('list_files')
 // --- incoming media: placeholders become readable local paths
 import {
   inboxRoot, chatFolder, safeFileName, extensionFor, sourceFromData, sourceFromResponse,
-  mediaPlaceholder, buildInboundText, unescapeCqLite, sniffImageExtension,
+  mediaPlaceholder, buildInboundText, unescapeCq, sniffImageExtension,
   unknownSegmentTypes, segmentPlaceholder, KNOWN_SEGMENT_TYPES,
 } from '../inbound.js'
 t('inbox root follows the workspace cache convention', inboxRoot({ workspacePath: '/workspace/QQ' }, { kind: 'private', id: '2000001' }, 'private:2000001') === '/workspace/QQ/onebot-mini-cache/QQ/2000001')
@@ -591,8 +588,8 @@ t('the image placeholder carries its path', mediaPlaceholder('image', '/tmp/a.pn
 t('the voice placeholder appends a transcript', mediaPlaceholder('record', '/tmp/a.amr', undefined, '你好').includes('转写：你好'))
 t('the file placeholder names the file', mediaPlaceholder('file', '/tmp/a.pdf', 'a.pdf') === '[文件: a.pdf, /tmp/a.pdf]')
 t('a failed download keeps the bare placeholder', mediaPlaceholder('image') === '[图片]')
-t('the CQ fallback strips media tags', unescapeCqLite('[CQ:image,file=x] hi') === '[图片] hi')
-t('the CQ fallback turns a json card into a placeholder', unescapeCqLite('[CQ:json,data={"prompt":"&#91;QQ小程序&#93;"}]') === '[卡片]')
+t('the CQ fallback strips media tags', unescapeCq('[CQ:image,file=x] hi') === '[图片] hi')
+t('the CQ fallback turns a json card into a placeholder', unescapeCq('[CQ:json,data={"prompt":"&#91;QQ小程序&#93;"}]') === '[卡片]')
 t('a known card type has a labelled placeholder', segmentPlaceholder('json', { data: '{"prompt":"[QQ小程序]"}' }) === '[卡片: QQ小程序]')
 t('an unknown type has no placeholder', segmentPlaceholder('markdown', {}) === '')
 t('the known-type set covers cards and media', ['json', 'xml', 'image', 'record', 'text'].every((tp) => KNOWN_SEGMENT_TYPES.includes(tp)))

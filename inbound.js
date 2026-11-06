@@ -1,47 +1,37 @@
 /**
- * Incoming media: turn QQ message segments into files the agent can actually read.
+ * 入站媒体：把 QQ 消息段落成本地文件，供 agent 直接读取。
  *
- * A OneBot message often carries more than文字: an image, a voice clip, a video
- * or a file arrives as its own segment whose payload is only a URL (or a
- * gateway-side file id). Flattened to a bare `[图片]` placeholder the model can
- * do nothing with it. This module downloads each media segment to a local inbox
- * under the chat's workspace and rewrites the placeholder to carry the real
- * path:
+ * 一条 OneBot 消息常带有文字以外的内容：图片、语音、视频或文件各自成段，
+ * 段里往往只有 URL 或网关侧文件 id。只留 `[图片]` 这样的占位符模型无法处理，
+ * 因此本模块把每个媒体段下载到会话工作区下的缓存目录，并把占位符改写成
+ * 真实路径：
  *
- *   [图片: /workspace/QQ/qq-inbox/private-2000001/1712345678-0-image.png]
- *   [语音: /workspace/QQ/qq-inbox/…/…-0-record.amr]（转写：你好）
- *   [视频: /workspace/QQ/qq-inbox/…/…-0-video.mp4]
- *   [文件: 报告.pdf, /workspace/QQ/qq-inbox/…/…-0-file.pdf]
+ *   [图片: /workspace/QQ/onebot-mini-cache/QQ/2000001/1712345678-0-image.png]
+ *   [语音: …/…-0-record.amr]（转写：你好）
+ *   [视频: …/…-0-video.mp4]
+ *   [文件: 报告.pdf, …/…-0-file.pdf]
  *
- * The agent then reaches the bytes with its normal tools — `read_image` for a
- * picture, `read`/`bash` for text and archives. A voice clip is only downloaded
- * and annotated with its gateway message id; the prompt then guides the model to
- * call `onebot_call`'s `fetch_ptt_text` itself if it wants QQ's transcript. This
- * module issues no non-standard action on its own.
+ * 模型随后用自带工具读取字节：`read_image` 看图，`read`/`bash` 读文本与压缩包。
+ * 语音只下载并附上网关消息 id，由提示词引导模型自行调用 `onebot_call` 的
+ * `fetch_ptt_text` 取 QQ 转写；本模块不自行发起非标准 action。
  *
- * Only http(s) URLs from the gateway frame are fetched. Nothing here trusts the
- * model, and a failed download degrades to the old placeholder instead of
- * dropping the message.
+ * 只抓取网关帧里的 http(s) URL；下载失败退化为原占位符，不丢消息。
  */
 
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { accountDir } from './cachepaths.js'
-
-/** Segment kinds handled here. */
-export const INBOUND_KINDS = Object.freeze(['image', 'record', 'video', 'file'])
+import { MEDIA_KINDS } from './media.js'
 
 /**
- * Pull a human label out of a rich-card segment (`json` / `xml`).
+ * 从富卡片段（`json` / `xml`）里取出人类可读的标签。
  *
- * A QQ mini-program / share card arrives as a segment whose payload is a JSON
- * string with a `prompt` like "[QQ小程序]" plus `desc` and `meta.detail_*.title`.
- * Parsing is best effort: anything unusable yields an empty string and the
- * caller falls back to a bare "卡片" placeholder. Never throws.
- * @param data - the segment's `data` object.
- * @returns a short label, or ''.
+ * 小程序/分享卡片常带 `prompt`（如「[QQ小程序]」）、`desc` 与
+ * `meta.detail_*.title`；解析尽力而为，取不到就返回空串由调用方回退。
+ * @param data - 段的 `data` 对象。
+ * @returns 短标签，或 ''。
  */
-export function cardLabel(data) {
+function cardLabel(data) {
   if (data === null || typeof data !== 'object') return ''
   let parsed = data.data ?? data.content ?? data
   if (typeof parsed === 'string') {
@@ -77,10 +67,10 @@ export function cardLabel(data) {
 }
 
 /**
- * Segment kinds this plugin knows how to represent.
+ * 本插件能表示的消息段类型。
  *
- * Anything outside this set is reported as "暂时不能处理" instead of being
- * silently dropped — see `unknownSegmentTypes`.
+ * 不在集合内的类型会回「暂时不能处理」，而不是被静默丢弃 —— 见
+ * `unknownSegmentTypes`。
  */
 export const KNOWN_SEGMENT_TYPES = Object.freeze([
   'text', 'at', 'face', 'mface', 'image', 'record', 'video', 'file',
@@ -89,9 +79,9 @@ export const KNOWN_SEGMENT_TYPES = Object.freeze([
 ])
 
 /**
- * The unseen segment types in one message, in first-seen order.
- * @param segments - the `message` field (array of segments, or a CQ string).
- * @returns the unknown type names; empty when everything is recognised.
+ * 一条消息里未识别过的段类型，按首次出现顺序。
+ * @param segments - `message` 字段（段数组，或 CQ 字符串）。
+ * @returns 未识别的类型名；全部识别时为空。
  */
 export function unknownSegmentTypes(segments) {
   if (!Array.isArray(segments)) return []
@@ -105,14 +95,13 @@ export function unknownSegmentTypes(segments) {
 }
 
 /**
- * A model-facing placeholder for a non-text segment kind we handle.
+ * 给非文本段类型一个面向模型的占位符。
  *
- * `text`/`at` are handled inline; media is downloaded before this is called.
- * Unknown kinds return '' on purpose so the bridge can answer "暂时不能处理"
- * instead of pretending it understood them.
- * @param type - the segment type.
- * @param data - the segment's `data`.
- * @returns a bracketed placeholder, or '' for an empty/unknown type.
+ * `text`/`at` 在别处内联处理；媒体段在此前已完成下载。未识别的类型
+ * 故意返回 ''，好让调用方回「暂时不能处理」而不是假装看懂了。
+ * @param type - 段类型。
+ * @param data - 段的 `data`。
+ * @returns 方括号占位符；类型为空或未识别时为 ''。
  */
 export function segmentPlaceholder(type, data) {
   const kind = String(type ?? '')
@@ -134,29 +123,28 @@ export function segmentPlaceholder(type, data) {
   if (kind === 'rps') return '[猜拳]'
   if (kind === 'shake') return '[窗口抖动]'
   if (kind === 'poke') return '[戳一戳]'
-  // Unknown kind: let the caller answer "暂时不能处理" instead of inventing one.
+  // 未识别的类型：交给调用方回「暂时不能处理」，不臆造占位符。
   return ''
 }
 
-/** A download longer than this is abandoned. */
+/** 单次下载超过此毫秒数即放弃。 */
 const FETCH_TIMEOUT_MS = 20000
 
-/** A running counter so several media in the same millisecond never collide. */
+/** 进程内自增序号，避免同一毫秒内的多份媒体文件名相撞。 */
 let sequence = 0
 
 /**
- * The cache directory for one chat's incoming media.
+ * 一个会话的入站媒体缓存目录。
  *
- * Follows the plugin-wide cache convention (see cachepaths.js):
- * `{workspacePath}/onebot-mini-cache/QQ/{qq号或群号}/`. Because it lives inside
- * the session workspace, the agent can `read_image`/`read` these files directly.
+ * 遵循插件统一的缓存约定（见 cachepaths.js）：
+ * `{workspacePath}/onebot-mini-cache/QQ/{qq号或群号}/`。目录位于会话工作区内，
+ * 模型可直接用 `read_image`/`read` 读取。
  *
- * `config.inboundDir` is an internal override (tests / advanced setups) and is
- * not a documented setting, so a normal config object has no such key.
- * @param config - the effective config.
- * @param chat - `{ kind, id }` for the chat, whose id is the QQ号 or 群号.
- * @param chatId - canonical chat id, used by the override path only.
- * @returns the absolute cache directory for this chat's media.
+ * `config.inboundDir` 是内部覆盖项（测试/高级用法），不是对外设置项。
+ * @param config - 生效配置。
+ * @param chat - 会话的 `{ kind, id }`，id 为 QQ 号或群号。
+ * @param chatId - 规范会话 id，仅覆盖路径使用。
+ * @returns 该会话媒体目录的绝对路径。
  */
 export function inboxRoot(config, chat, chatId) {
   const override = String(config?.inboundDir ?? '').trim()
@@ -166,18 +154,18 @@ export function inboxRoot(config, chat, chatId) {
 }
 
 /**
- * The per-chat folder name: only safe characters survive.
- * @param chatId - `private:<id>` or `group:<id>`.
- * @returns a filesystem-safe folder name.
+ * 单个会话的目录名：只保留安全字符。
+ * @param chatId - `private:<id>` 或 `group:<id>`。
+ * @returns 文件系统安全的目录名。
  */
 export function chatFolder(chatId) {
   return String(chatId ?? '').replace(/[^A-Za-z0-9-]/g, '-')
 }
 
 /**
- * Strip anything path-like from a suggested file name.
- * @param name - the raw name from the gateway.
- * @returns a safe base name (may be empty).
+ * 去掉建议文件名里的路径成分。
+ * @param name - 网关给出的原始文件名。
+ * @returns 安全的基本名（可能为空）。
  */
 export function safeFileName(name) {
   const raw = String(name ?? '').replace(/[:\\/]+/g, '_').replace(/[^\w.\-\u4e00-\u9fa5]/g, '_')
@@ -185,11 +173,11 @@ export function safeFileName(name) {
 }
 
 /**
- * Pick a file extension from the content type, falling back per kind.
- * @param kind - image / record / video / file.
- * @param contentType - the response `content-type`.
- * @param suggested - a suggested original name.
- * @returns an extension without the dot, always non-empty.
+ * 按内容类型挑扩展名，取不到时按类型回退。
+ * @param kind - image / record / video / file。
+ * @param contentType - 响应的 `content-type`。
+ * @param suggested - 建议的原始文件名。
+ * @returns 不带点的扩展名，永不为空。
  */
 export function extensionFor(kind, contentType, suggested) {
   const type = String(contentType ?? '').toLowerCase()
@@ -216,13 +204,12 @@ export function extensionFor(kind, contentType, suggested) {
 }
 
 /**
- * Identify a supported image format from its magic bytes.
+ * 按魔数识别受支持的图片格式。
  *
- * The gateway often omits a content type, and a PNG saved as `.jpg` would fail
- * `read_image`'s declared-type-vs-bytes check. Sniffing the bytes keeps the
- * extension honest.
- * @param bytes - the file bytes.
- * @returns `png|jpg|gif|webp|bmp`, or an empty string.
+ * 网关常常不给 content-type，而存成 `.jpg` 的 PNG 会过不了 `read_image`
+ * 的「声明类型对字节」校验，嗅探字节可让扩展名诚实。
+ * @param bytes - 文件字节。
+ * @returns `png|jpg|gif|webp|bmp`，或空串。
  */
 export function sniffImageExtension(bytes) {
   const b = bytes
@@ -236,13 +223,12 @@ export function sniffImageExtension(bytes) {
 }
 
 /**
- * Read a payload from a direct segment field.
+ * 从段字段里读出载荷。
  *
- * OneBot puts the payload in `data.url` for image/record/video, and sometimes in
- * `data.file` as an http, base64 or file URL. A bare `/abs/path` is also accepted
- * when it happens to exist on this host.
- * @param data - the segment data object.
- * @returns `{ url } | { base64 } | { path }`, or undefined.
+ * OneBot 把图片/语音/视频的载荷放在 `data.url`，有时也放在 `data.file`（
+ * http、base64 或 file URL）。本机确实存在的裸 `/abs/path` 也接受。
+ * @param data - 段的数据对象。
+ * @returns `{ url } | { base64 } | { path }`，或 undefined。
  */
 export function sourceFromData(data) {
   if (data === null || typeof data !== 'object') return undefined
@@ -262,9 +248,9 @@ export function sourceFromData(data) {
 }
 
 /**
- * Read a payload from a `get_file`-style response.
- * @param response - the action's `data`.
- * @returns a source, or undefined.
+ * 从 `get_file` 一类响应里读出载荷。
+ * @param response - action 的 `data`。
+ * @returns 载荷来源，或 undefined。
  */
 export function sourceFromResponse(response) {
   if (response === null || typeof response !== 'object') return undefined
@@ -276,13 +262,13 @@ export function sourceFromResponse(response) {
 }
 
 /**
- * Fetch one URL into a Buffer, enforcing the byte ceiling while streaming.
- * @param url - an http(s) URL.
- * @param maxBytes - the ceiling in bytes.
- * @param timeoutMs - abort deadline.
- * @returns `{ ok: true, bytes, contentType }` or `{ ok: false, reason }`.
+ * 把一个 URL 抓成 Buffer，流式读取时即守住字节上限。
+ * @param url - http(s) URL。
+ * @param maxBytes - 字节上限。
+ * @param timeoutMs - 中止期限。
+ * @returns `{ ok: true, bytes, contentType }` 或 `{ ok: false, reason }`。
  */
-export async function fetchToBuffer(url, maxBytes, timeoutMs = FETCH_TIMEOUT_MS) {
+async function fetchToBuffer(url, maxBytes, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   if (typeof timer.unref === 'function') timer.unref()
@@ -312,14 +298,14 @@ export async function fetchToBuffer(url, maxBytes, timeoutMs = FETCH_TIMEOUT_MS)
 }
 
 /**
- * Resolve a segment's bytes: direct field first, then a gateway `get_file`
- * round-trip, then the group/private file-URL actions.
- * @param connection - the transport facade (`call`).
- * @param segment - the OneBot segment.
- * @param chat - `{ kind, id }`.
- * @returns `{ source }` (a url/base64/path object) or `{ reason }`.
+ * 解析一个段的字节来源：先看段字段，再走网关 `get_file` 往返，
+ * 最后才是群/私聊的文件 URL action。
+ * @param connection - 传输门面（`call`）。
+ * @param segment - OneBot 消息段。
+ * @param chat - `{ kind, id }`。
+ * @returns `{ source }`（url/base64/path 之一）或 `{ reason }`。
  */
-export async function resolveSegmentSource(connection, segment, chat) {
+async function resolveSegmentSource(connection, segment, chat) {
   const data = segment?.data !== null && typeof segment?.data === 'object' ? segment.data : {}
   const direct = sourceFromData(data)
   if (direct !== undefined) return { source: direct }
@@ -329,20 +315,19 @@ export async function resolveSegmentSource(connection, segment, chat) {
     return { reason: 'no downloadable source on the segment' }
   }
 
-  // image / record / video / file: get_file resolves a gateway-side id to a URL.
+  // 图片/语音/视频/文件：get_file 把网关侧 id 解析成 URL。
   try {
     const response = await connection.call('get_file', { file_id: fileId })
     const got = sourceFromResponse(response)
     if (got !== undefined) return { source: got }
   } catch {
-    // fall through to the file-specific actions
+    // 继续走文件专用的 action
   }
 
   if (segment.type === 'file') {
-    // These two are transport calls made by the plugin itself, not catalogued
-    // tool actions: `get_group_file_url` / `get_private_file_url` stay out of
-    // the `onebot_call` allowlist on purpose, so pruning the catalog does not
-    // break inbound downloads and nothing here should be read as a tool name.
+    // 这两个是插件自己发起的传输调用，不在 `onebot_call` 的允许清单里：
+    // `get_group_file_url` / `get_private_file_url` 故意不进目录，这样裁剪
+    // 目录不会弄坏入站下载，此处也不该被读成工具名。
     try {
       if (chat.kind === 'group') {
         const response = await connection.call('get_group_file_url', {
@@ -361,19 +346,19 @@ export async function resolveSegmentSource(connection, segment, chat) {
         if (got !== undefined) return { source: got }
       }
     } catch {
-      // no file URL either
+      // 文件 URL 也没拿到
     }
   }
   return { reason: 'the gateway did not return a download URL' }
 }
 
 /**
- * Obtain the bytes for one resolved source, honoring the size ceiling.
- * @param source - `{ url } | { base64 } | { path }`.
- * @param maxBytes - the ceiling in bytes.
- * @returns `{ ok: true, bytes, contentType }` or `{ ok: false, reason }`.
+ * 取到一个已解析来源的字节，同时守住大小上限。
+ * @param source - `{ url } | { base64 } | { path }`。
+ * @param maxBytes - 字节上限。
+ * @returns `{ ok: true, bytes, contentType }` 或 `{ ok: false, reason }`。
  */
-export async function readSourceBytes(source, maxBytes) {
+async function readSourceBytes(source, maxBytes) {
   if (typeof source.base64 === 'string') {
     const bytes = Buffer.from(source.base64, 'base64')
     if (bytes.length > maxBytes) return { ok: false, reason: 'too large: ' + bytes.length + ' bytes' }
@@ -396,12 +381,12 @@ export async function readSourceBytes(source, maxBytes) {
 }
 
 /**
- * The placeholder text for one saved (or failed) media segment.
- * @param kind - image / record / video / file.
- * @param path - the saved path, or undefined on failure.
- * @param name - a display name for a file.
- * @param transcript - a voice transcript, when available.
- * @returns the model-facing placeholder.
+ * 一个已保存（或失败）媒体段的占位符文本。
+ * @param kind - image / record / video / file。
+ * @param path - 已保存的路径；失败时为 undefined。
+ * @param name - 文件的展示名。
+ * @param transcript - 语音转写文本，若已取得。
+ * @returns 面向模型的占位符。
  */
 export function mediaPlaceholder(kind, path, name, transcript) {
   if (path === undefined) {
@@ -420,9 +405,9 @@ export function mediaPlaceholder(kind, path, name, transcript) {
 }
 
 /**
- * Download and save one media segment.
- * @param options - `{ segment, chatId, chat, connection, config, messageId, log }`.
- * @returns `{ placeholder, saved?, warning? }`.
+ * 下载并保存一个媒体段。
+ * @param options - `{ segment, chatId, chat, connection, config, messageId, log }`。
+ * @returns `{ placeholder, saved?, warning? }`。
  */
 async function ingestSegment({ segment, chatId, chat, connection, config, messageId, log }) {
   const kind = segment.type
@@ -455,11 +440,9 @@ async function ingestSegment({ segment, chatId, chat, connection, config, messag
     return { placeholder: mediaPlaceholder(kind), warning: kind + ': ' + reason }
   }
 
-  // Voice: the code stays on the standard protocol and only downloads the file.
-  // It never calls a non-standard action itself — instead it hands the model the
-  // local path plus the gateway message id, and the prompt tells the model it may
-  // call onebot_call's `fetch_ptt_text` (a gateway extension) to get QQ's own
-  // transcript. That keeps every hard-coded action in this plugin standard.
+  // 语音：只走标准协议下载文件，不自行调用非标准 action；把本地路径与网关
+  // 消息 id 交给模型，提示词再引导它调用 `fetch_ptt_text` 取 QQ 的转写，
+  // 这样插件里硬编码的 action 全是标准接口。
   let placeholder = mediaPlaceholder(kind, path, suggested !== '' ? suggested : undefined)
   if (kind === 'record' && typeof messageId === 'string' && messageId !== '') {
     placeholder += '（消息ID: ' + messageId + '）'
@@ -471,12 +454,12 @@ async function ingestSegment({ segment, chatId, chat, connection, config, messag
 }
 
 /**
- * Build the model-facing text for one inbound message, saving media on the way.
+ * 为一条入站消息生成面向模型的文本，沿途把媒体落盘。
  *
- * Mirrors `flattenMessage` for text/at/face/other segments, but each media
- * segment is downloaded and rewritten to a local path so the model can read it.
- * @param options - `{ segments, chatId, chat, connection, config, messageId, log }`.
- * @returns `{ text, saved, warnings }`.
+ * 文本/at/表情等段与 `flattenMessage` 对齐，但每个媒体段都会下载并改写成
+ * 本地路径，模型可直接读取。
+ * @param options - `{ segments, chatId, chat, connection, config, messageId, log }`。
+ * @returns `{ text, saved, warnings }`。
  */
 export async function buildInboundText({ segments, chatId, chat, connection, config, messageId, log }) {
   const saved = []
@@ -484,7 +467,7 @@ export async function buildInboundText({ segments, chatId, chat, connection, con
   const record = (note) => {
     if (typeof log === 'function') log(note)
   }
-  if (typeof segments === 'string') return { text: unescapeCqLite(segments), saved, warnings }
+  if (typeof segments === 'string') return { text: unescapeCq(segments), saved, warnings }
   if (!Array.isArray(segments)) return { text: '', saved, warnings }
 
   const parts = []
@@ -500,7 +483,7 @@ export async function buildInboundText({ segments, chatId, chat, connection, con
       if (String(data.qq ?? '') === 'all') parts.push('@全体成员')
       continue
     }
-    if (type === 'face') {
+    if (type === 'face' || type === 'mface') {
       parts.push('[表情]')
       continue
     }
@@ -509,15 +492,15 @@ export async function buildInboundText({ segments, chatId, chat, connection, con
       parts.push('[合并转发]')
       continue
     }
-    if (INBOUND_KINDS.includes(type)) {
+    if (MEDIA_KINDS.includes(type)) {
       const outcome = await ingestSegment({ segment, chatId, chat, connection, config, messageId, log: record })
       if (outcome.warning !== undefined) warnings.push(outcome.warning)
       if (outcome.saved !== undefined) saved.push(outcome.saved)
       parts.push(outcome.placeholder)
       continue
     }
-    // Any other segment (json/xml card, music, location, contact, …) still gets a
-    // placeholder so the message is not flattened to '' and silently dropped.
+    // 其余段（json/xml 卡片、音乐、位置、名片等）也要有占位符，
+    // 否则整条消息会被摊成 '' 并被静默丢弃。
     if (type !== '') {
       const placeholder = segmentPlaceholder(type, data)
       if (placeholder !== '') parts.push(placeholder)
@@ -527,14 +510,13 @@ export async function buildInboundText({ segments, chatId, chat, connection, con
 }
 
 /**
- * A minimal CQ-string fallback (no media download is possible without URLs).
- * @param raw - the CQ string.
- * @returns plain text with bracketed placeholders.
+ * CQ 字符串的最小回退解析（没有 URL 时无法下载媒体）。
+ * @param raw - CQ 字符串。
+ * @returns 带方括号占位符的纯文本。
  */
-export function unescapeCqLite(raw) {
+export function unescapeCq(raw) {
   return String(raw)
-    // Card / rich segments are matched before entities are decoded, while any
-    // brackets inside their payload are still `&#91;`/`&#93;`.
+    // 富卡片段先匹配，再解码实体 —— 此时其载荷里的方括号还是 `&#91;`/`&#93;`。
     .replace(/\[CQ:json,[^\]]*\]/gi, '[卡片]')
     .replace(/\[CQ:xml,[^\]]*\]/gi, '[卡片]')
     .replace(/\[CQ:forward,[^\]]*\]/gi, '[合并转发]')
@@ -553,13 +535,13 @@ export function unescapeCqLite(raw) {
 }
 
 /**
- * Remove a saved inbound file (used by tests and by a future prune).
- * @param path - the file to remove.
+ * 删除一个已保存的入站文件（回合结束后的清理与测试在用）。
+ * @param path - 要删除的文件。
  */
 export async function removeInbound(path) {
   try {
     await rm(path, { force: true })
   } catch {
-    // best effort
+    // 尽力而为
   }
 }

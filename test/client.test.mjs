@@ -168,7 +168,6 @@ for (const key of ['promptsTitle', 'promptsSubtitle', 'promptsReset', 'promptsSa
   'promptDefAdmin', 'promptDefAdminHint', 'promptDefSenderPrefix', 'promptDefSenderPrefixHint',
   'promptDefMedia', 'promptDefMediaHint', 'promptDefTools', 'promptDefToolsHint',
   'promptDefToolCall', 'promptDefToolCallHint',
- 'promptDefInterject', 'promptDefInterjectHint',
   'promptsPlaceholders', 'promptsNoPlaceholders', 'promptsCollapseHint', 'promptsDirtyMark',
   'phReplyMode', 'phAdmin', 'phAdminId', 'phSenderPrefix', 'phMedia', 'phTools', 'phActions', 'phInbound', 'phEnabledNote']) {
   t('prompt copy present: ' + key, typeof zh[key] === 'string' && zh[key] !== '' && typeof en[key] === 'string' && en[key] !== '')

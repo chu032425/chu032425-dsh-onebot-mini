@@ -1,44 +1,34 @@
-/**
- * The chat ↔ session bridge: one durable dsh Session per OneBot chat.
- *
- * Inbound: a pushed message event is gated (self → policy → mention → dedup),
- * flattened to text and handed to the chat's agent as one follow-up turn.
- *
- * Outbound: how the assistant's text reaches the chat depends on `replyMode`.
- *  - `stream` (default): each assistant message is sent as soon as it is
- *    produced, so the chat sees the answer unfold step by step.
- *  - `final`: text blocks are buffered and sent once the turn ends, so a
- *    multi-step turn produces one QQ message instead of one per step.
- * `turn/end` releases any leftover buffer and the turn's inbound files.
- *
- * The session id is derived from the chat id, so a restart resumes the same
- * conversation with no mapping file: `agents.resume` finds the persisted log,
- * and `agents.create` only runs when there is none.
- */
+/** 聊天 ↔ 会话桥：每个 OneBot 聊天对应一个持久 dsh Session。
+ * 入站：推送来的消息事件先过分级闸（自己 → 策略 → @提及 → 去重），摊平成文本，
+ * 作为一个 follow-up 回合交给该聊天的 agent。
+ * 出站：助手文本怎么到聊天里由 `replyMode` 决定。
+ * - `stream`（默认）：每条助手消息一产生就发，聊天里能看到回答逐步展开。
+ * - `final`：文本块先缓存，回合结束时一次性发出，多步回合只产生一条 QQ 消息。
+ * `turn/end` 释放剩余缓冲与这一回合的入站文件。
+ * session id 由 chat id 派生，所以重启后无需映射文件即可恢复同一段对话：
+ * `agents.resume` 找已落盘的日志，`agents.create` 只在没有时运行。 */
 
+import { mkdir, stat } from 'node:fs/promises'
 import { createPluginUserMessage, PLUGIN_SOURCE } from './message.js'
 import { computeAllowlist, enabledGroups, GROUP_LABELS } from './toolcatalog.js'
-import { DEFAULT_CHANNEL_PROMPT, DEFAULT_INTERJECT_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
-import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes } from './inbound.js'
+import { DEFAULT_CHANNEL_PROMPT, mediaParagraph, inboundParagraph, senderPrefixParagraph, toolsParagraph, replyModeParagraph, adminParagraph, renderPrompt, renderToolCallPrompt } from './prompt.js'
+import { buildInboundText, removeInbound, segmentPlaceholder, unknownSegmentTypes, unescapeCq } from './inbound.js'
+import { buildReplySegments, groupReplySegments, safeUnlink } from './media.js'
 
-/** Non-alphanumerics become `-` so the id stays filesystem-safe. */
+/** 非字母数字一律变成 `-`，让 id 保持文件系统安全。 */
 const ID_SAFE = /[^A-Za-z0-9-]/g
 
-/**
- * Build the canonical chat id for one inbound event.
- * @param messageType - `private` or `group`.
- * @param target - the user or group id.
- * @returns `private:<id>` or `group:<id>`.
- */
+/** 为一个入站事件构造规范 chat id。
+ * @param messageType - `private` 或 `group`。
+ * @param target - 用户或群号。
+ * @returns `private:<id>` 或 `group:<id>`。 */
 export function chatIdOf(messageType, target) {
   return (messageType === 'group' ? 'group:' : 'private:') + String(target)
 }
 
-/**
- * Split a canonical chat id back into its parts.
- * @param chatId - `private:<id>` or `group:<id>`.
- * @returns `{ kind, id }`.
- */
+/** 把规范 chat id 拆回各段。
+ * @param chatId - `private:<id>` 或 `group:<id>`。
+ * @returns 拆出的 `{ kind, id }` 两段。 */
 export function splitChatId(chatId) {
   const at = chatId.indexOf(':')
   if (at <= 0) return { kind: 'private', id: chatId }
@@ -46,30 +36,23 @@ export function splitChatId(chatId) {
   return { kind: kind === 'group' ? 'group' : 'private', id: chatId.slice(at + 1) }
 }
 
-/**
- * Derive the durable session id for a chat.
- *
- * The prefix is configurable because it decides where every conversation shows
- * up in the sidebar: a short, recognizable prefix makes QQ Sessions easy to
- * pick out from other work in the same profile.
- * @param chatId - canonical chat id.
- * @param prefix - configured session prefix; an empty prefix means no prefix.
- * @returns the session id string.
- */
+/** 派生一个聊天的持久 session id。
+ * 前缀可配，因为它决定每段对话在侧边栏里的位置：短而好认的前缀让 QQ 会话在
+ * 同一 profile 的其他工作里一眼可辨。
+ * @param chatId - 规范 chat id。
+ * @param prefix - 配置的会话前缀；空前缀表示不加前缀。
+ * @returns session id 字符串。 */
 export function sessionIdOf(chatId, prefix = 'onebot') {
   const body = chatId.replace(ID_SAFE, '-')
   const head = String(prefix ?? '').trim()
   return head === '' ? body : head + '-' + body
 }
 
-/**
- * Whether consumed context has reached a pressure threshold.
- *
- * @param threshold - ratio in (0, 1]; 0 or less disables the check.
- * @param used - measured pressure tokens.
- * @param window - model context window in tokens.
- * @returns true when `used / window >= threshold`.
- */
+/** 判断已消耗上下文是否达到压力阈值。
+ * @param threshold - (0, 1] 区间的比例；0 或负数表示关闭检查。
+ * @param used - 已测得的压力 token 数。
+ * @param window - 模型的上下文窗口 token 数。
+ * @returns `used / window >= threshold` 时返回 true。 */
 export function ratioReached(threshold, used, window) {
   const limit = Number(threshold)
   const consumed = Number(used)
@@ -78,14 +61,10 @@ export function ratioReached(threshold, used, window) {
   return consumed / capacity >= limit
 }
 
-/**
- * Flatten OneBot message segments to model-facing text.
- *
- * Non-text segments become bracketed placeholders: the model gets to know an
- * image or a voice message arrived, without the plugin downloading anything.
- * @param segments - the `message` field (array of segments or a CQ string).
- * @returns the flattened text.
- */
+/** 把 OneBot 消息段摊平成模型可读的文本。
+ * 非文本段变成方括号占位符：模型因此知道来了图片或语音，而插件不必下载任何东西。
+ * @param segments - `message` 字段（段数组或 CQ 字符串）。
+ * @returns 摊平后的文本。 */
 export function flattenMessage(segments) {
   if (typeof segments === 'string') return unescapeCq(segments)
   if (!Array.isArray(segments)) return ''
@@ -123,9 +102,8 @@ export function flattenMessage(segments) {
       parts.push('[表情]')
       continue
     }
-    // Any other non-text segment (json/xml card, forward, music, location, …)
-    // gets a placeholder so a card-only message is not flattened to '' and
-    // silently dropped before it can reach the model.
+    // 其余非文本段（json/xml 卡片、合并转发、音乐、位置…）也要占位，
+    // 否则只有一张卡片的消息会被摊成 '' 并在到达模型前被静默丢弃。
     if (type !== '') {
       const placeholder = segmentPlaceholder(type, data)
       if (placeholder !== '') parts.push(placeholder)
@@ -134,41 +112,12 @@ export function flattenMessage(segments) {
   return parts.join('').trim()
 }
 
-/**
- * Turn a CQ-coded string into plain text (the fallback path for gateways that
- * report messages as CQ strings instead of segment arrays).
- * @param raw - the CQ string.
- * @returns plain text with bracketed media placeholders.
- */
-export function unescapeCq(raw) {
-  return String(raw)
-    // Match rich/card segments before entities are decoded.
-    .replace(/\[CQ:json,[^\]]*\]/gi, '[卡片]')
-    .replace(/\[CQ:xml,[^\]]*\]/gi, '[卡片]')
-    .replace(/\[CQ:forward,[^\]]*\]/gi, '[合并转发]')
-    .replace(/&#91;/g, '[')
-    .replace(/&#93;/g, ']')
-    .replace(/&#44;/g, ',')
-    .replace(/&amp;/g, '&')
-    .replace(/\[CQ:image[^\]]*\]/g, '[图片]')
-    .replace(/\[CQ:record[^\]]*\]/g, '[语音]')
-    .replace(/\[CQ:video[^\]]*\]/g, '[视频]')
-    .replace(/\[CQ:file[^\]]*\]/g, '[文件]')
-    .replace(/\[CQ:face[^\]]*\]/g, '[表情]')
-    .replace(/\[CQ:at,qq=all[^\]]*\]/g, '@全体成员')
-    .replace(/\[CQ:[^\]]*\]/g, '')
-    .trim()
-}
-
-/**
- * Whether a group message addresses the bot.
- *
- * Fail-closed: with no known bot account, a group message never counts as a
- * mention, so the bot stays quiet instead of answering every message.
- * @param frame - the message event.
- * @param botId - the bot's own account id, possibly empty.
- * @returns whether the bot was addressed.
- */
+/** 判断群消息是否在叫机器人。
+ * 失败即闭嘴：拿不到机器人账号时群消息永远不算被提及，机器人宁可沉默，也不要
+ * 对每条消息都应答。
+ * @param frame - 消息事件。
+ * @param botId - 机器人自己的账号 id，可能为空。
+ * @returns 是否被叫到。 */
 export function isAddressed(frame, botId) {
   if (botId === '') return false
   const segments = frame.message
@@ -191,28 +140,11 @@ export function isAddressed(frame, botId) {
   return false
 }
 
-/**
- * Prefix a group message with the speaker so the model can tell participants
- * apart. Private chats need no prefix.
- * @param frame - the message event.
- * @param chatKind - `private` or `group`.
- * @param enabled - whether the prefix is configured on.
- * @returns the prefix (possibly empty).
- */
-/**
- * The identity that decides whether two messages may merge.
- *
- * In a group it is the sender, so different people never share a window; in a
- * private chat there is only one speaker, so a constant is enough.
- * @param frame - the inbound event.
- * @param chatKind - `private` or `group`.
- * @returns a stable key for the speaker.
- */
-export function speakerKey(frame, chatKind) {
-  if (chatKind !== 'group') return 'private'
-  return String(frame?.user_id ?? '')
-}
-
+/** 给群消息加上发言人前缀，让模型能区分参与者。私聊不需要前缀。
+ * @param frame - 消息事件。
+ * @param chatKind - `private` 或 `group`。
+ * @param enabled - 前缀是否配置为开。
+ * @returns 前缀（可能为空）。 */
 export function speakerPrefix(frame, chatKind, enabled) {
   if (!enabled || chatKind !== 'group') return ''
   const sender = frame.sender !== null && typeof frame.sender === 'object' ? frame.sender : {}
@@ -224,14 +156,40 @@ export function speakerPrefix(frame, chatKind, enabled) {
   return '[' + hh + ':' + mm + ' ' + name + '(' + id + ')] '
 }
 
-/**
- * The bridge. One instance per plugin mount.
- */
+/** 解析一个 `provider::model` 配置串。
+ * 用 `::` 分隔，模型 id 里自带的斜杠因此不会被截断。
+ * @param text - 配置值。
+ * @returns `{ provider, model }`；格式不完整时返回 undefined。 */
+function parseModelRef(text) {
+  const configured = String(text ?? '').trim()
+  const at = configured.indexOf('::')
+  if (at <= 0) return undefined
+  const provider = configured.slice(0, at)
+  const model = configured.slice(at + 2)
+  if (provider === '' || model === '') return undefined
+  return { provider, model }
+}
+
+/** 删除一回合的入站文件（尽力而为）。
+ * @param log - 日志总线。
+ * @param chatId - 规范 chat id。
+ * @param paths - 要删除的路径。 */
+function unlinkInbound(log, chatId, paths) {
+  if (!Array.isArray(paths) || paths.length === 0) return
+  for (const path of paths) {
+    removeInbound(path).then(() => {
+      log.record('bridge', { note: 'inbound media source removed', chatId, path })
+    }).catch(() => {
+      // removeInbound 不会抛，但清理也绝不能打断一个回合。
+    })
+  }
+}
+
+/** 桥。每次插件挂载一个实例。
+ * 桥。每次插件挂载一个实例。 */
 export class ChatBridge {
-  /**
-   * @param options - `ctx`, `config`, `connection`, `log`, `sessionTitle`
-   * (optional service), `describeError`.
-   */
+  /** 依赖注入：`ctx`、`config`、`connection`、`log`、`sessionTitle`
+ * （可选服务）、`describeError`。 */
   constructor({ ctx, config, connection, log, sessionTitle, getWorkspaceRegistry, getAgentPresets, getPermissionPresets, describeError }) {
     this.ctx = ctx
     this.config = config
@@ -243,67 +201,56 @@ export class ChatBridge {
     this.getPermissionPresets = getPermissionPresets
     this.describeError = describeError ?? ((error) => String(error?.message ?? error))
 
-    /** chatId → chat record. */
+    /** chatId → 聊天记录。 */
     this.chats = new Map()
-    /** sessionId → chatId, for the session event feed. */
+    /** sessionId → chatId，供会话事件流反查。 */
     this.bySession = new Map()
-    /** chatId → in-flight creation promise (collapses concurrent first messages). */
+    /** chatId → 进行中的创建 promise（并发首条消息折叠成一次创建）。 */
     this.pendingCreates = new Map()
-    /** chatId → accumulated assistant text for the open turn (`final` mode). */
+    /** chatId → 当前回合累积的助手文本（`final` 模式）。 */
     this.buffers = new Map()
-    /**
-     * `stream` mode delivery state, one entry per chat:
-     *  - streamQueues: chatId → promise chain that serializes streamed sends so
-     *    two assistant messages can never go out of order;
-     *  - sentThisTurn: chatIds that already streamed at least one message, so an
-     *    errored turn does not add a redundant "turn failed" notice.
-     */
+    /** `stream` 模式的投递状态，每个聊天一项：
+ * - streamQueues：chatId → 串行化流式发送的 promise 链，两条助手消息绝不会
+ * 乱序；
+ * - sentThisTurn：本回合已经流式发过的 chatId，出错的回合因此不必再补一条
+ * 「回合失败」提示。 */
     this.streamQueues = new Map()
     this.sentThisTurn = new Set()
-    /**
-     * Incoming-media cleanup, only used when `deleteInboundMedia` is on:
-     *  - inboundQueue: chatId → FIFO of batches (one per queued message) whose
-     *    turn has not started yet;
-     *  - inboundCurrent: chatId → the batches' paths for the turn now running.
-     * Tying paths to a turn stops a queued message's files from being deleted
-     * before its own turn ever reads them.
-     */
+    /** 入站媒体清理，只在 `deleteInboundMedia` 打开时使用：
+ * - inboundQueue：chatId → 待开始回合的文件批次 FIFO（每条排队消息一批）；
+ * - inboundCurrent：chatId → 正在运行的这一回合的路径。
+ * 把路径绑到回合上，排队消息的文件才不会在自己的回合读到之前就被删掉。 */
     this.inboundQueue = new Map()
     this.inboundCurrent = new Map()
-    /** chatId → message ids already handled (reconnect replay guard). */
+    /** chatId → 已处理过的消息 id（重连重放防护）。 */
     this.seen = new Map()
     this.dedupWindowMs = 300000
     this.dedupMax = 2000
     this.stopping = false
-    /** Last workspace verified, and when (epoch ms); avoids a stat per message. */
+    /** 最近一次校验过的工作区路径与时刻（epoch 毫秒），避免每条消息都 stat。 */
     this.workspaceCheckedPath = ''
     this.workspaceCheckedAt = 0
   }
 
-  /**
-   * Apply live config changes (the config page can save while running).
-   * @param config - the new effective config.
-   */
+  /** 应用运行中的配置变更（配置页可以在运行时保存）。
+ * @param config - 新的生效配置。 */
   reconfigure(config) {
-    // A save is an explicit "re-check now": drop the workspace verification cache
-    // so a workspace deleted in the meantime is recreated on the next message.
+    // 一次保存就是一次「现在重新校验」：丢掉工作区校验缓存，
+    // 于是期间被删掉的工作区会在下一条消息时重建。
     this.workspaceCheckedPath = ''
     this.workspaceCheckedAt = 0
     this.config = config
   }
 
-  /**
-   * Subscribe to the session event feed.
-   * @returns the disposer.
-   */
+  /** 订阅会话事件流。
+ * @returns 取消订阅用的 disposer。 */
   start() {
     this.stopping = false
     return this.ctx.on('session/event', (session, event) => this.onSessionEvent(session, event))
   }
 
-  /**
-   * Release every chat and stop reacting to events.
-   */
+  /** 释放每个聊天并停止响应事件。
+ * 释放每个聊天并停止响应事件。 */
   async stop() {
     this.stopping = true
     const chats = [...this.chats.values()]
@@ -314,19 +261,27 @@ export class ChatBridge {
     this.sentThisTurn.clear()
     this.inboundQueue.clear()
     this.inboundCurrent.clear()
+    this.seen.clear()
+    this.pendingCreates.clear()
     for (const chat of chats) {
       try {
         await chat.dispose()
       } catch {
-        // A failing dispose must not block the remaining teardown.
+        // 单个 dispose 失败不得挡住其余收尾。
       }
     }
   }
 
-  /**
-   * Handle one pushed OneBot event.
-   * @param frame - the event frame.
-   */
+  /** 记录一条错误日志（统一 `X failed for <id>` 模板）。
+ * @param stage - 失败环节，如 `agent creation failed`。
+ * @param chatId - 目标 chat id（也用于工作区路径等标识）。
+ * @param error - 原始错误。 */
+  recordError(stage, chatId, error) {
+    this.log.record('error', { note: stage + ' for ' + chatId, error: this.describeError(error) })
+  }
+
+  /** 处理一个推送来的 OneBot 事件。
+ * @param frame - 事件帧。 */
   async handleInbound(frame) {
     if (this.stopping) return
     if (frame === null || typeof frame !== 'object') return
@@ -343,9 +298,8 @@ export class ChatBridge {
     const chatId = chatIdOf(frame.message_type, frame.message_type === 'group' ? groupId : userId)
     const chat = splitChatId(chatId)
 
-    // Access gate, deny before allow: a blacklisted chat is always refused, and
-    // a non-empty whitelist restricts the channel to the ids on it. An empty
-    // whitelist means "no restriction", which is the default.
+    // 访问闸，先拒后允：黑名单里的聊天永远拒绝，非空白名单则把通道收窄到名单内。
+    // 空白名单表示「不限制」，这也是默认值。
     const allow = chat.kind === 'private' ? this.config.allowFrom : this.config.allowGroups
     const deny = chat.kind === 'private' ? this.config.denyFrom : this.config.denyGroups
     if (Array.isArray(deny) && deny.length > 0 && deny.includes(chat.id)) {
@@ -367,12 +321,10 @@ export class ChatBridge {
       return
     }
 
-    // Incoming media is downloaded to a local inbox and rewritten to a readable
-    // path, so the model can open an image with read_image or a file with read.
-    // Turned off, it degrades to the bare placeholders that name nothing.
+    // 入站媒体会下载到本地收件箱并改写成可读路径，模型因此能用 read_image 看图、
+    // 用 read 读文件。关掉后降级为不指名的裸占位符。
     let body
-    // Paths of the files just downloaded for THIS message; they are only tracked
-    // for cleanup when the operator turned `deleteInboundMedia` on.
+    // 本条消息刚下载的文件路径；只有运营方打开 `deleteInboundMedia` 时才跟踪清理。
     let savedPaths = []
     if (this.config.inboundMedia !== false) {
       const outcome = await buildInboundText({
@@ -396,9 +348,8 @@ export class ChatBridge {
     } else {
       body = flattenMessage(frame.message)
     }
-    // Never leave a chat with no answer: a message that carries nothing we can
-    // turn into model input (an unseen segment type, a bare reply marker, an
-    // empty text) gets an explicit "cannot handle yet" notice instead of silence.
+    // 绝不能让聊天无人应答：一条消息若什么都变不成模型输入（没见过的段类型、
+    // 只有一个回复标记、空文本），就明确回一句「暂时不能处理」而不是沉默。
     if (body === '') {
       const unknown = unknownSegmentTypes(frame.message)
       const notice = unknown.length > 0
@@ -413,12 +364,10 @@ export class ChatBridge {
     await this.dispatch(chatId, chat, text, frame, savedPaths)
   }
 
-  /**
-   * Record one message id and report whether it was seen recently.
-   * @param chatId - canonical chat id.
-   * @param messageId - gateway message id.
-   * @returns whether this id was already handled.
-   */
+  /** 记录一个消息 id 并报告它是否刚刚出现过。
+ * @param chatId - 规范 chat id。
+ * @param messageId - 网关消息 id。
+ * @returns 这个 id 是否已处理过。 */
   duplicated(chatId, messageId) {
     const now = Date.now()
     const key = chatId + '#' + messageId
@@ -438,23 +387,20 @@ export class ChatBridge {
     return false
   }
 
-  /**
-   * Deliver one user message to the chat's agent.
-   * @param chatId - canonical chat id.
-   * @param chat - split chat id.
-   * @param text - the model-facing text.
-   * @param frame - the source event (for logging).
-   * @param savedPaths - incoming files this message produced, for cleanup.
-   */
+  /** 把一条用户消息投递给该聊天的 agent。
+ * @param chatId - 规范 chat id。
+ * @param chat - 拆开的 chat id。
+ * @param text - 面向模型的文本。
+ * @param frame - 源事件（用于日志）。
+ * @param savedPaths - 本条消息产生的入站文件，供清理用。 */
   async dispatch(chatId, chat, text, frame, savedPaths = []) {
-    // A workspace can be deleted at any time; re-verify before delivering so an
-    // existing chat also lands in a real workspace after a delete.
+    // 工作区随时可能被删；投递前重新校验，已存在的聊天因此也能在删除后落回真实工作区。
     await this.ensureWorkspace()
     let record
     try {
       record = await this.ensureChat(chatId)
     } catch (error) {
-      this.log.record('error', { note: 'agent creation failed for ' + chatId, error: this.describeError(error) })
+      this.recordError('agent creation failed', chatId, error)
       return
     }
     this.log.record('bridge', {
@@ -464,21 +410,18 @@ export class ChatBridge {
       length: text.length,
       messageId: String(frame.message_id ?? ''),
     })
-    // Idempotent: re-attach on every message so a session that landed ungrouped
-    // (e.g. a resume that created a fresh id, or an attach that ran before the
-    // workspace registry was ready) heals itself on the next message.
+    // 幂等：每条消息都重挂一次，让落成未分组（例如 resume 造出了新 id、或挂载
+    // 早于工作区注册表就绪）的会话在下一条消息时自愈。
     await this.attachWorkspace(record.sessionId)
-    // A private chat steers straight into a running answer: the same person is
-    // correcting or adding to what is still being written, so waiting for a
-    // separate turn would answer twice. No model judgement is involved.
+    // 私聊直接插话进正在写的回答：同一个人是在补充或修正，另起回合会答两遍。
+    // 这里不涉及任何模型判断。
     const interjectOn = chat.kind === 'private' && this.config.privateAutoInterject !== false
     if (interjectOn && record.agent?.status === 'running' && typeof record.agent?.steer === 'function') {
       try {
         const message = await createPluginUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE })
         record.agent.steer(message)
-        // A steered message joins the turn that is already running, so its files
-        // are cleared when that turn ends.
-        if (savedPaths.length > 0) this.addCurrentInbound(chatId, savedPaths)
+        // 插话的消息并入正在运行的回合，因此它的文件在该回合结束时清理。
+        if (savedPaths.length > 0) this.bindTurnInbound(chatId, savedPaths)
         this.log.record('bridge', { note: 'steered into the running turn', chatId, length: text.length })
         return
       } catch (error) {
@@ -489,26 +432,22 @@ export class ChatBridge {
     await this.sendToAgent(chatId, record, text, frame, savedPaths)
   }
 
-  /**
-   * Send one message straight to the chat's agent.
-   * @param chatId - canonical chat id.
-   * @param record - the chat record.
-   * @param text - the message text.
-   * @param frame - the originating event, for logging.
-   * @param savedPaths - incoming files this message produced, for cleanup.
-   */
+  /** 把一条消息直接送给该聊天的 agent。
+ * @param chatId - 规范 chat id。
+ * @param record - 聊天记录。
+ * @param text - 消息文本。
+ * @param frame - 来源事件，用于日志。
+ * @param savedPaths - 本条消息产生的入站文件，供清理用。 */
   async sendToAgent(chatId, record, text, frame, savedPaths = []) {
-    // Queue this message's files against the turn its follow-up will start. The
-    // batch is popped on `turn/start`, so a message still waiting behind a running
-    // turn never loses its files to that earlier turn's end.
-    if (savedPaths.length > 0) this.enqueueInbound(chatId, savedPaths)
+    // 把本条消息的文件排到它的 follow-up 将开启的那个回合上。批次在 `turn/start`
+    // 弹出，因此还堵在运行中回合后面的消息，其文件不会被前一个回合的结束带走。
+    if (savedPaths.length > 0) this.queueInbound(chatId, savedPaths)
     try {
-      // "Compact first, then answer": if the session has reached the configured
-      // pressure ratio, condense it before this message becomes the next turn.
+      // 「先压缩再作答」：会话压力达到配置比例时，在这条消息变成下一回合前先压缩。
       try {
         await this.maybeCompact(chatId, record)
       } catch {
-        // Compaction is best-effort; a failure here must never block the answer.
+        // 压缩是尽力而为；这里失败绝不能挡住回答。
       }
       const message = await createPluginUserMessage({
         content: [{ type: 'text', text }],
@@ -522,24 +461,18 @@ export class ChatBridge {
         messageId: String(frame?.message_id ?? ''),
       })
     } catch (error) {
-      // No turn will ever start for this batch, so drop it rather than leak the
-      // claim on files that no `turn/end` would clear.
+      // 这一批永远不会等到 turn/start，撤销入队，而不是把文件占位泄漏出去。
       if (savedPaths.length > 0) this.dropLastInbound(chatId)
-      this.log.record('error', { note: 'delivery failed for ' + chatId, error: this.describeError(error) })
+      this.recordError('delivery failed', chatId, error)
     }
   }
 
-  /**
-   * Compact the chat's session before the next answer when context pressure has
-   * reached `compactRatio`.
-   *
-   * Uses the harness token meter to read the last measured pressure and the live
-   * compaction service to condense idle history. Everything is best-effort: a
-   * missing service, an unmeasured session, a disabled ratio, or a busy agent all
-   * leave the turn untouched so the user still gets an answer.
-   * @param chatId - canonical chat id (for logging).
-   * @param record - the chat record holding the live agent.
-   */
+  /** 上下文压力达到 `compactRatio` 时，在下一个回答前压缩该聊天的会话。
+ * 用 harness 的 token 计量器读最近一次压力，用活的压缩服务压缩空闲历史。全部
+ * 尽力而为：服务缺失、会话未计量、比例关闭、agent 忙，都不动这个回合，用户照
+ * 样拿到回答。
+ * @param chatId - 规范 chat id（用于日志）。
+ * @param record - 持有活 agent 的聊天记录。 */
   async maybeCompact(chatId, record) {
     const threshold = Number(this.config.compactRatio)
     if (!(threshold > 0)) return
@@ -571,20 +504,20 @@ export class ChatBridge {
         ratio,
       })
     } catch (error) {
-      // Busy (a turn or queued work owns the agent) or a summarizer failure must
-      // never block the user's message; log and answer with the current history.
+      // 忙（回合或排队工作占着 agent）或摘要器失败，都不能挡住用户的消息；
+      // 记一笔，然后用当前历史作答。
       this.log.record('warn', { note: 'pre-reply compaction skipped: ' + this.describeError(error), chatId, ratio })
     }
   }
 
-  /** Append one message's files to the chat's not-yet-started queue. */
-  enqueueInbound(chatId, paths) {
+  /** 把一条消息的文件批次排进该聊天尚未开始的队列。 */
+  queueInbound(chatId, paths) {
     const queue = this.inboundQueue.get(chatId) ?? []
     queue.push(paths)
     this.inboundQueue.set(chatId, queue)
   }
 
-  /** Undo the most recent enqueue (used when delivery failed). */
+  /** 撤销最近一次入队（投递失败时用）。 */
   dropLastInbound(chatId) {
     const queue = this.inboundQueue.get(chatId)
     if (queue === undefined) return
@@ -592,119 +525,36 @@ export class ChatBridge {
     if (queue.length === 0) this.inboundQueue.delete(chatId)
   }
 
-  /** Attach files to the running turn (a steered message). */
-  addCurrentInbound(chatId, paths) {
-    const current = this.inboundCurrent.get(chatId) ?? []
-    current.push(...paths)
-    this.inboundCurrent.set(chatId, current)
+  /** 把文件绑到正在运行的回合。
+ * 传 `paths` 时把插话消息的文件追加进当前回合；不传时在 `turn/start` 把最老的
+ * 一批排队文件移入当前回合（没有排队批次就清空，免得上一回合的路径串台）。
+ * @param chatId - 规范 chat id。
+ * @param paths - 插话消息带来的路径；空表示 turn/start 的队列弹出。 */
+  bindTurnInbound(chatId, paths = []) {
+    if (paths.length > 0) {
+      const current = this.inboundCurrent.get(chatId) ?? []
+      current.push(...paths)
+      this.inboundCurrent.set(chatId, current)
+      return
+    }
+    const queue = this.inboundQueue.get(chatId)
+    const next = queue !== undefined && queue.length > 0 ? queue.shift() : undefined
+    if (queue !== undefined && queue.length === 0) this.inboundQueue.delete(chatId)
+    if (next !== undefined) this.inboundCurrent.set(chatId, next)
+    else this.inboundCurrent.delete(chatId)
   }
 
-  /**
-   * Take (and forget) the files bound to the turn that is ending.
-   * @returns the paths to delete, possibly empty.
-   */
-  takeCurrentInbound(chatId) {
+  /** 取走（并忘掉）即将结束的回合绑定的文件。
+ * @returns 要删除的路径，可能为空。 */
+  takeInbound(chatId) {
     const paths = this.inboundCurrent.get(chatId)
     this.inboundCurrent.delete(chatId)
     return Array.isArray(paths) ? paths : []
   }
 
-  /** Remove the files of one finished turn, best effort. */
-  releaseInbound(chatId, paths) {
-    if (!Array.isArray(paths) || paths.length === 0) return
-    for (const path of paths) {
-      removeInbound(path).then(() => {
-        this.log.record('bridge', { note: 'inbound media source removed', chatId, path })
-      }).catch(() => {
-        // removeInbound never throws, but never let cleanup break a turn.
-      })
-    }
-  }
-
-  /**
-   * Resolve the provider/model used for the lightweight interject judge.
-   *
-   * Preference: the chat's configured model, then the deployment default, then
-   * the first advertised provider/model. Undefined means "no judge available".
-   * @param llm - the live `llm` service.
-   * @returns `{ provider, model }` or undefined.
-   */
-  async resolveJudgeModel(llm) {
-    const configured = String(this.config.agentModel ?? '').trim()
-    if (configured.includes('::')) {
-      const [provider, ...rest] = configured.split('::')
-      if (provider !== '' && rest.length > 0) return { provider, model: rest.join('::') }
-    }
-    try {
-      const selection = this.ctx.get('agentDefaultModel')?.currentSelection?.()
-      if (selection?.provider && selection?.model) {
-        return { provider: String(selection.provider), model: String(selection.model) }
-      }
-    } catch {
-      // fall through to the advertised catalog
-    }
-    try {
-      for (const provider of await llm.listProviders()) {
-        const models = await llm.listModels(provider.id)
-        if (models.length > 0) return { provider: String(provider.id), model: String(models[0].id) }
-      }
-    } catch {
-      // no catalog is a normal condition on a bare deployment
-    }
-    return undefined
-  }
-
-  /**
-   * Ask a small model whether a new message should steer the running turn.
-   *
-   * The call is capped in size and time; anything unusual (no service, no model,
-   * timeout, error) resolves to `followup`, which is always safe.
-   * @param chatId - canonical chat id, for logging.
-   * @param text - the new message text.
-   * @returns `'steer'` or `'followup'`.
-   */
-  async judgeInterject(chatId, text) {
-    let timer
-    try {
-      const llm = this.ctx.get('llm')
-      if (llm === undefined || typeof llm.stream !== 'function') return 'followup'
-      const target = await this.resolveJudgeModel(llm)
-      if (target === undefined) return 'followup'
-      const prompt = String(this.config.interjectPrompt ?? '').trim() !== ''
-        ? String(this.config.interjectPrompt)
-        : DEFAULT_INTERJECT_PROMPT
-      const controller = new AbortController()
-      timer = setTimeout(() => controller.abort(), 4000)
-      if (typeof timer.unref === 'function') timer.unref()
-      let out = ''
-      const stream = llm.stream({
-        provider: target.provider,
-        model: target.model,
-        system: prompt,
-        messages: [{ role: 'user', content: [{ type: 'text', text: 'New message: ' + text }] }],
-        temperature: 0,
-        maxTokens: 16,
-        signal: controller.signal,
-      })
-      for await (const chunk of stream) {
-        if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') out += chunk.text
-      }
-      const verdict = /steer/i.test(out) && !/followup/i.test(out) ? 'steer' : 'followup'
-      this.log.record('bridge', { note: 'interject judge', chatId, verdict, raw: out.trim().slice(0, 24) })
-      return verdict
-    } catch (error) {
-      this.log.record('warn', { note: 'interject judge failed; queueing instead', chatId, error: this.describeError(error) })
-      return 'followup'
-    } finally {
-      if (timer !== undefined) clearTimeout(timer)
-    }
-  }
-
-  /**
-   * Get or create the chat's agent.
-   * @param chatId - canonical chat id.
-   * @returns the chat record.
-   */
+  /** 让聊天拿到一个新 agent，或复用已存在的那个。
+ * @param chatId - 规范 chat id。
+ * @returns 聊天记录。 */
   async ensureChat(chatId) {
     const existing = this.chats.get(chatId)
     if (existing !== undefined) return existing
@@ -719,32 +569,27 @@ export class ChatBridge {
     }
   }
 
-  /**
-   * Resume the persisted session for a chat, or create a fresh one.
-   * @param chatId - canonical chat id.
-   * @returns the chat record.
-   */
+  /** 恢复该聊天已落盘的会话，或新建一个。
+ * @param chatId - 规范 chat id。
+ * @returns 聊天记录。 */
   async createChat(chatId) {
     const sessionId = sessionIdOf(chatId, this.config.sessionPrefix)
-    // The configured workspace is required, but its registration may have been
-    // deleted since — recreate it so the Session always lands in a real
-    // workspace instead of falling back to the host cwd.
+    // 配置的工作区是必需的，但它的注册可能已被删除 —— 重建它，让 Session 永远
+    // 落在真实工作区里，而不是退回宿主 cwd。
     await this.ensureWorkspace(true)
     const meta = {}
     if (this.config.workspacePath !== '') meta.cwd = this.config.workspacePath
-    // Resolve once, then use the same id for both the header and the mount so a
-    // preset deleted after configuration falls back to the deployment default in
-    // both places instead of diverging.
+    // 只解析一次，然后 header 与 mount 用同一个 id：这样配置后被删掉的 preset
+    // 在两边都退回部署默认值，而不是各走一条。
     const presetId = await this.resolveAgentPreset()
     if (presetId !== undefined) meta.agentPreset = presetId
 
-    // Three steps, because "resume failed" and "no such session" are different
-    // facts: a resume can fail while the log exists (owned elsewhere, unreadable
-    // tail), and then `create` on the same id fails with "already exists". A chat
-    // must always end up with an agent, so the last step retires the plain id and
-    // takes a suffixed one.
-    // A fresh agent needs a provider and model: without them the first turn fails
-    // with "has no provider/model". A resumed session already recorded its own.
+    // 分三步，因为「resume 失败」与「没有这个会话」是两件事：日志存在时 resume
+    // 也可能失败（被别处占用、尾部不可读），此时对同一 id 再 create 会报
+    // 「already exists」。聊天必须总有一个 agent，所以最后一步退役裸 id 改用带
+    // 后缀的 id。
+    // 全新 agent 需要 provider 与 model：没有它们第一回合就会以「has no
+    // provider/model」失败。恢复的会话已经记录了自己的。
     const agentOptions = this.modelOptions()
     if (agentOptions === undefined) {
       this.log.record('error', {
@@ -755,32 +600,27 @@ export class ChatBridge {
 
     let handle
     let created = false
-    // The session may already be live: the user can open a QQ chat's Session in
-    // the Web UI, and that live agent owns the write handle. Resume and create
-    // both fail in that state ("already owned by an active write handle" /
-    // "already exists"), so an existing live agent is reused instead.
+    // 会话可能已经活着：用户可以在 Web UI 里打开某个 QQ 聊天的 Session，那个活
+    // agent 占着写句柄。这种状态下 resume 与 create 都会失败（「already owned by
+    // an active write handle」/「already exists」），于是改为复用这个活 agent。
     const live = this.ctx.agents.get(sessionId)
     if (live !== undefined) {
       const record = {
         chatId,
         sessionId,
         agent: live,
-        // The live agent is owned by whoever created it (the Web session
-        // controller); this plugin must not dispose it.
+        // 活 agent 归它的创建者（Web 会话控制器）所有，本插件不得 dispose 它。
         dispose: async () => {},
-        borrowed: true,
       }
       this.chats.set(chatId, record)
       this.bySession.set(sessionId, chatId)
       this.log.record('bridge', { note: 'reusing a live agent for this chat', chatId, sessionId })
-      // A reused agent was probably created before any setup ran (an old version,
-      // or opened directly in the Web UI), so its tools were never registered.
-      // Register them at the plugin/global scope so every agent sees them. The
-      // disposers live as long as the plugin does, which is fine: registration is
-      // idempotent per name and the plugin does not unload per chat.
-      // A reused agent keeps the tool view it was built with, so registering now
-      // may be a no-op for it. Re-running the whole setup against the live agent's
-      // ctx re-announces the tools and the channel prompt for this conversation.
+      // 被复用的 agent 很可能在任何 setup 跑之前就建好了（旧版本，或直接从 Web
+      // UI 打开），于是它的工具从未注册。这里把工具注册到插件/全局作用域，让每
+      // 个 agent 都能看到。disposer 活到插件结束，这没问题：注册按名字幂等，而
+      // 插件不会按聊天卸载。
+      // 复用的 agent 保留它被建时的工具视图，所以现在注册可能对它无效。对活
+      // agent 的 ctx 重跑整套 setup，会把工具与通道提示词为这段对话重新宣告一遍。
       try {
         const setup = this.buildSetup(await this.resolveAgentPreset(), chatId)
         await setup(live.ctx)
@@ -832,21 +672,17 @@ export class ChatBridge {
 
     if (this.config.titleEqualsId) this.pinTitle(handle.agent.session, record.sessionId)
     await this.attachWorkspace(record.sessionId)
-    // Permission and plan mode are session-scoped intents: apply them only when
-    // this plugin created the session, never on a resume (a user may have changed
-    // them deliberately in the Web UI since).
+    // 权限是会话级意图：只在本插件自己创建会话时施加，绝不在 resume 时施加
+    // （用户可能已经在 Web UI 里刻意改过）。
     if (created) this.applySessionSettings(handle.agent, chatId)
     return record
   }
 
-  /**
-   * Apply the configured permission preset to a new agent.
-   *
-   * Best-effort: a missing service or an unknown preset name must not break the
-   * chat, so failures are logged and the Host default stays in force.
-   * @param agent - the freshly created agent.
-   * @param chatId - canonical chat id, for logging.
-   */
+  /** 把配置的权限预设施加到新 agent 上。
+ * 尽力而为：服务缺失或预设名未知都不能弄坏这个聊天，因此失败只记日志，宿主
+ * 默认值继续生效。
+ * @param agent - 刚创建的 agent。
+ * @param chatId - 规范 chat id，用于日志。 */
   applySessionSettings(agent, chatId) {
     const permissionName = String(this.config.sessionPermission ?? '').trim()
     if (permissionName !== '') {
@@ -865,23 +701,18 @@ export class ChatBridge {
 
   }
 
-  /**
-   * Make sure the configured workspace exists and is registered.
-   *
-   * A deleted registration (or a deleted directory) must not leave the chat with
-   * no workspace, so this recreates whichever part is missing. Failures are
-   * logged and swallowed: a workspace problem must not block the conversation.
-   */
+  /** 确保配置的工作区存在且已注册。
+ * 注册被删（或目录被删）不能让聊天没有工作区，因此缺哪部分就补哪部分。失败只
+ * 记日志并吞掉：工作区问题不得阻塞对话。 */
   async ensureWorkspace(force = false) {
     const registry = typeof this.getWorkspaceRegistry === 'function' ? this.getWorkspaceRegistry() : undefined
     const path = String(this.config.workspacePath ?? '').trim()
     if (registry === undefined || path === '') return
-    // Verified within the last minute against the same path: skip the stat.
+    // 一分钟内对同一路径校验过：跳过 stat。
     if (!force && this.workspaceCheckedPath === path && Date.now() - this.workspaceCheckedAt < 60000) return
-    const { mkdir, stat } = await import('node:fs/promises')
 
-    // A missing directory makes `resolveByPath` reject (its realpath fails), so
-    // the directory check comes first and its absence is not an error.
+    // 目录缺失会让 `resolveByPath` 拒绝（其 realpath 失败），所以先查目录，
+    // 且它的缺失不算错误。
     let directoryExists = true
     try {
       await stat(path)
@@ -893,7 +724,7 @@ export class ChatBridge {
         await mkdir(path, { recursive: true })
         this.log.record('bridge', { note: 'workspace directory created', path })
       } catch (error) {
-        this.log.record('error', { note: 'workspace directory create failed for ' + path, error: this.describeError(error) })
+        this.recordError('workspace directory create failed', path, error)
         return
       }
     }
@@ -910,16 +741,13 @@ export class ChatBridge {
       this.workspaceCheckedAt = Date.now()
       this.log.record('bridge', { note: 'workspace recreated', path })
     } catch (error) {
-      this.log.record('error', { note: 'workspace ensure failed for ' + path, error: this.describeError(error) })
+      this.recordError('workspace ensure failed', path, error)
     }
   }
 
-  /**
-   * Put the Session under the configured workspace so the sidebar groups it.
-   *
-   * Attaching is best-effort: a workspace mismatch must not break the chat.
-   * @param sessionId - the live session to record.
-   */
+  /** 把 Session 放到配置的工作区下，好让侧边栏归组。
+ * 挂载是尽力而为：工作区不匹配不能弄坏聊天。
+ * @param sessionId - 要登记的活会话。 */
   async attachWorkspace(sessionId) {
     const registry = typeof this.getWorkspaceRegistry === 'function' ? this.getWorkspaceRegistry() : undefined
     const path = String(this.config.workspacePath ?? '').trim()
@@ -928,8 +756,7 @@ export class ChatBridge {
     }
     try {
       let workspace = await registry.resolveByPath(path)
-      // A deleted registration must not leave the session ungrouped: recreate it
-      // and retry before giving up.
+      // 注册被删不能让会话失联：重建它并重试一次，再放弃。
       if (workspace === undefined) {
         await this.ensureWorkspace(true)
         workspace = await registry.resolveByPath(path)
@@ -950,14 +777,11 @@ export class ChatBridge {
     }
   }
 
-  /**
-   * Re-attach one chat's session to the configured workspace.
-   *
-   * The session id is derived from the chat id even when no live record exists
-   * (after a restart), so this can heal a session that landed ungrouped.
-   * @param chatId - canonical chat id.
-   * @returns the attach outcome.
-   */
+  /** 把某个聊天的会话重挂到配置的工作区。
+ * 即使没有活记录（重启之后），session id 也能由 chat id 派生，因此可以修复一
+ * 个落成未分组的会话。
+ * @param chatId - 规范 chat id。
+ * @returns 挂载结果。 */
   async reattachWorkspace(chatId) {
     const sessionId = this.sessionOf(chatId) ?? sessionIdOf(chatId, this.config.sessionPrefix)
     const result = await this.attachWorkspace(sessionId)
@@ -965,26 +789,14 @@ export class ChatBridge {
     return { chatId, sessionId, ...result }
   }
 
-  /**
-   * The provider and model a fresh agent starts on.
-   *
-   * Mirrors the Host's own callers: read the deployment default once per chat
-   * creation. `undefined` means the deployment has no default, which the caller
-   * logs rather than guessing.
-   * @returns agent options, or undefined when no default model is configured.
-   */
+  /** 新 agent 起步用的 provider 与 model。
+ * 与宿主自己的调用方一致：每次创建聊天时读一次部署默认值。`undefined` 表示部
+ * 署没有默认值，由调用方记日志而不是乱猜。
+ * @returns agent 选项，没有默认模型时返回 undefined。 */
   modelOptions() {
-    // An explicit per-chat model wins over the deployment default. The value is
-    // "provider::model" so a model id that itself contains a slash stays intact.
-    const configured = String(this.config.agentModel ?? '').trim()
-    if (configured !== '') {
-      const at = configured.indexOf('::')
-      if (at > 0) {
-        const provider = configured.slice(0, at)
-        const model = configured.slice(at + 2)
-        if (provider !== '' && model !== '') return { provider, model }
-      }
-    }
+    // 显式的每聊天模型优先于部署默认值。
+    const explicit = parseModelRef(this.config.agentModel)
+    if (explicit !== undefined) return explicit
     const service = this.ctx.get('agentDefaultModel')
     if (service === undefined) return undefined
     try {
@@ -1003,14 +815,9 @@ export class ChatBridge {
     }
   }
 
-  /**
-   * Pin the session title to the session id.
-   *
-   * The title service accepts an explicit user title and stops scheduling
-   * automatic ones afterwards, which is exactly "the name equals the id".
-   * @param session - the live session.
-   * @param title - the title to pin.
-   */
+  /** 把会话标题钉成 session id：标题服务接受显式用户标题后不再安排自动标题。
+   * @param session - 活会话。
+   * @param title - 要钉的标题。 */
   pinTitle(session, title) {
     const service = this.sessionTitle
     if (service === undefined) return
@@ -1022,29 +829,12 @@ export class ChatBridge {
     }
   }
 
-  /**
-   * The per-agent setup: the channel prompt section and the OneBot tool.
-   *
-   * Registered on `agentCtx` so disposal removes them with the agent.
-   * @returns the setup callback.
-   */
-  /**
-   * Register the plugin's tools at the global scope, for agents whose setup
-   * never ran (a reused live agent). Safe to call repeatedly: `register` returns
-   * a disposer and duplicate names within one layer are replaced.
-   */
-  async registerToolsFor(scopeCtx, chatId) {
-    const allow = computeAllowlist(this.config)
-    if (allow === null) return
-    const { registerTools } = await requireToolsOnce()
-    // Record what actually happened: a silent no-op here is exactly what made the
-    // model claim it had no permission to send images.
-    const toolsService = scopeCtx?.tools ?? scopeCtx?.get?.('tools')
-    if (toolsService === undefined || typeof toolsService.register !== 'function') {
-      this.log.record('warn', { note: 'tool registration skipped: no tools service on that ctx', chatId })
-      return
-    }
-    registerTools(scopeCtx, {
+  /** 给 `onebot_call` 工具准备注册选项（setup 与全局注册共用一份）。
+ * @param chatId - 规范 chat id；空串表示全局注册。
+ * @param allow - 允许的 action 集合。
+ * @returns registerTools 的选项对象。 */
+  toolRegistrationOptions(chatId, allow) {
+    return {
       connection: this.connection,
       allow,
       chatId,
@@ -1052,17 +842,31 @@ export class ChatBridge {
       prompts: {
         call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
       },
-      recordLog: (note) => this.log.record('bridge', { note }),
-    })
+      recordLog: chatId === ''
+        ? (note) => this.log.record('bridge', { note })
+        : (note) => this.log.record('bridge', { note, chatId }),
+    }
+  }
+
+  /** 在全局作用域注册本插件的工具，供 setup 从未跑过的 agent（被复用的活 agent）
+ * 使用。可以重复调用：`register` 返回 disposer，同一层里的重名会被替换。 */
+  async registerToolsFor(scopeCtx, chatId) {
+    const allow = computeAllowlist(this.config)
+    if (allow === null) return
+    const { registerTools } = await requireToolsOnce()
+    // 记下实际发生了什么：这里的静默空转，正是模型声称自己没权限发图的成因。
+    const toolsService = scopeCtx?.tools ?? scopeCtx?.get?.('tools')
+    if (toolsService === undefined || typeof toolsService.register !== 'function') {
+      this.log.record('warn', { note: 'tool registration skipped: no tools service on that ctx', chatId })
+      return
+    }
+    registerTools(scopeCtx, this.toolRegistrationOptions(chatId, allow))
     this.log.record('bridge', { note: 'tools registered for the reused agent', chatId, actions: allow.size })
   }
 
-  /**
-   * Resolve the preset id to mount: the configured one when it still exists,
-   * otherwise the deployment default. A deleted or broken preset must not leave
-   * the agent without its composition.
-   * @returns the preset id, or undefined to let the Host use its default.
-   */
+  /** 解析要挂载的 preset id：配置的那个若还在就用它，否则用部署默认值。被删或坏
+ * 掉的 preset 不能让 agent 失去自己的组合。
+ * @returns preset id，或 undefined 表示交给宿主默认值。 */
   async resolveAgentPreset() {
     const registry = typeof this.getAgentPresets === 'function' ? this.getAgentPresets() : undefined
     const configured = String(this.config.agentPreset ?? '').trim()
@@ -1078,41 +882,20 @@ export class ChatBridge {
     return undefined
   }
 
-  /**
-   * The per-agent setup: channel prompt, the OneBot tool, and the preset mount.
-   *
-   * Mounting is what makes `agentPreset` real: writing it into the session
-   * header alone records intent but never loads that preset's plugins.
-   * @param presetId - resolved preset id, or undefined for the Host default.
-   * @returns the setup callback.
-   */
+  /** 每个 agent 的 setup：通道提示词、`onebot_call` 工具与 preset 挂载。
+ * 挂载才让 `agentPreset` 真正生效：只把 id 写进会话 header 只记录了意图，从不
+ * 加载该 preset 的插件。
+ * @param presetId - 解析后的 preset id，undefined 表示宿主默认值。
+ * @returns setup 回调。 */
   buildSetup(presetId, chatId) {
     return async (agentCtx) => {
-      // The tool is registered only when at least one action is enabled, so a
-      // chat never sees a `onebot_call` that can do nothing. Evaluated per agent
-      // at creation time: an existing chat keeps the tool set it was created with.
+      // 工具只在至少有一个 action 启用时注册，聊天因此永远看不到一个什么都做不
+      // 了的 `onebot_call`。按 agent 在创建时求值：已存在的聊天保留它被建时的
+      // 工具集。
       const allow = computeAllowlist(this.config)
-      // Record what the agent ctx actually exposes: a missing tools service here
-      // silently costs the model every OneBot tool.
-      this.log.record('bridge', {
-        note: 'setup ctx probe',
-        chatId,
-        hasTools: typeof (agentCtx?.tools ?? agentCtx?.get?.('tools'))?.register === 'function',
-        hasSystemPrompt: typeof agentCtx?.systemPrompt?.section === 'function',
-        keys: Object.keys(agentCtx ?? {}).slice(0, 8).join(','),
-      })
       if (allow !== null) {
         const { registerTools } = await requireToolsOnce()
-        registerTools(agentCtx, {
-          connection: this.connection,
-          allow,
-          chatId,
-          deleteSentMedia: this.config.deleteSentMedia === true,
-          recordLog: (note) => this.log.record('bridge', { note, chatId }),
-          prompts: {
-            call: renderToolCallPrompt(this.config.toolCallPrompt, allow),
-          },
-        })
+        registerTools(agentCtx, this.toolRegistrationOptions(chatId, allow))
       }
       agentCtx.systemPrompt.section({
         name: 'channel:dsh-onebot-mini',
@@ -1130,11 +913,9 @@ export class ChatBridge {
     }
   }
 
-  /**
-   * React to one session event.
-   * @param session - the session that emitted it.
-   * @param event - the committed event.
-   */
+  /** 响应一条会话事件。
+ * @param session - 发出该事件的会话。
+ * @param event - 已提交的事件。 */
   onSessionEvent(session, event) {
     if (this.stopping) return
     const chatId = this.bySession.get(session.id)
@@ -1142,24 +923,20 @@ export class ChatBridge {
     const chat = splitChatId(chatId)
 
     if (event.type === 'turn/start') {
-      // Reset here, not at dispatch: a message queued while a turn runs must not
-      // wipe the text that turn has already accumulated.
+      // 在这里重置而不是在 dispatch：回合运行期间排队的消息，不得抹掉该回合已经
+      // 累积的文本。
       this.buffers.set(chatId, '')
       this.sentThisTurn.delete(chatId)
-      // Bind this turn to the oldest queued message's inbound files.
-      const queue = this.inboundQueue.get(chatId)
-      const next = queue !== undefined && queue.length > 0 ? queue.shift() : undefined
-      if (queue !== undefined && queue.length === 0) this.inboundQueue.delete(chatId)
-      if (next !== undefined) this.inboundCurrent.set(chatId, next)
-      else this.inboundCurrent.delete(chatId)
+      // 把本回合绑到最老那条排队消息的入站文件上。
+      this.bindTurnInbound(chatId)
       return
     }
 
     if (event.type === 'assistant/message') {
       const text = textOfMessage(event.data?.message)
       if (text === '') return
-      // `stream` (the default) sends each message the moment it appears;
-      // `final` collects it and lets `turn/end` send the whole answer at once.
+      // `stream`（默认）在消息出现的那一刻就发；`final` 先收集，让 `turn/end`
+      // 一次发出整段回答。
       if (this.config.replyMode === 'final') {
         this.buffers.set(chatId, (this.buffers.get(chatId) ?? '') + text)
       } else {
@@ -1174,71 +951,58 @@ export class ChatBridge {
     }
   }
 
-  /**
-   * Queue one streamed delivery behind the chat's previous streamed send.
-   *
-   * Serializing per chat keeps two assistant messages in production order even
-   * though `deliver` is async.
-   * @param chatId - canonical chat id.
-   * @param chat - split chat id.
-   * @param text - assistant text to send now.
-   */
+  /** 把一次流式投递排在该聊天上一条流式发送之后。
+ * 按聊天串行，让两条助手消息即使 `deliver` 是异步的也保持生产顺序。
+ * @param chatId - 规范 chat id。
+ * @param chat - 拆开的 chat id。
+ * @param text - 要立刻发送的助手文本。 */
   enqueueStream(chatId, chat, text) {
     const previous = this.streamQueues.get(chatId) ?? Promise.resolve()
     const next = previous.catch(() => {}).then(() => this.deliver(chatId, chat, text))
     this.streamQueues.set(chatId, next)
   }
 
-  /**
-   * Flush one turn at `turn/end`.
-   *
-   * In `final` mode the buffered text goes out as one message; in `stream` mode
-   * the already-enqueued sends are awaited so inbound files stay on disk until
-   * every reply that might echo them has gone out. A turn that produced nothing
-   * still reports an error notice, and an errored turn that already streamed
-   * text does not add a redundant one.
-   * @param chatId - canonical chat id.
-   * @param chat - split chat id.
-   * @param event - the `turn/end` event.
-   * @returns a promise that resolves once the turn's sends and cleanup finish.
-   */
+  /** 在 `turn/end` 冲刷一个回合。
+ * `final` 模式把缓存的文本作为一条消息发出；`stream` 模式则等待已排队的发送结
+ * 束，好让入站文件留在盘上直到每一条可能回显它们的回复都已发出。什么都没产生
+ * 的回合仍要报一条错误提示，而已经流式发过文本的错误回合不再补一条冗余提示。
+ * @param chatId - 规范 chat id。
+ * @param chat - 拆开的 chat id。
+ * @param event - `turn/end` 事件。
+ * @returns 该回合的发送与清理都完成后 resolve 的 promise。 */
   async finishTurn(chatId, chat, event) {
     const pending = this.streamQueues.get(chatId)
     this.streamQueues.delete(chatId)
     const buffered = this.buffers.get(chatId) ?? ''
     this.buffers.delete(chatId)
     const streamed = this.sentThisTurn.delete(chatId)
-    // Detach this turn's inbound files now; delete them after the reply has
-    // gone out, because the reply may echo one of those same files back.
-    const inboundPaths = this.takeCurrentInbound(chatId)
+    // 现在就把本回合的入站文件摘下来；等回复发出后再删，因为回复可能回显其中
+    // 某个文件。
+    const inboundPaths = this.takeInbound(chatId)
     const reason = event.data?.reason
     try {
       if (pending !== undefined) await pending.catch(() => {})
       if (buffered.trim() !== '') {
-        // Covers `final` mode, and a turn whose mode flipped to `stream` after
-        // it had already buffered some text.
+        // 覆盖 `final` 模式，以及一个在已缓存文本之后才切到 `stream` 的回合。
         await this.deliver(chatId, chat, buffered)
       } else if (!streamed && reason?.kind === 'error') {
         const message = String(reason?.error?.message ?? 'turn failed')
         await this.sendNotice(chatId, chat, '⚠️ 本轮出错：' + message)
       }
     } finally {
-      this.releaseInbound(chatId, inboundPaths)
+      unlinkInbound(this.log, chatId, inboundPaths)
     }
   }
 
-  /**
-   * Send one buffered reply.
-   * @param chatId - canonical chat id.
-   * @param chat - split chat id.
-   * @param text - reply text.
-   */
+  /** 发送一段缓存的回复。
+ * @param chatId - 规范 chat id。
+ * @param chat - 拆开的 chat id。
+ * @param text - 回复文本。 */
   async deliver(chatId, chat, text) {
     try {
-      // A reply may carry `[[image:…]]`-style markers; those become real message
-      // segments. Only an image travels with text, so the segment list is split
-      // into as many messages as QQ accepts (see `groupReplySegments`).
-      const { buildReplySegments, groupReplySegments, safeUnlink } = await import('./media.js')
+      // 回复里可能带 `[[image:…]]` 这类标记，它们会变成真实的消息段。只有图片能
+      // 与文本同条发送，所以段列表会拆成 QQ 能接受的多条消息（见
+      // `groupReplySegments` 里的拆分规则）。
       const { segments, warnings, sourcePaths } = await buildReplySegments(text)
       if (segments.length === 0) return
       for (const warning of warnings) {
@@ -1250,8 +1014,7 @@ export class ChatBridge {
         const data = await this.connection.sendMessage(chat, message)
         lastMessageId = String(data?.message_id ?? '')
       }
-      // Only after the gateway accepted the message: remove the source files the
-      // reply attached, when the operator asked for that.
+      // 只在网关接受消息之后，才删除回复附带的源文件 —— 前提是运营方要求这么做。
       if (this.config.deleteSentMedia === true && sourcePaths.length > 0) {
         for (const path of sourcePaths) {
           const result = await safeUnlink(path)
@@ -1271,64 +1034,55 @@ export class ChatBridge {
         media: segments.filter((segment) => segment.type !== 'text').length,
       })
     } catch (error) {
-      this.log.record('error', { note: 'reply send failed for ' + chatId, error: this.describeError(error) })
+      this.recordError('reply send failed', chatId, error)
     }
   }
 
-  /**
-   * Send one diagnostic notice to a chat.
-   * @param chatId - canonical chat id.
-   * @param chat - split chat id.
-   * @param text - notice text.
-   */
+  /** 向聊天发一条诊断提示。
+ * @param chatId - 规范 chat id。
+ * @param chat - 拆开的 chat id。
+ * @param text - 提示文本。 */
   async sendNotice(chatId, chat, text) {
     try {
       await this.connection.sendText(chat, text)
       this.log.record('bridge', { note: 'notice sent', chatId })
     } catch (error) {
-      this.log.record('error', { note: 'notice send failed for ' + chatId, error: this.describeError(error) })
+      this.recordError('notice send failed', chatId, error)
     }
   }
 
-  /**
-   * Forget one chat's mapping so the next message starts a clean conversation.
-   *
-   * A conversation that has accumulated many failed turns keeps steering the
-   * model down the same wrong path (for example, repeatedly insisting it may not
-   * send media). Dropping the mapping makes the next message open a fresh
-   * session, which is the cheapest way to break that loop without editing the
-   * stored transcript.
-   * @param chatId - canonical chat id.
-   * @returns whether a mapping existed.
-   */
+  /** 忘掉一个聊天的映射，让下一条消息开启一段干净的对话。
+ * 累积了很多失败回合的对话会把模型持续带偏（例如反复坚称自己不能发媒体）。
+ * 丢掉映射后下一条消息会开新会话，这是打破该循环最便宜的办法，不必编辑已存
+ * 的转录。
+ * @param chatId - 规范 chat id。
+ * @returns 是否原本存在映射。 */
   forgetChat(chatId) {
     const existed = this.chats.delete(chatId)
     for (const [sessionId, mapped] of this.bySession.entries()) {
       if (mapped === chatId) this.bySession.delete(sessionId)
     }
     this.buffers.delete(chatId)
+    this.streamQueues.delete(chatId)
+    this.sentThisTurn.delete(chatId)
+    this.inboundQueue.delete(chatId)
+    this.inboundCurrent.delete(chatId)
     this.log.record('bridge', { note: 'chat mapping forgotten; the next message starts a fresh session', chatId })
     return existed
   }
 
-  /**
-   * Resolve one chat's session id for the log page (diagnostics).
-   * @param chatId - canonical chat id.
-   * @returns the session id, or undefined when the chat has no agent yet.
-   */
+  /** 为日志页（诊断）解析某个聊天的 session id。
+ * @param chatId - 规范 chat id。
+ * @returns session id；该聊天还没有 agent 时返回 undefined。 */
   sessionOf(chatId) {
     return this.chats.get(chatId)?.sessionId
   }
 }
 
-/**
- * Join an assistant message's text blocks.
- *
- * Reasoning and tool-call blocks are skipped on purpose: sending them to a chat
- * would leak chain-of-thought and raw tool arguments.
- * @param message - the assistant message.
- * @returns the joined text.
- */
+/** 拼合一条助手消息里的文本块。
+ * 刻意跳过推理块与工具调用块：把它们发到聊天里会泄漏思维链与原始工具参数。
+ * @param message - 助手消息。
+ * @returns 拼合后的文本。 */
 export function textOfMessage(message) {
   if (message === null || typeof message !== 'object') return ''
   const content = message.content
@@ -1342,22 +1096,19 @@ export function textOfMessage(message) {
   return parts.join('\n').trim()
 }
 
-/**
- * The platform guidance section injected into every OneBot chat's agent.
- * @param config - the effective config.
- * @returns the section text.
- */
-/** Load the tools module once; subsequent calls reuse the cached ESM binding. */
+/** 只加载一次 tools 模块；后续调用复用缓存后的 ESM 绑定。 */
 let toolsModule
 async function requireToolsOnce() {
   toolsModule ??= await import('./tools.js')
   return toolsModule
 }
 
+/** 注入到每个 OneBot 聊天 agent 里的平台说明。
+ * @param config - 生效配置。
+ * @returns 说明文本。 */
 export function buildPlatformPrompt(config) {
-  // The prose lives in the config now (editable from the Prompt page); the code
-  // only fills the dynamic parts, so an operator can rewrite the wording without
-  // touching a build.
+  // 文案现在住在配置里（可在提示词页编辑），代码只填动态部分，
+  // 于是运营方不必重新构建就能改写措辞。
   const template = String(config?.channelPrompt ?? '').trim() !== ''
     ? String(config.channelPrompt)
     : DEFAULT_CHANNEL_PROMPT
@@ -1382,9 +1133,8 @@ export function buildPlatformPrompt(config) {
       ? config.actionPrompts
       : {}
     const lines = []
-    // Advertise exactly what the operator left enabled, with each action's own
-    // prompt (built-in doc or the operator's override), so the model never wastes
-    // a turn on an action that would be refused and knows the parameters.
+    // 只宣告运营方真正留下的 action，并附上各自的提示词（内置文档或运营方覆
+    // 盖），模型因此不会把回合浪费在一个会被拒的动作上，也知道参数。
     for (const group of enabledGroups(allow)) {
       lines.push('【' + (GROUP_LABELS[group.id] ?? group.id) + '】')
       for (const action of group.actions) {

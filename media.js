@@ -1,45 +1,31 @@
 import { tmpdir } from 'node:os'
-import { isAbsolute, basename, resolve } from 'node:path'
-import { lstat, unlink } from 'node:fs/promises'
+import { basename, resolve } from 'node:path'
+import { lstat, readFile, stat, unlink } from 'node:fs/promises'
 import { dshHome } from './config.js'
 
 /**
- * Sending media segments on a bridged chat.
+ * 桥接聊天里的媒体段发送。
  *
- * The reply path only ever produces text: the bridge buffers the assistant's
- * text blocks and sends one text segment. Anything else — an image, a voice
- * clip, a file — has to be an explicit message segment, and the gateway must
- * receive the bytes in a form it can read.
- *
- * The plugin runs on the DSH host while NapCat usually runs in another
- * container, so a path on this host is not readable by the gateway. The
- * therefore-supported sources are:
- *
- *  - `url`:    an http(s) URL the gateway can reach;
- *  - `base64`: raw bytes carried inline as `base64://…`, which needs no shared
- *    filesystem at all;
- *  - `path`:   a file on the DSH host, read here and inlined as base64, so the
- *    caller can pass a local file without caring where NapCat runs.
- *
- * A hard size ceiling keeps one call from pushing a multi-hundred-megabyte
- * payload through the WebSocket.
+ * 回复通道只产出文本，图片 / 语音 / 文件必须作为显式消息段发出，并让网关
+ * 拿到它读得懂的字节。支持三种来源：`url`、`base64`、本机 `path`（就地读成
+ * base64）。硬性大小上限防止一次调用把几百兆塞进 WebSocket。
  */
 
-/** The largest media payload this module will relay, in bytes. */
+/** 本模块单次转发的媒体上限（字节）。 */
 export const MAX_MEDIA_BYTES = 20 * 1024 * 1024
 
-/** Segment types accepted by `buildSegment`. */
+/** `buildSegment` 接受的段类型。 */
 export const MEDIA_KINDS = Object.freeze(['image', 'record', 'video', 'file'])
 
 /**
- * Build one OneBot media segment.
+ * 构造一个 OneBot 媒体段。
  *
- * `file` is the field every OneBot media segment uses; the value may be a URL,
- * a `file:///` path, or `base64://<payload>`. `name` only matters for a file.
- * @param kind - image / record / video / file.
- * @param source - `{ url?, base64? }`.
- * @param name - optional display name for a file.
- * @returns the message segment.
+ * `file` 是所有媒体段通用的字段，值可以是 URL、`file:///` 路径或
+ * `base64://<payload>`；`name` 只对文件有意义。
+ * @param kind - image / record / video / file。
+ * @param source - `{ url?, base64? }`。
+ * @param name - 可选的文件显示名。
+ * @returns 消息段。
  */
 export function buildSegment(kind, source, name) {
   const data = {}
@@ -53,12 +39,11 @@ export function buildSegment(kind, source, name) {
 }
 
 /**
- * Read a local file into base64, enforcing the size ceiling.
- * @param path - the file path on this host.
- * @returns `{ ok: true, base64 }` or `{ ok: false, reason }`.
+ * 把本机文件读成 base64，并执行大小上限。
+ * @param path - 本机文件路径。
+ * @returns `{ ok: true, base64 }` 或 `{ ok: false, reason }`。
  */
 export async function readFileAsBase64(path) {
-  const { readFile, stat } = await import('node:fs/promises')
   try {
     const info = await stat(path)
     if (!info.isFile()) return { ok: false, reason: 'not a file: ' + path }
@@ -71,12 +56,11 @@ export async function readFileAsBase64(path) {
 }
 
 /**
- * Build the ordered segment list for one outgoing message.
+ * 构造一条待发消息的有序段列表。
  *
- * `send_msg` accepts a mixed segment array, so a caption and its picture travel
- * as one message instead of two. Text first (when given), then the media item.
- * @param options - `{ text?, kind?, url?, base64?, name? }`.
- * @returns the segment array; empty when neither text nor media was supplied.
+ * `send_msg` 接受混合段数组，所以文字和它的图片作为一条消息发出，而不是两条。
+ * @param options - `{ text?, kind?, url?, base64?, name? }`。
+ * @returns 段数组；既无文字也无媒体时为空。
  */
 export function buildMessageSegments(options) {
   const segments = []
@@ -94,14 +78,14 @@ export function buildMessageSegments(options) {
 }
 
 /**
- * The parameters for one `send_msg` call.
+ * 一次 `send_msg` 调用的参数。
  *
- * `send_msg` is the single send interface: it takes `message_type` plus the
- * matching id, and a segment array that may mix text with image/record/video/file.
- * @param chatType - `private` or `group`.
- * @param chatId - the numeric target.
- * @param segments - the ordered segment array.
- * @returns the action params.
+ * `send_msg` 是唯一的发送接口：它接受 `message_type` 加上对应 id，以及一个
+ * 可混排文字与图片 / 语音 / 视频 / 文件的段数组。
+ * @param chatType - `private` 或 `group`。
+ * @param chatId - 数字目标。
+ * @param segments - 有序段数组。
+ * @returns 动作参数。
  */
 export function sendMsgParams(chatType, chatId, segments) {
   const id = Number(chatId)
@@ -111,15 +95,13 @@ export function sendMsgParams(chatType, chatId, segments) {
 }
 
 /**
- * Send one message through the unified `send_msg` action.
+ * 通过统一的 `send_msg` 动作发送一条消息。
  *
- * Wraps the interface the gateway already offers instead of assembling
- * `send_group_msg`/`send_private_msg` calls: text, image, voice, video and file
- * can share one segment array, which is how a caption and its picture arrive
- * together.
- * @param connection - the live `connection` facade (`call`).
- * @param options - `{ chatType, chatId, text?, kind?, url?, base64?, path?, name? }`.
- * @returns `{ ok, data?, error? }`.
+ * 复用网关已有的单一发送接口，而不是分别拼 `send_group_msg` /
+ * `send_private_msg`：这样文字、图片、语音、视频、文件可以共用一个段数组。
+ * @param connection - 在线 `connection` 门面（提供 `call`）。
+ * @param options - `{ chatType, chatId, text?, kind?, url?, base64?, path?, name? }`。
+ * @returns `{ ok, data?, error? }`。
  */
 export async function sendMedia(connection, options) {
   const chatType = options.chatType === 'group' ? 'group' : (options.chatType === 'private' ? 'private' : '')
@@ -135,14 +117,13 @@ export async function sendMedia(connection, options) {
   if (kind !== '' && !MEDIA_KINDS.includes(kind)) {
     return { ok: false, error: 'kind must be one of ' + MEDIA_KINDS.join(', ') }
   }
-  // Only an image may share a message with text. A voice clip, a video and a
-  // file each go out on their own; the QQ client does not present them together
-  // with a caption, so the wrapper refuses instead of sending something odd.
+  // 只有图片能和文字同条发送；语音、视频、文件各自单发，客户端不会把说明和
+  // 它们并排呈现，所以这里直接拒绝而不是发出奇怪的东西。
   if (text.trim() !== '' && kind !== '' && kind !== 'image') {
     return { ok: false, error: 'text can only accompany an image; send ' + kind + ' on its own' }
   }
 
-  // Only a media item needs a payload read; text alone skips all of it.
+  // 只有媒体项才需要读取载荷，纯文字跳过全部这一步。
   let source
   if (kind !== '') {
     if (typeof options.path === 'string' && options.path !== '') {
@@ -166,10 +147,8 @@ export async function sendMedia(connection, options) {
   const params = sendMsgParams(chatType, chatId, segments)
   try {
     const data = await connection.call('send_msg', params)
-    // A source file is only removed after the gateway accepted the send, and only
-    // when the caller asked for it. The outcome is reported through `onCleanup`
-    // (the log), not in the tool result: the model only needs to know whether the
-    // message went out, and an extra field would trip the tool's output schema.
+    // 源文件只在网关确认接收、且调用方要求时才删除；结果经 `onCleanup` 进日志，
+    // 不进工具结果——模型只需要知道发没发出去。
     if (options.deleteSource === true && typeof options.path === 'string' && options.path !== '') {
       const result = await safeUnlink(options.path)
       if (typeof options.onCleanup === 'function') {
@@ -183,25 +162,23 @@ export async function sendMedia(connection, options) {
 }
 
 /**
- * The directories a sent source file may be deleted from.
+ * 允许删除源文件的目录白名单。
  *
- * Deleting an arbitrary absolute path a model produced would be one bad prompt
- * away from wiping something important, so deletion is limited to scratch and
- * workspace areas. Anything else is left alone and reported back.
- * @returns the allowed roots, fully resolved.
+ * 删除模型给出的任意绝对路径，离误删重要文件只差一次糟糕的提示词，所以删除
+ * 只限临时目录与工作区；其余一律保留并如实回报。
+ * @returns 允许的根目录，已 resolve。
  */
 function allowedDeleteRoots() {
   return [resolve(tmpdir()), '/workspace', resolve(dshHome())]
 }
 
 /**
- * Delete one sent source file, refusing anything outside the allowed roots.
- * @param target - the configured path.
- * @returns `{ ok: true }` or `{ ok: false, reason }`.
+ * 删除一个已发送的源文件，越出白名单即拒绝。
+ * @param target - 配置里给出的路径。
+ * @returns `{ ok: true }` 或 `{ ok: false, reason }`。
  */
 export async function safeUnlink(target) {
   const absolute = resolve(String(target ?? ''))
-  if (!isAbsolute(absolute)) return { ok: false, reason: 'not an absolute path' }
   const roots = allowedDeleteRoots()
   const inside = roots.some((root) => absolute === root || absolute.startsWith(root + '/'))
   if (!inside) return { ok: false, reason: 'outside the allowed roots' }
@@ -212,31 +189,27 @@ export async function safeUnlink(target) {
     await unlink(absolute)
     return { ok: true }
   } catch (error) {
-    if (error?.code === 'ENOENT') return { ok: true }  // already gone: nothing to do
+    if (error?.code === 'ENOENT') return { ok: true }  // 已经不在了：无事可做
     return { ok: false, reason: String(error?.message ?? error) }
   }
 }
 
 
 /**
- * The marker a reply can carry to attach media, e.g. `[[image:/tmp/a.png]]`.
+ * 回复里用来附带媒体的标记，例如 `[[image:/tmp/a.png]]`。
  *
- * The assistant only produces text, so a reply that should carry media needs a
- * convention the bridge can parse. Doubled brackets keep it from colliding with
- * ordinary prose, and the four kind names match the tool's `kind` values.
+ * 助手只产出文本，因此需要一套桥接层可解析的约定；双方括号避免与正文冲突，
+ * 四个类型名与工具的 `kind` 取值一致。
  */
-export const MEDIA_MARKER_PATTERN = /\[\[(image|record|video|file):([^\[\]]+)\]\]/g
+const MEDIA_MARKER_PATTERN = /\[\[(image|record|video|file):([^\[\]]+)\]\]/g
 
 /**
- * Split one flat reply segment list into the messages it may actually be sent as.
+ * 把一条扁平回复的段列表切成它实际可发的若干条消息。
  *
- * Only an image shares a message with text; a voice clip, a video and a file go
- * out alone, because QQ does not present them together with a caption. Text runs
- * therefore break wherever a non-image media item sits: the segments before it
- * form one message, the media item is its own message, and the segments after it
- * start another.
- * @param segments - the ordered segments from `buildReplySegments`.
- * @returns an array of segment arrays, one per outgoing message.
+ * 只有图片能和文字同条；语音、视频、文件各自单发，因此文本串会在非图片媒体
+ * 处断开：它之前的段成一条，媒体项自成一条，其后的段重新开始。
+ * @param segments - `buildReplySegments` 产出的有序段。
+ * @returns 段数组的数组，每项对应一条外发消息。
  */
 export function groupReplySegments(segments) {
   const list = Array.isArray(segments) ? segments : []
@@ -248,7 +221,7 @@ export function groupReplySegments(segments) {
   }
   for (const segment of list) {
     if (segment !== null && typeof segment === 'object' && segment.type !== 'text' && segment.type !== 'image') {
-      // A standalone attachment: it must not travel with any text.
+      // 独立附件：不能与任何文字同行。
       flush()
       messages.push([segment])
       continue
@@ -260,19 +233,15 @@ export function groupReplySegments(segments) {
 }
 
 /**
- * Turn a reply's text into an ordered segment list.
+ * 把一条回复的文字转成有序段列表。
  *
- * Text around a marker is kept in order, so a caption can sit before or after
- * its picture. A marker whose file is missing or too large is replaced by a
- * short text note instead of failing the whole reply — losing one attachment
- * must not lose the message.
- * @param text - the buffered reply text.
- * @param options - `{ maxBytes? }`.
- * @returns `{ segments, warnings, sourcePaths }`; `sourcePaths` lists the local
- *   files that were inlined, so the caller can remove them after a successful
- *   send.
+ * 标记两侧的文字保持原序，说明可以在图片之前或之后。标记指向的文件缺失或过大
+ * 时，替换成一句简短提示，而不是让整条回复失败。
+ * @param text - 缓冲的回复文本。
+ * @returns `{ segments, warnings, sourcePaths }`；`sourcePaths` 列出被内联的本机
+ *   文件，供调用方在发送成功后删除。
  */
-export async function buildReplySegments(text, options = {}) {
+export async function buildReplySegments(text) {
   const input = String(text ?? '')
   const segments = []
   const warnings = []
@@ -282,12 +251,10 @@ export async function buildReplySegments(text, options = {}) {
     if (trimmed !== '') segments.push({ type: 'text', data: { text: trimmed } })
   }
 
-  let lastIndex = 0
-  const pattern = new RegExp(MEDIA_MARKER_PATTERN.source, 'g')
-  let match
-  while ((match = pattern.exec(input)) !== null) {
-    pushText(input.slice(lastIndex, match.index))
-    lastIndex = match.index + match[0].length
+  let cursor = 0
+  for (const match of input.matchAll(MEDIA_MARKER_PATTERN)) {
+    pushText(input.slice(cursor, match.index))
+    cursor = match.index + match[0].length
     const kind = match[1]
     const source = match[2].trim()
     const isUrl = /^https?:\/\//i.test(source)
@@ -297,9 +264,8 @@ export async function buildReplySegments(text, options = {}) {
     } else {
       const read = await readFileAsBase64(source)
       if (read.ok !== true) {
-        // The reason carries an absolute path and an errno string. That is
-        // useless (and leaky) in a chat, so the reader sees a short notice while
-        // the full reason goes to the log.
+        // 原始原因带着绝对路径与 errno 字符串，进聊天既无用又泄露目录结构，
+        // 所以聊天只看简短提示，完整原因进日志。
         warnings.push(kind + ': ' + read.reason)
         pushText(mediaFailureNotice(kind))
         continue
@@ -309,19 +275,18 @@ export async function buildReplySegments(text, options = {}) {
     }
     segments.push(built)
   }
-  pushText(input.slice(lastIndex))
+  pushText(input.slice(cursor))
 
   return { segments, warnings, sourcePaths }
 }
 
 
 /**
- * The chat-facing notice for a media attachment that could not be sent.
+ * 媒体附件发不出去时给聊天看的提示。
  *
- * Kept short and free of paths or errno text: the chat should not learn the
- * host's directory layout, and the operator has the log for the real reason.
- * @param kind - image / record / video / file.
- * @returns one short sentence.
+ * 保持简短且不含路径与 errno：聊天不该知道宿主目录结构，真实原因在日志里。
+ * @param kind - image / record / video / file。
+ * @returns 一句短提示。
  */
 export function mediaFailureNotice(kind) {
   const noun = kind === 'image' ? '图片' : (kind === 'record' ? '语音' : (kind === 'video' ? '视频' : '文件'))

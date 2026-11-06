@@ -200,13 +200,6 @@ export function inboundParagraph(template) {
 export const DEFAULT_TOOL_CALL_PROMPT = '执行一个动作：OneBot 11 动作，或本插件的本地动作（send_message、list_files）。'
   + '把动作名放进 action，参数放进 params。不确定用哪个动作时，按动作名称与中文注释自行挑选。动作结果以 JSON 返回。{enabledNote}'
 
-/** 轻量「插话 / 排队」判定器的默认指令。 */
-export const DEFAULT_INTERJECT_PROMPT = '你负责为一位可能仍在作答的助手转发一条新的 QQ 消息。'
-  + '只回答一个词：STEER 或 FOLLOWUP。'
-  + 'STEER 表示这条消息是在纠正、改变方向、叫停或紧急补充正在进行的回答，必须让它在模型的下一步执行时送达。'
-  + 'FOLLOWUP 表示它是一个独立的后续请求，可以等当前回答结束后再处理。'
-  + '拿不准时，回答 FOLLOWUP。'
-
 /**
  * 每一个面向模型的提示词，按「提示词」页面展示顺序排列。
  *
@@ -226,7 +219,6 @@ export const PROMPT_DEFS = Object.freeze([
   Object.freeze({ id: 'tools', field: 'toolsPrompt', labelKey: 'promptDefTools', placeholders: Object.freeze([]), default: DEFAULT_TOOLS_PROMPT }),
   Object.freeze({ id: 'inbound', field: 'inboundPrompt', labelKey: 'promptDefInbound', placeholders: Object.freeze([]), default: DEFAULT_INBOUND_PROMPT }),
   Object.freeze({ id: 'toolCall', field: 'toolCallPrompt', labelKey: 'promptDefToolCall', placeholders: Object.freeze(['{enabledNote}']), default: DEFAULT_TOOL_CALL_PROMPT }),
-  Object.freeze({ id: 'interject', field: 'interjectPrompt', labelKey: 'promptDefInterject', placeholders: Object.freeze([]), default: DEFAULT_INTERJECT_PROMPT }),
 ])
 
 /**
