@@ -9,7 +9,7 @@
  *  - `{admin}` —— 管理员身份说明（告诉模型管理员 QQ 号、其指令优先），未设置时为空；
  *  - `{senderPrefix}` —— 群聊发言人前缀说明，或空；
  *  - `{media}` —— 媒体发送工具 + 标记段落，工具关闭时为空；
- *  - `{tools}` —— 本插件唯一的工具 onebot_call（含本地动作 send_media /
+ *  - `{tools}` —— 本插件唯一的工具 onebot_call（含本地动作 send_message /
  *    list_files）以及「QQ 相关操作只能用这个工具」的硬规则；
  *  - `{actions}` —— 工具关闭时的说明，或当前启用的动作清单（每个动作含功能、参数和用法）；
  *  - `{inbound}` —— 收到的图片/语音/视频/文件已保存到本机、如何读取的说明。
@@ -125,9 +125,9 @@ export function senderPrefixParagraph(template) {
 
 /** 默认：媒体发送段落（工具启用时注入）。 */
 export const DEFAULT_MEDIA_PROMPT = [
-  '- 要把图片、语音、视频或文件作为单独一条消息发出时，调用 onebot_call，action 填 send_media，params 填 {kind, path/url/base64}。要让它和文字一起作为一条回复发出时，在回复里写标记：[[image:/abs/path.png]]、[[record:/abs/a.wav]]、[[video:/abs/a.mp4]] 或 [[file:/abs/a.zip]]——路径也可以是 http(s) URL。插件会把每个标记替换成真实附件。仅在用户要求时才发送媒体。',
+  '- 要把图片、语音、视频或文件作为单独一条消息发出时，调用 onebot_call，action 填 send_message，params 填 {kind, path/url/base64}（也可加 text 组成一条图文消息）。要让它和文字一起作为一条回复发出时，在回复里写标记：[[image:/abs/path.png]]、[[record:/abs/a.wav]]、[[video:/abs/a.mp4]] 或 [[file:/abs/a.zip]]——路径也可以是 http(s) URL。插件会把每个标记替换成真实附件。仅在用户要求时才发送媒体。',
   '- 你看不到磁盘。在说出某个本地文件名之前，先调用 onebot_call(action="list_files", params={"dir": "/绝对目录"})，使用它返回的真实文件名。绝不臆造文件名：路径错误会导致附件发送失败，用户只会看到一条简短提示。',
-  '- 当用户要图片、语音、视频或文件时，你【必须】用 onebot_call 的 send_media 动作发送（先 list_files 列目录）。不要回复说你没有权限、账号受限、只有管理员才能发媒体、或工具不可用——这些说法在本通道都是错误的。如果确实发送失败，如实报告工具返回的错误。绝不要让用户把你设为管理员来换取发媒体的能力。',
+  '- 当用户要图片、语音、视频或文件时，你【必须】用 onebot_call 的 send_message 动作发送（先 list_files 列目录）。不要回复说你没有权限、账号受限、只有管理员才能发媒体、或工具不可用——这些说法在本通道都是错误的。如果确实发送失败，如实报告工具返回的错误。绝不要让用户把你设为管理员来换取发媒体的能力。',
 ].join('\n')
 
 /**
@@ -143,7 +143,7 @@ export function mediaParagraph(template) {
 /** 默认：工具清单段落（工具启用时注入；本地动作也在动作列表里）。 */
 export const DEFAULT_TOOLS_PROMPT = [
   '## 本插件提供的工具（所有 QQ 相关操作都必须使用这些工具）',
-  '- 本插件只注册了一个工具 onebot_call：它既执行 OneBot 11 动作，也执行本插件的本地动作（send_media 发媒体、list_files 列本机目录）。',
+  '- 本插件只注册了一个工具 onebot_call：它既执行 OneBot 11 动作，也执行本插件的本地动作（send_message 发消息、list_files 列本机目录）。',
   '- 所有 QQ 相关操作（发消息、发图片/语音/视频/文件、群管理、查询等）都必须通过 onebot_call 完成；不要使用任何其他以 qq_ 开头的工具或第三方 QQ 工具。如果工具报错，请如实转述错误，不要声称没有权限。',
   '- 调用时动作名放 action、参数放 params，且只接受已启用的动作；下面按分组列出当前可用的动作。',
 ].join('\n')
@@ -196,7 +196,7 @@ export function inboundParagraph(template) {
  *
  * `{enabledNote}` 在工具有效时展开为「只接受已启用动作」的说明，关闭时展开为空。
  */
-export const DEFAULT_TOOL_CALL_PROMPT = '执行一个动作：OneBot 11 动作，或本插件的本地动作（send_media、list_files）。'
+export const DEFAULT_TOOL_CALL_PROMPT = '执行一个动作：OneBot 11 动作，或本插件的本地动作（send_message、list_files）。'
   + '把动作名放进 action，参数放进 params。不确定用哪个动作时，按动作名称与中文注释自行挑选。动作结果以 JSON 返回。{enabledNote}'
 
 /** 轻量「插话 / 排队」判定器的默认指令。 */

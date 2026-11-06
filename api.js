@@ -744,6 +744,7 @@ export function registerRoutes(ctx, { store, log, getConnection, applyConfig, li
       const result = await sendMedia(connection, {
         chatType: body?.chatType,
         chatId: body?.chatId,
+        text: body?.text,
         kind: body?.kind,
         url: body?.url,
         base64: body?.base64,

@@ -71,42 +71,95 @@ export async function readFileAsBase64(path) {
 }
 
 /**
- * Send one media segment to a chat.
+ * Build the ordered segment list for one outgoing message.
+ *
+ * `send_msg` accepts a mixed segment array, so a caption and its picture travel
+ * as one message instead of two. Text first (when given), then the media item.
+ * @param options - `{ text?, kind?, url?, base64?, name? }`.
+ * @returns the segment array; empty when neither text nor media was supplied.
+ */
+export function buildMessageSegments(options) {
+  const segments = []
+  const text = String(options?.text ?? '').trim()
+  if (text !== '') segments.push({ type: 'text', data: { text } })
+  const kind = String(options?.kind ?? '')
+  if (MEDIA_KINDS.includes(kind)) {
+    if (typeof options.base64 === 'string' && options.base64 !== '') {
+      segments.push(buildSegment(kind, { base64: options.base64 }, options.name))
+    } else if (typeof options.url === 'string' && options.url !== '') {
+      segments.push(buildSegment(kind, { url: options.url }, options.name))
+    }
+  }
+  return segments
+}
+
+/**
+ * The parameters for one `send_msg` call.
+ *
+ * `send_msg` is the single send interface: it takes `message_type` plus the
+ * matching id, and a segment array that may mix text with image/record/video/file.
+ * @param chatType - `private` or `group`.
+ * @param chatId - the numeric target.
+ * @param segments - the ordered segment array.
+ * @returns the action params.
+ */
+export function sendMsgParams(chatType, chatId, segments) {
+  const id = Number(chatId)
+  return chatType === 'group'
+    ? { message_type: 'group', group_id: id, message: segments }
+    : { message_type: 'private', user_id: id, message: segments }
+}
+
+/**
+ * Send one message through the unified `send_msg` action.
+ *
+ * Wraps the interface the gateway already offers instead of assembling
+ * `send_group_msg`/`send_private_msg` calls: text, image, voice, video and file
+ * can share one segment array, which is how a caption and its picture arrive
+ * together.
  * @param connection - the live `connection` facade (`call`).
- * @param options - `{ chatType, chatId, kind, url?, base64?, path?, name? }`.
+ * @param options - `{ chatType, chatId, text?, kind?, url?, base64?, path?, name? }`.
  * @returns `{ ok, data?, error? }`.
  */
 export async function sendMedia(connection, options) {
   const chatType = options.chatType === 'group' ? 'group' : (options.chatType === 'private' ? 'private' : '')
   const chatId = String(options.chatId ?? '').trim()
-  const kind = String(options.kind ?? '')
   if (chatType === '') return { ok: false, error: 'chatType must be group or private' }
   if (!/^[0-9]+$/.test(chatId)) return { ok: false, error: 'chatId must be numeric' }
-  if (!MEDIA_KINDS.includes(kind)) return { ok: false, error: 'kind must be one of ' + MEDIA_KINDS.join(', ') }
 
-  let source
-  if (typeof options.path === 'string' && options.path !== '') {
-    const read = await readFileAsBase64(options.path)
-    if (read.ok !== true) return { ok: false, error: read.reason }
-    source = { base64: read.base64 }
-  } else if (typeof options.base64 === 'string' && options.base64 !== '') {
-    if (options.base64.length > Math.ceil(MAX_MEDIA_BYTES * 4 / 3) + 4) {
-      return { ok: false, error: 'the base64 payload is above the size ceiling' }
-    }
-    source = { base64: options.base64 }
-  } else if (typeof options.url === 'string' && options.url !== '') {
-    source = { url: options.url }
-  } else {
-    return { ok: false, error: 'one of url, base64 or path is required' }
+  const text = String(options.text ?? '')
+  const kind = String(options.kind ?? '')
+  if (text.trim() === '' && kind === '') {
+    return { ok: false, error: 'give text, a media item, or both' }
+  }
+  if (kind !== '' && !MEDIA_KINDS.includes(kind)) {
+    return { ok: false, error: 'kind must be one of ' + MEDIA_KINDS.join(', ') }
   }
 
-  const segment = buildSegment(kind, source, options.name)
-  const action = chatType === 'group' ? 'send_group_msg' : 'send_private_msg'
-  const params = chatType === 'group'
-    ? { group_id: Number(chatId), message: [segment] }
-    : { user_id: Number(chatId), message: [segment] }
+  // Only a media item needs a payload read; text alone skips all of it.
+  let source
+  if (kind !== '') {
+    if (typeof options.path === 'string' && options.path !== '') {
+      const read = await readFileAsBase64(options.path)
+      if (read.ok !== true) return { ok: false, error: read.reason }
+      source = { base64: read.base64 }
+    } else if (typeof options.base64 === 'string' && options.base64 !== '') {
+      if (options.base64.length > Math.ceil(MAX_MEDIA_BYTES * 4 / 3) + 4) {
+        return { ok: false, error: 'the base64 payload is above the size ceiling' }
+      }
+      source = { base64: options.base64 }
+    } else if (typeof options.url === 'string' && options.url !== '') {
+      source = { url: options.url }
+    } else {
+      return { ok: false, error: 'one of url, base64 or path is required' }
+    }
+  }
+
+  const segments = buildMessageSegments({ text, kind, ...source, name: options.name })
+  if (segments.length === 0) return { ok: false, error: 'nothing to send' }
+  const params = sendMsgParams(chatType, chatId, segments)
   try {
-    const data = await connection.call(action, params)
+    const data = await connection.call('send_msg', params)
     // A source file is only removed after the gateway accepted the send, and only
     // when the caller asked for it. The outcome is reported through `onCleanup`
     // (the log), not in the tool result: the model only needs to know whether the

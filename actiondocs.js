@@ -516,19 +516,20 @@ export const ACTION_DOCS = Object.freeze({
     params: [groupId, P('album_id', 'string', true, '相册 ID'), P('lloc', 'string', true, '媒体 lloc 标识')],
   },
 
-  // --- 本地工具（不经过网关，由插件自己实现） ---
-  send_media: {
+  // --- 本地工具（包装标准动作，不直接转发网关） ---
+  send_message: {
     params: [
-      P('kind', 'enum', true, '"image"、"record"、"video" 或 "file"'),
-      P('path', 'string', false, '本机文件绝对路径（插件会内联字节后发送）'),
+      P('text', 'string', false, '要发送的文字；可与媒体一起发，形成一条图文消息'),
+      P('kind', 'enum', false, '"image"、"record"、"video" 或 "file"；只发文字时省略'),
+      P('path', 'string', false, '媒体在本机的绝对路径（插件会内联成 base64 后发送）'),
       P('url', 'string', false, '可直接下载的媒体 URL'),
       P('base64', 'string', false, '原始 base64（不带 data: 前缀）'),
       P('name', 'string', false, '显示名称，仅文件需要'),
       P('chatType', 'enum', false, '"private" 或 "group"；默认当前会话'),
       P('chatId', 'string', false, '目标 QQ 或群号；默认当前会话'),
     ],
-    summary: '发送图片/语音/视频/文件到当前或其他 QQ 会话（本机路径会内联字节）',
-    note: 'kind 必填；path / url / base64 三选一。',
+    summary: '发送一条消息：文字、图片/语音/视频/文件，或图文混排（内部包装标准 send_msg）',
+    note: 'text 与媒体至少给一个；kind 填了就要给 path / url / base64 之一。',
   },
   list_files: {
     params: [

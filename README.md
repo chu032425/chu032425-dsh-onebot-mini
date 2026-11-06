@@ -8,7 +8,7 @@
 - 模型回复 → 通过 OneBot 接口发回原聊天；
 - **唯一的 `onebot_call` 工具**：模型只需记一个工具，用 `action` + `params` 调任意动作。
   收录 **118 个 OneBot 动作 / 9 个分组**（按 [NapCat 接口文档](https://napcat.apifox.cn/)），
-  外加 **2 个本地动作**（`send_media` 发图片/语音/视频/文件、`list_files` 列本机目录，由插件自己实现、不经网关），
+  外加 **2 个本地动作**（`send_message` 发文字/图片/语音/视频/文件或图文混排、`list_files` 列本机目录，由插件自己实现，内部包装标准 `send_msg`），
   全部在左侧「工具」菜单按分组/动作开关，标「标准 / NapCat 扩展 / 本地」；
 - **收到的媒体可读取**：用户发来的图片/语音/视频/文件自动下载到工作区下的 `onebot-mini-cache/QQ/<QQ号或群号>/`
   （与 QQ 空间图片缓存同一处，统一在「缓存」页可查、可清理），消息里给出本机路径（图片用 `read_image` 看，文件用 `read`/`bash` 读，语音给出路径+消息ID，由提示词引导模型用 `onebot_call` 取转写）；`deleteInboundMedia` 默认在解析完这一轮后删除源文件，和「发送后删除源文件」一致；
@@ -157,7 +157,7 @@ dsh plugin --profile web add https://github.com/<you>/dsh-onebot-mini
 
 左侧边栏的 **工具** 菜单里，可按 **分组 + 单个动作** 勾选模型能调用的动作
 （本地工具、发送消息、媒体与文件、群管理、账号与查询、请求处理）。模型只看到一个
-`onebot_call` 工具：OneBot 动作转发给网关，本地动作（`send_media`、`list_files`）在插件内部执行。
+`onebot_call` 工具：OneBot 动作转发给网关，本地动作（`send_message`、`list_files`）在插件内部执行。
 每一项都是一个列表行：勾选框 + **中文说明** + 动作 id（如 `禁言群成员 / set_group_ban`）
 + 「标准 / NapCat 扩展 / 本地」徽章。
 每一行下方还有一个**默认折叠的「提示词」**（`<details>`），展开后可查看并修改该动作写给模型的
@@ -386,7 +386,7 @@ QQ 空间、群相册。
 | `{admin}` | 管理员身份说明：告诉模型管理员 QQ 号、其指令优先（未设置管理员时为空） |
 | `{senderPrefix}` | 「群消息带发言人前缀」的说明（关闭时为空） |
 | `{media}` | 媒体发送说明（工具关闭时为空） |
-| `{tools}` | 本插件工具说明（唯一的 `onebot_call`，含本地动作 `send_media` / `list_files`）与「QQ 相关操作只能用这个工具」的硬规则（工具关闭时为空） |
+| `{tools}` | 本插件工具说明（唯一的 `onebot_call`，含本地动作 `send_message` / `list_files`）与「QQ 相关操作只能用这个工具」的硬规则（工具关闭时为空） |
 | `{inbound}` | 收到的媒体说明（`inboundMedia` 关闭时为空） |
 | `{actions}` | 当前**已启用**的动作列表（工具关闭时换成「工具已关闭」提示） |
 
@@ -464,11 +464,13 @@ QQ 空间、群相册。
 多步回合不会刷屏。`reasoning` 与 `tool-call` 块不会发出去。
 回合出错且没有文本时，发一条 `⚠️ 本轮出错：…` 提示。
 
-**自动回复只发文字。** 图片 / 语音 / 视频 / 文件要走 `onebot_call` 的 `send_media` 动作（模型主动调用）：
+**自动回复只发文字。** 图片 / 语音 / 视频 / 文件要走 `onebot_call` 的 `send_message` 动作（模型主动调用）。
+它是标准 `send_msg` 的包装：`text` 与媒体段会合成**一条**消息，所以"文字+图"也能一次发出。
 
 | 参数 | 说明 |
 |---|---|
-| `kind` | `image` / `record` / `video` / `file` |
+| `text` | 要发送的文字；可省略，也可与媒体一起发 |
+| `kind` | `image` / `record` / `video` / `file`；只发文字时省略 |
 | `path` | DSH 本机文件路径；插件读取后**内联为 base64**，NapCat 不需要访问本机文件 |
 | `url` | 网关能访问到的 http(s) 地址 |
 | `base64` | 原始 base64（不带 `data:` 前缀） |
@@ -498,7 +500,7 @@ QQ 空间、群相册。
 
 设置页「媒体」组有一个开关 **「发送后删除源文件」**（默认开）：
 
-- 通过 `[[image:/path]]` 标记、或 `onebot_call` 的 `send_media` 动作发送**本地路径**的媒体时，
+- 通过 `[[image:/path]]` 标记、或 `onebot_call` 的 `send_message` 动作发送**本地路径**的媒体时，
   **网关确认发送成功后**才删除该源文件；
 - 用 URL 或 base64 发送的没有源文件，不受影响；
 - 删除有安全护栏：只删普通文件，且只允许 `/tmp`、`/workspace`、DSH 数据目录下的路径；

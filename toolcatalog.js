@@ -98,12 +98,12 @@ export const STANDARD_ACTIONS = Object.freeze(new Set([
  * gateway. They share the one `onebot_call` tool: the tool dispatches these
  * names to local handlers before falling back to the OneBot transport.
  */
-export const LOCAL_ACTIONS = Object.freeze(new Set(['send_media', 'list_files']))
+export const LOCAL_ACTIONS = Object.freeze(new Set(['send_message', 'list_files']))
 
 /** The operator-facing grouping. Order is the order shown in the tools page. */
 export const TOOL_GROUPS = Object.freeze([
   Object.freeze({ id: 'local', actions: Object.freeze([
-    a('send_media', '发送媒体（图片/语音/视频/文件）', 'Send image/voice/video/file'),
+    a('send_message', '发送消息（文字/图片/语音/视频/文件，可图文混排）', 'Send a message (text and media in one)'),
     a('list_files', '列出本机目录文件', 'List host directory files'),
   ]) }),
 

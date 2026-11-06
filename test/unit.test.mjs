@@ -296,6 +296,28 @@ t('a segment uses the url when given a url', JSON.stringify(buildSegment('image'
 t('a file segment carries its name', JSON.stringify(buildSegment('file', { url: 'http://x/y.zip' }, 'a.zip')) === '{"type":"file","data":{"file":"http://x/y.zip","name":"a.zip"}}')
 t('media kinds cover image, record, video and file', JSON.stringify(MEDIA_KINDS) === '["image","record","video","file"]')
 t('the media ceiling is 20 MB', MAX_MEDIA_BYTES === 20 * 1024 * 1024)
+
+// the unified send wrapper: text, media, or both in one send_msg call
+{
+  const { sendMedia, buildMessageSegments, sendMsgParams } = await import('../media.js')
+  const textOnly = buildMessageSegments({ text: '你好' })
+  t('text alone becomes one text segment', JSON.stringify(textOnly) === '[{"type":"text","data":{"text":"你好"}}]')
+  const mixed = buildMessageSegments({ text: '看这张', kind: 'image', url: 'http://x/a.png' })
+  t('text and media mix into one ordered list', mixed.length === 2 && mixed[0].type === 'text' && mixed[1].type === 'image')
+  const mediaOnly = buildMessageSegments({ kind: 'image', url: 'http://x/a.png' })
+  t('media alone becomes one media segment', mediaOnly.length === 1 && mediaOnly[0].type === 'image')
+  t('nothing given produces no segments', buildMessageSegments({}).length === 0)
+  t('send_msg params carry message_type and group_id', JSON.stringify(sendMsgParams('group', '7', [])).includes('"message_type":"group"'))
+  t('send_msg params carry message_type and user_id', JSON.stringify(sendMsgParams('private', '7', [])).includes('"user_id":7'))
+
+  const calls = []
+  const conn = { call: async (action, params) => { calls.push({ action, params }); return { message_id: 1 } } }
+  await sendMedia(conn, { chatType: 'group', chatId: '7', text: '看这张', kind: 'image', url: 'http://x/a.png' })
+  t('the wrapper always calls the unified send_msg action', calls.length === 1 && calls[0].action === 'send_msg')
+  t('the wrapper keeps text and media in one message', calls[0].params.message.length === 2)
+  const empty = await sendMedia(conn, { chatType: 'group', chatId: '7' })
+  t('an empty message is refused', empty.ok === false)
+}
 const readBack = await readFileAsBase64('/tmp/onebot-mini-unit.json')
 t('a local file is read into base64', readBack.ok === true && typeof readBack.base64 === 'string' && readBack.base64.length > 0)
 const missingFile = await readFileAsBase64('/tmp/definitely-not-here-xyz')
@@ -461,28 +483,28 @@ t('an absent payload becomes null (lossless JSON)', nullOut.ok === true && nullO
   const { registerTools: reg } = await import('../tools.js')
   const disposers = reg(
     { tools: { register: (d) => { registered.push(d.name); return () => {} } } },
-    { connection, allow: new Set(['send_media', 'list_files', 'send_group_msg']), chatId: 'private:42', deleteSentMedia: false, prompts: {}, recordLog: () => {} },
+    { connection, allow: new Set(['send_message', 'list_files', 'send_group_msg']), chatId: 'private:42', deleteSentMedia: false, prompts: {}, recordLog: () => {} },
   )
   t('exactly one tool is registered', disposers.length === 1 && registered.includes('onebot_call'))
   const dir = mkdtempSync(pathJoin(tmpdir(), 'onebot-tools-'))
   writeFileSync(pathJoin(dir, 'a.png'), 'x')
   let tool
   reg({ tools: { register: (d) => { tool = d; return () => {} } } },
-    { connection, allow: new Set(['send_media', 'list_files', 'send_group_msg']), chatId: 'private:42', deleteSentMedia: false, prompts: {}, recordLog: () => {} })
+    { connection, allow: new Set(['send_message', 'list_files', 'send_group_msg']), chatId: 'private:42', deleteSentMedia: false, prompts: {}, recordLog: () => {} })
   const listed = await tool.execute({ action: 'list_files', params: { dir } })
   t('list_files runs locally and never hits the transport', listed.ok === true && listed.data.count === 1 && !registered.includes('list_files'))
   const refused = await tool.execute({ action: 'set_group_ban', params: {} })
   t('a disabled action is still refused', refused.ok === false && refused.error.includes('disabled'))
-  const unknownLocal = await tool.execute({ action: 'send_media', params: { kind: 'image', url: 'http://x/y.png' } })
-  t('send_media dispatches to the local handler', typeof unknownLocal.ok === 'boolean' && !registered.includes('send_media'))
-  t('send_media is not marked concurrency safe', tool.isConcurrencySafe({ action: 'send_media' }) === false)
+  const unknownLocal = await tool.execute({ action: 'send_message', params: { text: 'hi', kind: 'image', url: 'http://x/y.png' } })
+  t('send_message dispatches to the local handler', typeof unknownLocal.ok === 'boolean' && !registered.includes('send_message'))
+  t('send_message is not marked concurrency safe', tool.isConcurrencySafe({ action: 'send_message' }) === false)
   rmSync(dir, { recursive: true, force: true })
 }
 
 // --- media prompt forbids the permission hallucination
 import { mediaParagraph } from '../prompt.js'
 const mediaText = mediaParagraph()
-t('the media paragraph requires the send_media action', mediaText.includes('必须') && mediaText.includes('send_media'))
+t('the media paragraph requires the send_message action', mediaText.includes('必须') && mediaText.includes('send_message'))
 t('the media paragraph forbids claiming no permission', mediaText.includes('不要回复说你没有权限'))
 t('the media paragraph forbids the admin excuse', mediaText.includes('绝不要让用户把你设为管理员'))
 t('the media paragraph requires listing first', mediaText.includes('list_files'))

@@ -265,7 +265,7 @@ const promptOff = buildPlatformPrompt({ ...baseConfig, onebotToolEnabled: false 
 t('the prompt says the tool is off', promptOff.includes('已关闭 onebot_call 工具') && !promptOff.includes('send_group_msg：'))
 const promptNoBan = buildPlatformPrompt({ ...baseConfig, onebotToolDisabled: ['set_group_ban'] })
 t('a disabled action is not advertised', !promptNoBan.includes('set_group_ban：') && promptNoBan.includes('send_group_msg：功能：发送群消息'))
-t('the prompt advertises the local media action', promptAll.includes('send_media') && promptAll.includes('list_files'))
+t('the prompt advertises the local message actions', promptAll.includes('send_message') && promptAll.includes('list_files'))
 t('the prompt teaches the reply media markers', promptAll.includes('[[image:/abs/path.png]]'))
 t('the prompt names the one plugin tool', promptAll.includes('onebot_call'))
 t('the prompt says QQ actions must use this tool', promptAll.includes('都必须通过 onebot_call 完成') && promptAll.includes('不要使用任何其他以 qq_ 开头的工具'))
@@ -276,7 +276,7 @@ t('a custom prompt template is used', customPrompt.trim().startsWith('MY PROMPT'
 t('the actions placeholder expands into the enabled list', customPrompt.includes('send_group_msg：功能：发送群消息'))
 const plainPrompt = buildPlatformPrompt({ ...baseConfig, channelPrompt: 'JUST TEXT' })
 t('a template without placeholders is used as-is', plainPrompt.trim() === 'JUST TEXT')
-t('the prompt omits the local actions when the tool is off', !promptOff.includes('send_media'))
+t('the prompt omits the local actions when the tool is off', !promptOff.includes('send_message'))
 // an explicit provider::model in config wins over the deployment default
 const bridgeModel = new ChatBridge({
   ctx, config: { ...baseConfig, workspacePath: '/workspace/QQ', agentModel: 'localhost::group/never-stuck' },
@@ -844,10 +844,10 @@ const postJson = async (path, body) => {
   return { status: res.statusCode, body: res.body === '' ? {} : JSON.parse(res.body) }
 }
 const sendOk = await postJson('/onebot-mini/api/send-media', { chatType: 'group', chatId: '2000003', kind: 'image', base64: 'AAA' })
-t('the send-media route relays a group image', sendOk.status === 200 && sendOk.body.ok === true && mediaCalls.some((c) => c.action === 'send_group_msg'))
+t('the send-media route relays a group image through send_msg', sendOk.status === 200 && sendOk.body.ok === true && mediaCalls.some((c) => c.action === 'send_msg' && c.params.message_type === 'group'))
 t('the media segment is base64', mediaCalls[0].params.message[0].type === 'image' && mediaCalls[0].params.message[0].data.file === 'base64://AAA')
 const sendPrivate = await postJson('/onebot-mini/api/send-media', { chatType: 'private', chatId: '123', kind: 'file', url: 'http://x/y.zip', name: 'y.zip' })
-t('a private file send uses send_private_msg', sendPrivate.body.ok === true && mediaCalls.some((c) => c.action === 'send_private_msg'))
+t('a private file send uses send_msg with message_type private', sendPrivate.body.ok === true && mediaCalls.some((c) => c.action === 'send_msg' && c.params.message_type === 'private'))
 const badKind = await postJson('/onebot-mini/api/send-media', { chatType: 'group', chatId: '1', kind: 'sticker', base64: 'AAA' })
 t('an unknown media kind is refused', badKind.status === 400 && badKind.body.ok === false)
 const badChat = await postJson('/onebot-mini/api/send-media', { chatType: 'group', chatId: 'abc', kind: 'image', base64: 'AAA' })

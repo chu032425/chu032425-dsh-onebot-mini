@@ -4,7 +4,7 @@
  * One generic escape hatch instead of one tool per action: the model passes the
  * name of an OneBot action — or of a local action implemented inside this plugin
  * — and its params. OneBot actions are relayed to the transport; local actions
- * (send_media, list_files) run here. That keeps the model's tool list to a single
+ * (send_message, list_files) run here. That keeps the model's tool list to a single
  * entry while still covering media, files, group administration and every other
  * action a gateway offers.
  *
@@ -22,14 +22,14 @@ const PARAMETERS = Object.freeze({
   properties: {
     action: {
       type: 'string',
-      description: 'Action name: an OneBot 11 action (e.g. send_private_msg, send_group_msg, get_group_info, '
-        + 'set_group_ban) or a local action (send_media, list_files).',
+      description: 'Action name: an OneBot 11 action (e.g. send_group_msg, get_group_info, set_group_ban) '
+        + 'or a local action (send_message for text/media/图文混排, list_files).',
     },
     params: {
       type: 'object',
       additionalProperties: true,
       description: 'Action parameters, e.g. { user_id, message }, { group_id, message }, '
-        + 'or for local actions { kind, path } / { dir }. '
+        + 'or for local actions { text, kind, path } / { dir }. '
         + 'Message segments look like [{ "type": "text", "data": { "text": "hi" } }, '
         + '{ "type": "image", "data": { "file": "/path/to.png" } }].',
     },
@@ -57,7 +57,7 @@ const OUTPUT_SCHEMA = Object.freeze({
 })
 
 /** Local actions implemented in this module instead of being relayed. */
-const LOCAL = new Set(['send_media', 'list_files'])
+const LOCAL = new Set(['send_message', 'list_files'])
 
 /** List files in a host directory so the model can pick a real name. */
 async function runListFiles(params) {
@@ -91,12 +91,12 @@ async function runListFiles(params) {
 }
 
 /**
- * Send one media item through the gateway.
+ * Send one message through the gateway's unified `send_msg` action.
  *
- * A local path is inlined by `media.js`, which is the point of this local action:
- * `onebot_call` to a raw send action can only reference a URL the gateway reads.
+ * A local path is inlined by `media.js`, which is the point of this wrapper:
+ * the raw send actions can only reference a URL the gateway itself can read.
  */
-async function runSendMedia(params, env) {
+async function runSendMessage(params, env) {
   const chatType = String(params?.chatType ?? env.defaultType ?? '').trim()
   const targetId = String(params?.chatId ?? env.defaultId ?? '').trim()
   if (chatType === '' || targetId === '') {
@@ -107,6 +107,7 @@ async function runSendMedia(params, env) {
     onCleanup: (outcome) => { if (typeof env.recordLog === 'function') env.recordLog('media source ' + outcome) },
     chatType,
     chatId: targetId,
+    text: params?.text,
     kind: params?.kind,
     path: params?.path,
     url: params?.url,
@@ -142,7 +143,7 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
   }
   const disposers = []
   const allowed = allow instanceof Set ? allow : undefined
-  // The chat this agent serves, so a local send_media can default to it instead
+  // The chat this agent serves, so a local send_message can default to it instead
   // of making the model repeat the target on every call.
   const [defaultType, defaultId] = String(chatId ?? '').split(':')
   const env = { connection, defaultType, defaultId, deleteSentMedia, recordLog }
@@ -160,7 +161,7 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
     // Media inlining can be slow; give every action the larger budget.
     timeoutMs: 120000,
     // A media send mutates the outside world and is not safe to overlap.
-    isConcurrencySafe: (args) => String(args?.action ?? '') !== 'send_media',
+    isConcurrencySafe: (args) => String(args?.action ?? '') !== 'send_message',
     async execute(args) {
       const action = String(args?.action ?? '').trim()
       if (action === '') throw new Error('onebot_call: action must not be empty')
@@ -171,7 +172,7 @@ export function registerTools(agentCtx, { connection, allow, chatId, deleteSentM
       // Local actions never reach the gateway; they run in-process.
       if (LOCAL.has(action)) {
         try {
-          return action === 'send_media' ? await runSendMedia(params, env) : await runListFiles(params)
+          return action === 'send_message' ? await runSendMessage(params, env) : await runListFiles(params)
         } catch (error) {
           return { ok: false, error: String(error?.message ?? error) }
         }
